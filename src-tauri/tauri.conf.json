@@ -1,0 +1,68 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Englist Tool",
+  "version": "0.1.0",
+  "identifier": "com.englist.tool",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "Englist Tool",
+        "url": "index.html",
+        "width": 1180,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 640,
+        "transparent": true,
+        "center": true
+      },
+      {
+        "label": "float_bar",
+        "title": "Englist Translation Bar",
+        "url": "index.html?window=float_bar",
+        "width": 980,
+        "height": 260,
+        "x": 220,
+        "y": 24,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
+        "label": "popup_card",
+        "title": "Englist Translation",
+        "url": "index.html?window=popup_card",
+        "width": 440,
+        "height": 210,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "resizable": true,
+        "minWidth": 360,
+        "minHeight": 150,
+        "skipTaskbar": true,
+        "visible": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": ["icons/icon.png"]
+  }
+}
