@@ -47,14 +47,14 @@
         "title": "Englist Translation",
         "url": "index.html?window=popup_card",
         "width": 440,
-        "height": 210,
+        "height": 360,
         "decorations": false,
         "transparent": true,
         "shadow": false,
         "alwaysOnTop": true,
         "resizable": true,
         "minWidth": 360,
-        "minHeight": 150,
+        "minHeight": 260,
         "skipTaskbar": true,
         "visible": false
       }

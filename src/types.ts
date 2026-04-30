@@ -4,6 +4,8 @@ export type DockMode = "dock_and_menu_bar" | "menu_bar_only";
 export type BackgroundStyle = "solid" | "transparent" | "macos_glass_clear";
 export type WordStatus = "new" | "learning" | "mastered";
 export type ReviewRating = "again" | "hard" | "good" | "easy";
+export type AiFeatureKind = "translation" | "review" | "custom";
+export type AiOutputMode = "translation_json" | "plain_text";
 
 export interface TranslationResult {
   word: string;
@@ -33,9 +35,6 @@ export interface AppSettings {
   apiBaseUrl: string;
   apiKey: string;
   model: string;
-  targetLanguage: string;
-  promptTemplate: string;
-  autoSave: boolean;
 }
 
 export interface ReviewUpdate {
@@ -44,4 +43,25 @@ export interface ReviewUpdate {
   next_review: string;
   ease_factor: number;
   interval: number;
+}
+
+export interface AiFeature {
+  id: string;
+  name: string;
+  kind: AiFeatureKind;
+  promptTemplate: string;
+  outputMode: AiOutputMode;
+  enabled: boolean;
+  sortOrder: number;
+  autoSaveToVocabulary: boolean;
+  targetLanguage: string;
+  reviewIntervalSeconds: number;
+  speechEnabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AiRunResult {
+  outputText: string;
+  translation?: TranslationResult;
 }

@@ -19,7 +19,7 @@ export function Button({ className, variant = "secondary", icon, children, ...pr
   return (
     <button
       className={cn(
-        "inline-flex min-h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
         variants[variant],
         className,
       )}

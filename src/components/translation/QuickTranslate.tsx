@@ -1,13 +1,14 @@
 import { Loader2, Wand2 } from "lucide-react";
 import { FormEvent, useState } from "react";
 import type { AppSettings, TranslationResult } from "../../types";
-import { addWord } from "../../lib/database";
+import { addWord, listAiFeatures } from "../../lib/database";
+import { DEFAULT_TRANSLATION_FEATURE } from "../../lib/defaults";
 import { errorMessage } from "../../lib/errors";
+import { runAiFeature } from "../../lib/ai";
 import {
-  showTranslationDisplay,
-  showTranslationError,
-  showTranslationLoading,
-  translateText,
+  showAiError,
+  showAiLoading,
+  showAiResult,
 } from "../../lib/translation";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
@@ -31,28 +32,25 @@ export function QuickTranslate({ settings, onWordAdded }: QuickTranslateProps) {
     setIsTranslating(true);
 
     try {
-      await showTranslationLoading(text, settings.displayMode);
-      const nextResult = await translateText(text, settings);
+      const feature = (await listAiFeatures()).find((item) => item.kind === "translation") ?? DEFAULT_TRANSLATION_FEATURE;
+      await showAiLoading(text, settings.displayMode);
+      const runResult = await runAiFeature(text, feature, settings);
+      if (!runResult.translation) throw new Error("Translation result was empty.");
+      const nextResult = runResult.translation;
       setResult(nextResult);
-      await showTranslationDisplay(nextResult, settings.displayMode);
+      await showAiResult(runResult, feature, text, settings.displayMode);
 
-      if (settings.autoSave) {
+      if (feature.autoSaveToVocabulary) {
         await addWord(nextResult);
         await onWordAdded();
       }
     } catch (translationError) {
       const message = errorMessage(translationError, "Translation failed.");
       setError(message);
-      await showTranslationError(message, settings.displayMode);
+      await showAiError(message, settings.displayMode);
     } finally {
       setIsTranslating(false);
     }
-  }
-
-  async function saveCurrentResult() {
-    if (!result) return;
-    await addWord(result);
-    await onWordAdded();
   }
 
   return (
@@ -76,7 +74,7 @@ export function QuickTranslate({ settings, onWordAdded }: QuickTranslateProps) {
 
       {result ? (
         <div className="mt-5">
-          <TranslationResultPanel result={result} onSave={settings.autoSave ? undefined : saveCurrentResult} />
+          <TranslationResultPanel result={result} />
         </div>
       ) : null}
     </Card>

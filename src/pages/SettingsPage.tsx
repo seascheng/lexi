@@ -6,7 +6,7 @@ import { saveSettings } from "../lib/database";
 import { errorMessage } from "../lib/errors";
 import { isTauriRuntime } from "../lib/platform";
 import { Card } from "../components/ui/Card";
-import { Field, Input, Select, Textarea } from "../components/ui/Field";
+import { Field, Input, Select } from "../components/ui/Field";
 
 interface SettingsPageProps {
   settings: AppSettings;
@@ -59,12 +59,12 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
   }, [draft, onSettingsChanged]);
 
   return (
-    <div className="grid gap-3">
-      <Card className="grid gap-3">
-        <h2 className="text-lg font-semibold">Appearance</h2>
-        <div className="grid gap-3 md:grid-cols-4">
+    <div className="grid gap-2.5">
+      <Card className="grid gap-2.5">
+        <h2 className="text-base font-semibold">Appearance</h2>
+        <div className="grid gap-2.5 md:grid-cols-4">
           <Field label="Theme">
-            <div className="grid grid-cols-2 gap-2 rounded-md border border-border bg-surface p-1">
+            <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-surface p-1">
               <ThemeButton
                 active={draft.theme === "dark"}
                 icon={<Moon size={16} />}
@@ -111,9 +111,9 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
         </div>
       </Card>
 
-      <Card className="grid gap-3">
-        <h2 className="text-lg font-semibold">Display and Shortcut</h2>
-        <div className="grid gap-3 md:grid-cols-2">
+      <Card className="grid gap-2.5">
+        <h2 className="text-base font-semibold">Display and Shortcut</h2>
+        <div className="grid gap-2.5 md:grid-cols-2">
           <Field label="Display mode">
             <Select
               onChange={(event) => setDraft({ ...draft, displayMode: event.target.value as DisplayMode })}
@@ -133,9 +133,9 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
         </div>
       </Card>
 
-      <Card className="grid gap-3">
-        <h2 className="text-lg font-semibold">AI API</h2>
-        <div className="grid gap-3 md:grid-cols-2">
+      <Card className="grid gap-2.5">
+        <h2 className="text-base font-semibold">AI API</h2>
+        <div className="grid gap-2.5 md:grid-cols-2">
           <Field label="Base URL">
             <Input
               onChange={(event) => setDraft({ ...draft, apiBaseUrl: event.target.value })}
@@ -152,48 +152,23 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
               value={draft.apiKey}
             />
           </Field>
-          <Field label="Target language">
-            <Input
-              onChange={(event) => setDraft({ ...draft, targetLanguage: event.target.value })}
-              value={draft.targetLanguage}
-            />
-          </Field>
         </div>
-        <div className="rounded-md border border-border bg-example px-3 py-2 text-xs leading-5 text-muted">
+        <div className="rounded-md border border-border bg-example px-2.5 py-1.5 text-xs leading-5 text-muted">
           Runtime: {isTauriRuntime() ? "Desktop app SQLite" : "Browser preview localStorage"}.
           Saved API key: {savedApiKeyLength > 0 ? `${savedApiKeyLength} characters` : "not saved"}.
           {!isTauriRuntime() ? " Browser settings are not used by the global shortcut." : ""}
         </div>
       </Card>
 
-      <Card className="grid gap-3">
-        <h2 className="text-lg font-semibold">Prompt and Saving</h2>
-        <Field label="Translation prompt">
-          <Textarea
-            onChange={(event) => setDraft({ ...draft, promptTemplate: event.target.value })}
-            value={draft.promptTemplate}
-          />
-        </Field>
-        <label className="flex items-center gap-3 text-sm text-strong">
-          <input
-            checked={draft.autoSave}
-            className="h-4 w-4 accent-[rgb(var(--color-accent))]"
-            onChange={(event) => setDraft({ ...draft, autoSave: event.target.checked })}
-            type="checkbox"
-          />
-          Auto-save translations to vocabulary
-        </label>
-      </Card>
-
-      <Card className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <Card className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold">About</h2>
+          <h2 className="text-base font-semibold">About</h2>
           <p className="mt-1 text-sm text-muted">Englist Tool 0.1.0</p>
         </div>
         <p className="text-sm text-muted">{saveState === "saving" ? "Saving..." : "Autosaved"}</p>
       </Card>
       {saveError ? (
-        <div className="rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+        <div className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
           {saveError}
         </div>
       ) : null}
@@ -211,7 +186,7 @@ interface ThemeButtonProps {
 function ThemeButton({ active, icon, label, onClick }: ThemeButtonProps) {
   return (
     <button
-      className={`inline-flex h-9 items-center justify-center gap-2 rounded-md text-sm font-medium transition ${
+      className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md text-sm font-medium transition ${
         active ? "bg-panel text-strong shadow-sm" : "text-muted hover:bg-panel hover:text-strong"
       }`}
       onClick={onClick}

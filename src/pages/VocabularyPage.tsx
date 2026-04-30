@@ -8,6 +8,7 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Input, Select } from "../components/ui/Field";
 import { StatusBadge } from "../components/ui/StatusBadge";
+import { cn } from "../lib/cn";
 
 interface VocabularyPageProps {
   words: WordEntry[];
@@ -43,13 +44,13 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
   }
 
   return (
-    <div className="grid gap-3">
-      <Card className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <div className="grid min-h-0 grid-rows-[auto_1fr] gap-2.5">
+      <Card className="sticky top-0 z-10 flex flex-col gap-2.5 border-border/80 bg-panel/95 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 className="text-xl font-semibold">Vocabulary</h2>
+          <h2 className="text-lg font-semibold">Vocabulary</h2>
           <p className="text-sm text-muted">{filteredWords.length} of {words.length} entries</p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
             <Input
@@ -71,9 +72,10 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
         </div>
       </Card>
 
-      <div className="grid gap-2">
+      <div className="min-h-0 overflow-y-auto pr-1">
+        <div className="grid gap-1.5">
         {filteredWords.map((word) => (
-          <Card className="grid gap-2 p-3" key={word.id}>
+          <Card className="grid gap-2 p-2.5" key={word.id}>
             <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -81,24 +83,16 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
                   <StatusBadge status={word.status} />
                   {word.pos ? <span className="text-xs text-muted">{word.pos}</span> : null}
                 </div>
-                <p className="mt-1 text-sm font-medium text-strong">{word.translation}</p>
-                <p className="mt-1 text-sm leading-5 text-content">{word.definition}</p>
-                <p className="mt-1 text-xs leading-5 text-muted">{word.example}</p>
+                <p className="mt-0.5 text-sm font-medium text-strong">{word.translation}</p>
+                <p className="mt-0.5 text-sm leading-5 text-content">{word.definition}</p>
+                <p className="mt-0.5 text-xs leading-5 text-muted">{word.example}</p>
               </div>
-              <div className="flex shrink-0 flex-wrap gap-2">
-                <Select
-                  className="w-32"
-                  onChange={(event) => changeStatus(word.id, event.target.value as WordStatus)}
-                  value={word.status}
-                >
-                  <option value="new">New</option>
-                  <option value="learning">Learning</option>
-                  <option value="mastered">Mastered</option>
-                </Select>
+              <div className="flex shrink-0 flex-wrap items-start gap-2">
+                <StatusTags status={word.status} onStatusChange={(nextStatus) => changeStatus(word.id, nextStatus)} />
                 <Button aria-label="Delete word" onClick={() => removeWord(word.id)} variant="danger" icon={<Trash2 size={16} />} />
               </div>
             </div>
-            <div className="grid gap-1 border-t border-border pt-2 text-[11px] text-muted sm:grid-cols-4">
+            <div className="grid gap-1 border-t border-border pt-1.5 text-[11px] text-muted sm:grid-cols-4">
               <span>Added {formatDate(word.created_at)}</span>
               <span>Reviews {word.review_count}</span>
               <span>Next {formatDate(word.next_review)}</span>
@@ -110,7 +104,36 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
         {filteredWords.length === 0 ? (
           <Card className="text-center text-sm text-muted">No matching vocabulary entries.</Card>
         ) : null}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function StatusTags({
+  status,
+  onStatusChange,
+}: {
+  status: WordStatus;
+  onStatusChange: (status: WordStatus) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1 rounded-md border border-border bg-surface p-0.5">
+      {(["new", "learning", "mastered"] as WordStatus[]).map((entryStatus) => (
+        <button
+          className={cn(
+            "rounded px-1.5 py-0.5 text-[11px] font-medium transition",
+            status === entryStatus
+              ? "bg-panel text-strong shadow-sm"
+              : "text-muted hover:bg-panel hover:text-strong",
+          )}
+          key={entryStatus}
+          onClick={() => onStatusChange(entryStatus)}
+          type="button"
+        >
+          {entryStatus === "new" ? "New" : entryStatus === "learning" ? "Learning" : "Mastered"}
+        </button>
+      ))}
     </div>
   );
 }

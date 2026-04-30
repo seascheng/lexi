@@ -2,7 +2,7 @@ import { BookPlus, Clipboard } from "lucide-react";
 import type { TranslationResult } from "../../types";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
-import { copyTranslation } from "../../lib/translation";
+import { copyText } from "../../lib/ai";
 
 interface TranslationResultPanelProps {
   result: TranslationResult;
@@ -84,10 +84,14 @@ function TranslationResultContent({ result, compact, onSave }: TranslationResult
             Save
           </Button>
         ) : null}
-        <Button onClick={() => copyTranslation(result)} icon={<Clipboard size={16} />}>
+        <Button onClick={() => copyText(formatTranslation(result))} icon={<Clipboard size={16} />}>
           Copy
         </Button>
       </div> : null}
     </>
   );
+}
+
+function formatTranslation(result: TranslationResult) {
+  return `${result.word} - ${result.translation}\n${result.definition}\n${result.example}`;
 }

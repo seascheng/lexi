@@ -1,5 +1,5 @@
 import { emit, listen } from "@tauri-apps/api/event";
-import { BookOpen, Languages, Settings, Wand2 } from "lucide-react";
+import { BookOpen, Languages, Settings, Sparkles, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppSettings, WordEntry } from "./types";
 import { applyAppearanceSettings } from "./lib/appearance";
@@ -8,8 +8,8 @@ import { listWords, loadSettings, saveSettings } from "./lib/database";
 import { errorMessage } from "./lib/errors";
 import {
   captureSelectedText,
-  showTranslationError,
-  showTranslationRequest,
+  showAiError,
+  showAiRequest,
 } from "./lib/translation";
 import { isTauriRuntime } from "./lib/platform";
 import { Button } from "./components/ui/Button";
@@ -17,12 +17,14 @@ import { TranslationWindow } from "./components/translation/TranslationWindow";
 import { VocabularyPage } from "./pages/VocabularyPage";
 import { ReviewPage } from "./pages/ReviewPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { FeaturesPage } from "./pages/FeaturesPage";
 
-type Page = "vocabulary" | "review" | "settings";
+type Page = "vocabulary" | "review" | "features" | "settings";
 
 const navItems: Array<{ page: Page; label: string; icon: JSX.Element }> = [
   { page: "vocabulary", label: "Vocabulary", icon: <BookOpen size={17} /> },
   { page: "review", label: "Review", icon: <Languages size={17} /> },
+  { page: "features", label: "Features", icon: <Sparkles size={17} /> },
   { page: "settings", label: "Settings", icon: <Settings size={17} /> },
 ];
 
@@ -83,6 +85,16 @@ function MainWindow() {
     );
   }, []);
 
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+
+    returnEffect(
+      listen("englist://words-changed", async () => {
+        await refreshWords();
+      }),
+    );
+  }, []);
+
   async function refreshSettings() {
     setSettings(await loadSettings());
   }
@@ -107,32 +119,46 @@ function MainWindow() {
         throw new Error("Selected text looks like an API key. Select a word or phrase instead.");
       }
 
-      await showTranslationRequest(selectedText, currentSettings.displayMode);
+      await showAiRequest(selectedText, currentSettings.displayMode);
     } catch (error) {
-      const message = errorMessage(error, "Global translation failed.");
+      const message = errorMessage(error, "Global AI feature failed.");
       setShortcutError(message);
-      await showTranslationError(message, currentSettings.displayMode);
+      await showAiError(message, currentSettings.displayMode);
     }
   }
 
   const activeSettings = settings ?? DEFAULT_SETTINGS;
+  const pageContent =
+    page === "vocabulary" ? (
+      <VocabularyPage words={words} onWordsChanged={refreshWords} />
+    ) : page === "review" ? (
+      <ReviewPage words={words} onWordsChanged={refreshWords} />
+    ) : page === "features" ? (
+      <FeaturesPage />
+    ) : page === "settings" && settings ? (
+      <SettingsPage settings={settings} onSettingsChanged={handleSettingsChanged} />
+    ) : (
+      <div className="rounded-md border border-border bg-panel px-4 py-3 text-sm text-muted">
+        Loading settings...
+      </div>
+    );
 
   return (
     <main className="app-shell">
-      <div className="mx-auto grid max-w-7xl gap-6 px-4 py-5 md:grid-cols-[240px_1fr] md:px-6 lg:px-8">
-        <aside className="md:sticky md:top-5 md:h-[calc(100vh-40px)]">
-          <div className="rounded-lg border border-border bg-panel p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-md bg-accent text-accentForeground">
-                <Wand2 size={20} />
+      <div className="mx-auto grid min-h-screen max-w-7xl items-stretch gap-4 px-3 py-4 md:grid-cols-[216px_1fr] md:px-4 lg:px-5">
+        <aside className="md:sticky md:top-4 md:h-[calc(100vh-32px)]">
+          <div className="flex h-full flex-col rounded-lg border border-border bg-panel p-3">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-md bg-accent text-accentForeground">
+                <Wand2 size={18} />
               </div>
-              <div>
-                <h1 className="text-lg font-semibold">Englist Tool</h1>
+              <div className="min-w-0">
+                <h1 className="truncate text-base font-semibold">Englist Tool</h1>
                 <p className="text-xs text-muted">{activeSettings.shortcut}</p>
               </div>
             </div>
 
-            <nav className="mt-6 grid gap-2">
+            <nav className="mt-5 grid gap-1.5">
               {navItems.map((item) => (
                 <Button
                   className="justify-start"
@@ -148,22 +174,13 @@ function MainWindow() {
           </div>
         </aside>
 
-        <section className="grid content-start gap-5">
+        <section className="flex h-[calc(100vh-32px)] min-h-[calc(100vh-32px)] flex-col gap-3 overflow-hidden">
           {shortcutError ? (
-            <div className="rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+            <div className="shrink-0 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
               {shortcutError}
             </div>
           ) : null}
-          {page === "vocabulary" ? <VocabularyPage words={words} onWordsChanged={refreshWords} /> : null}
-          {page === "review" ? <ReviewPage words={words} onWordsChanged={refreshWords} /> : null}
-          {page === "settings" && settings ? (
-            <SettingsPage settings={settings} onSettingsChanged={handleSettingsChanged} />
-          ) : null}
-          {page === "settings" && !settings ? (
-            <div className="rounded-md border border-border bg-panel px-4 py-3 text-sm text-muted">
-              Loading settings...
-            </div>
-          ) : null}
+          <div className="min-h-0 flex-1 overflow-hidden">{pageContent}</div>
         </section>
       </div>
     </main>

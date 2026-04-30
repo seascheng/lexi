@@ -1,1 +1,3 @@
-pub mod translate;
+pub mod ai;
+pub mod speech;
+pub mod window;

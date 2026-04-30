@@ -44,54 +44,104 @@ export function ReviewPage({ words, onWordsChanged }: ReviewPageProps) {
 
   if (isComplete) {
     return (
-      <Card className="mx-auto max-w-2xl text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-accent/10 text-accent">
-          <Check size={24} />
+      <div className="grid min-h-0 grid-rows-[auto_1fr] gap-2.5">
+        <ReviewToolbar completed={completed} dueCount={due.length} index={0} />
+        <div className="grid min-h-0 place-items-center overflow-y-auto">
+          <Card className="grid min-h-[280px] w-full max-w-3xl place-items-center p-5 text-center">
+            <div>
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-accent/10 text-accent">
+                <Check size={24} />
+              </div>
+              <h2 className="mt-4 text-2xl font-semibold">Review complete</h2>
+              <p className="mt-2 text-muted">{completed === 0 ? "No words are due today." : `${completed} words reviewed.`}</p>
+              <Button className="mt-5" onClick={restartSession} icon={<RotateCcw size={16} />}>Refresh</Button>
+            </div>
+          </Card>
         </div>
-        <h2 className="mt-4 text-2xl font-semibold">Review complete</h2>
-        <p className="mt-2 text-muted">{completed === 0 ? "No words are due today." : `${completed} words reviewed.`}</p>
-        <Button className="mt-5" onClick={restartSession} icon={<RotateCcw size={16} />}>Refresh</Button>
-      </Card>
+      </div>
     );
   }
 
   return (
-    <div className="mx-auto grid max-w-3xl gap-5">
-      <div className="flex items-center justify-between text-sm text-muted">
-        <span>{index + 1}/{due.length} due</span>
-        <span>{completed} completed</span>
-      </div>
-      <Card className="min-h-[360px] text-center">
-        <p className="text-sm uppercase tracking-[0.16em] text-muted">Front</p>
-        <h2 className="mt-8 break-words text-4xl font-semibold">{currentWord.word}</h2>
+    <div className="grid min-h-0 grid-rows-[auto_1fr] gap-2.5">
+      <ReviewToolbar completed={completed} dueCount={due.length} index={index} />
 
-        {isRevealed ? (
-          <div className="mt-8 grid gap-4 text-left">
-            <div>
-              <p className="text-sm text-muted">Translation</p>
-              <p className="mt-1 text-2xl font-medium text-accent">{currentWord.translation}</p>
+      <div className="min-h-0 overflow-y-auto pr-1">
+        <div className="mx-auto grid w-full max-w-3xl gap-3">
+          <Card className="grid min-h-[340px] content-between gap-3 p-4 text-center sm:p-5">
+            <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-muted">
+              <span>Front</span>
+              <span>{currentWord.status}</span>
             </div>
-            <p className="leading-7 text-content">{currentWord.definition}</p>
-            <p className="rounded-md border border-border bg-example p-3 text-sm leading-6 text-muted">
-              {currentWord.example}
-            </p>
-          </div>
-        ) : (
-          <Button className="mt-10" onClick={() => setIsRevealed(true)} variant="primary" icon={<Eye size={16} />}>
-            Reveal
-          </Button>
-        )}
-      </Card>
 
-      {isRevealed ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {ratings.map((rating) => (
-            <Button key={rating.rating} onClick={() => rateWord(rating.rating)} variant={rating.variant}>
-              {rating.label}
-            </Button>
-          ))}
+            <div className="grid min-h-[120px] place-items-center rounded-lg border border-border bg-surface/60 px-3 py-5">
+              <h2 className="max-w-full break-words text-4xl font-semibold leading-tight text-strong md:text-5xl">
+                {currentWord.word}
+              </h2>
+            </div>
+
+            {isRevealed ? (
+              <div className="grid gap-2.5 rounded-lg border border-border bg-example p-3 text-left">
+                <div>
+                  <p className="text-sm text-muted">Translation</p>
+                  <p className="mt-1 text-xl font-medium text-accent">{currentWord.translation}</p>
+                </div>
+                <p className="leading-7 text-content">{currentWord.definition}</p>
+                <p className="rounded-md border border-border bg-panel p-2.5 text-sm leading-6 text-muted">
+                  {currentWord.example}
+                </p>
+              </div>
+            ) : (
+              <div className="grid min-h-[64px] place-items-center">
+                <Button className="min-w-32" onClick={() => setIsRevealed(true)} variant="primary" icon={<Eye size={16} />}>
+                  Reveal
+                </Button>
+              </div>
+            )}
+          </Card>
+
+          {isRevealed ? (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {ratings.map((rating) => (
+                <Button className="min-h-9" key={rating.rating} onClick={() => rateWord(rating.rating)} variant={rating.variant}>
+                  {rating.label}
+                </Button>
+              ))}
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </div>
     </div>
+  );
+}
+
+function ReviewToolbar({
+  completed,
+  dueCount,
+  index,
+}: {
+  completed: number;
+  dueCount: number;
+  index: number;
+}) {
+  const current = Math.min(index + 1, Math.max(dueCount, 1));
+  const progress = dueCount > 0 ? Math.max(4, Math.round((current / dueCount) * 100)) : 100;
+
+  return (
+    <Card className="sticky top-0 z-10 grid gap-2 border-border/80 bg-panel/95 backdrop-blur">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Review</h2>
+          <p className="text-sm text-muted">{dueCount} due / {completed} completed</p>
+        </div>
+        <div className="text-sm text-muted">{dueCount > 0 ? `${current}/${dueCount}` : "0/0"}</div>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-surface">
+        <div
+          className="h-full rounded-full bg-accent transition-[width]"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+    </Card>
   );
 }

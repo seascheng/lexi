@@ -1,7 +1,9 @@
 mod commands;
 mod selection;
 
-use commands::translate::translate_text;
+use commands::ai::run_ai_prompt;
+use commands::speech::speak_text;
+use commands::window::start_popup_resize;
 use selection::{cursor_position, get_selected_text};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -32,7 +34,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             cursor_position,
             get_selected_text,
-            translate_text
+            run_ai_prompt,
+            speak_text,
+            start_popup_resize
         ])
         .on_window_event(|window, event| {
             if window.label() == "main" {
@@ -57,12 +61,32 @@ pub fn run() {
 }
 
 fn migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: 1,
-        description: "create words and settings tables",
-        sql: include_str!("../migrations/001_init.sql"),
-        kind: MigrationKind::Up,
-    }]
+    vec![
+        Migration {
+            version: 1,
+            description: "create words and settings tables",
+            sql: include_str!("../migrations/001_init.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 2,
+            description: "create ai features table",
+            sql: include_str!("../migrations/002_ai_features.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 3,
+            description: "add review feature interval",
+            sql: include_str!("../migrations/003_review_feature_interval.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 4,
+            description: "add feature speech setting",
+            sql: include_str!("../migrations/004_feature_speech_enabled.sql"),
+            kind: MigrationKind::Up,
+        },
+    ]
 }
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
