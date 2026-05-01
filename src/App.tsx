@@ -22,7 +22,7 @@ import { FeaturesPage } from "./pages/FeaturesPage";
 type Page = "vocabulary" | "review" | "features" | "settings";
 
 const navItems: Array<{ page: Page; label: string; icon: JSX.Element }> = [
-  { page: "vocabulary", label: "Vocabulary", icon: <BookOpen size={17} /> },
+  { page: "vocabulary", label: "Expressions", icon: <BookOpen size={17} /> },
   { page: "review", label: "Review", icon: <Languages size={17} /> },
   { page: "features", label: "Features", icon: <Sparkles size={17} /> },
   { page: "settings", label: "Settings", icon: <Settings size={17} /> },

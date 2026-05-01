@@ -13,10 +13,13 @@ function toJson(words: WordEntry[]) {
 function toCsv(words: WordEntry[]) {
   const headers = [
     "word",
+    "entry_type",
     "translation",
     "pos",
     "definition",
     "example",
+    "source_text",
+    "note",
     "status",
     "created_at",
     "review_count",

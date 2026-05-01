@@ -1,10 +1,10 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AlertCircle, ChevronLeft, ChevronRight, Clipboard, Loader2, Volume2, Wand2 } from "lucide-react";
+import { AlertCircle, BookPlus, ChevronLeft, ChevronRight, Clipboard, Loader2, Save, Volume2, Wand2, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { AiFeature, AiRunResult, AppSettings, DisplayMode, WordEntry } from "../../types";
-import { copyText, runAiFeature, speakText } from "../../lib/ai";
+import type { AiFeature, AiRunResult, AppSettings, DisplayMode, LearningEntryInput, LearningEntryType, WordEntry } from "../../types";
+import { analyzeLearningPoint, copyText, runAiFeature, speakText } from "../../lib/ai";
 import { applyAppearanceSettings } from "../../lib/appearance";
 import { addWord, dueWords, listAiFeatures, listWords, loadSettings, savePopupPosition, savePopupSize } from "../../lib/database";
 import { errorMessage } from "../../lib/errors";
@@ -21,7 +21,13 @@ type AiState =
 interface FeaturePageState {
   inputText: string;
   state: AiState;
+  capture?: CaptureActionState;
 }
+
+type CaptureActionState =
+  | { status: "loading"; selectedText: string; contextText: string }
+  | { status: "ready"; selectedText: string; contextText: string; result: AiRunResult; draft: LearningEntryInput; saved?: boolean }
+  | { status: "error"; message: string; selectedText?: string; contextText?: string };
 
 interface RequestPayload {
   text: string;
@@ -49,6 +55,7 @@ export function TranslationWindow() {
   const [isPinned, setIsPinned] = useState(true);
   const positionSaveTimerRef = useRef<number>();
   const sizeSaveTimerRef = useRef<number>();
+  const shellRef = useRef<HTMLElement>(null);
   const featuresRef = useRef<AiFeature[]>([]);
   const activeFeatureIdRef = useRef("");
   const isPinnedRef = useRef(true);
@@ -252,6 +259,33 @@ export function TranslationWindow() {
   }, [activePage.state, isPinned]);
 
   useEffect(() => {
+    if (isBar) return;
+    const frame = shellRef.current?.querySelector<HTMLElement>(".translation-frame");
+    const page = shellRef.current?.querySelector<HTMLElement>(".translation-tab-page");
+    const content = shellRef.current?.querySelector<HTMLElement>(".translation-content");
+    if (!frame || !page || !content) return;
+
+    let resizeTimer: number | undefined;
+    const scheduleResize = () => {
+      if (resizeTimer) window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => {
+        void resizePopupToContent(frame, page, content);
+      }, 60);
+    };
+    const observer = new ResizeObserver(scheduleResize);
+
+    observer.observe(page);
+    observer.observe(content);
+    Array.from(content.children).forEach((child) => observer.observe(child));
+    scheduleResize();
+
+    return () => {
+      observer.disconnect();
+      if (resizeTimer) window.clearTimeout(resizeTimer);
+    };
+  }, [activeFeatureId, activePage.capture, activePage.inputText, activePage.state, isBar]);
+
+  useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") getCurrentWindow().hide();
     }
@@ -375,9 +409,11 @@ export function TranslationWindow() {
   }
 
   return (
-    <main className="translation-window-shell h-screen bg-transparent">
+    <main className="translation-window-shell h-screen bg-transparent" ref={shellRef}>
       <FloatingFrame
+        autoHeight={!isBar}
         isPinned={isPinned}
+        onCaptureSelection={activeFeature && activeFeature.kind !== "review" ? captureLearningPoint : undefined}
         onStartDrag={startWindowDrag}
         onStartResize={startWindowResize}
         onTogglePin={() => setIsPinned((currentIsPinned) => !currentIsPinned)}
@@ -389,9 +425,14 @@ export function TranslationWindow() {
         />
         <FeatureTabPage
           activeFeature={activeFeature}
+          autoHeight={!isBar}
+          captureState={activePage.capture}
           inputText={activePage.inputText}
           pageState={activePage.state}
+          onCancelCapture={cancelCaptureAction}
+          onCaptureEntryTypeChange={updateCaptureEntryType}
           onInputChange={updateActiveInput}
+          onSaveCapture={saveCaptureDraft}
           onSubmit={submitFeature}
         />
       </FloatingFrame>
@@ -406,10 +447,84 @@ export function TranslationWindow() {
         [featureId]: {
           inputText: update.inputText ?? currentPage.inputText,
           state: update.state ?? currentPage.state,
+          capture: "capture" in update ? update.capture : currentPage.capture,
         },
       };
       pagesRef.current = nextPages;
       return nextPages;
+    });
+  }
+
+  async function captureLearningPoint() {
+    if (!activeFeature || activeFeature.kind === "review") return;
+
+    const selectedText = popupSelectedText();
+    if (!selectedText) {
+      setFeaturePage(activeFeature.id, {
+        capture: { status: "error", message: "Select text inside the popup first." },
+      });
+      return;
+    }
+
+    await runCaptureAction(activeFeature, selectedText, captureContextText(activePage));
+  }
+
+  async function runCaptureAction(feature: AiFeature, selectedText: string, contextText: string) {
+    setFeaturePage(feature.id, {
+      capture: { status: "loading", selectedText, contextText },
+    });
+
+    try {
+      const settings = await loadSettings();
+      const result = await analyzeLearningPoint(selectedText, contextText, feature, settings);
+      setFeaturePage(feature.id, {
+        capture: {
+          status: "ready",
+          selectedText,
+          contextText,
+          result,
+          draft: learningEntryDraft(selectedText, contextText, result.outputText),
+        },
+      });
+    } catch (error) {
+      setFeaturePage(feature.id, {
+        capture: {
+          status: "error",
+          selectedText,
+          contextText,
+          message: errorMessage(error, "Capture learning point failed."),
+        },
+      });
+    }
+  }
+
+  async function saveCaptureDraft() {
+    if (!activeFeature) return;
+    const capture = pagesRef.current[activeFeature.id]?.capture;
+    if (!capture || capture.status !== "ready" || capture.saved) return;
+
+    await addWord(capture.draft);
+    await emit("englist://words-changed");
+    setFeaturePage(activeFeature.id, {
+      capture: { ...capture, saved: true },
+    });
+  }
+
+  function cancelCaptureAction() {
+    if (!activeFeature) return;
+    setFeaturePage(activeFeature.id, { capture: undefined });
+  }
+
+  function updateCaptureEntryType(entryType: LearningEntryType) {
+    if (!activeFeature) return;
+    const capture = pagesRef.current[activeFeature.id]?.capture;
+    if (!capture || capture.status !== "ready") return;
+    setFeaturePage(activeFeature.id, {
+      capture: {
+        ...capture,
+        saved: false,
+        draft: { ...capture.draft, entry_type: entryType },
+      },
     });
   }
 }
@@ -422,6 +537,41 @@ async function startWindowResize({ direction }: PopupResizeStart) {
   await invoke("start_popup_resize", { direction }).catch((error) => {
     console.warn("Failed to start popup resize", error);
   });
+}
+
+async function resizePopupToContent(frame: HTMLElement, page: HTMLElement, content: HTMLElement) {
+  const frameTop = frame.getBoundingClientRect().top;
+  const pageTop = page.getBoundingClientRect().top - frameTop;
+  const pageHeight = naturalContentHeight(page);
+  const contentOverflow = Math.max(0, naturalContentHeight(content) - content.clientHeight);
+  const targetHeight = clamp(Math.ceil(pageTop + pageHeight + contentOverflow + 18), 360, 900);
+  if (Math.abs(window.innerHeight - targetHeight) < 8) return;
+
+  await invoke("set_popup_height", { height: targetHeight }).catch((error) => {
+    console.warn("Failed to auto-size popup", error);
+  });
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function naturalContentHeight(content: HTMLElement) {
+  const children = Array.from(content.children) as HTMLElement[];
+  if (children.length === 0) return content.scrollHeight;
+
+  const contentTop = content.getBoundingClientRect().top;
+  const bottom = children.reduce((maxBottom, child) => {
+    const rect = child.getBoundingClientRect();
+    return Math.max(maxBottom, rect.bottom - contentTop);
+  }, 0);
+
+  return Math.max(content.scrollHeight, Math.ceil(bottom + contentPaddingY(content)));
+}
+
+function contentPaddingY(content: HTMLElement) {
+  const style = window.getComputedStyle(content);
+  return parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
 }
 
 interface FeatureTabsProps {
@@ -455,17 +605,27 @@ function FeatureTabs({ activeFeatureId, features, onFeatureChange }: FeatureTabs
 
 interface FeatureTabPageProps {
   activeFeature?: AiFeature;
+  autoHeight?: boolean;
+  captureState?: CaptureActionState;
   inputText: string;
   pageState: AiState;
+  onCancelCapture: () => void;
+  onCaptureEntryTypeChange: (entryType: LearningEntryType) => void;
   onInputChange: (value: string) => void;
+  onSaveCapture: () => void | Promise<void>;
   onSubmit: (event: FormEvent) => void;
 }
 
 function FeatureTabPage({
   activeFeature,
+  autoHeight = false,
+  captureState,
   inputText,
   pageState,
+  onCancelCapture,
+  onCaptureEntryTypeChange,
   onInputChange,
+  onSaveCapture,
   onSubmit,
 }: FeatureTabPageProps) {
   if (activeFeature?.kind === "review") {
@@ -473,7 +633,7 @@ function FeatureTabPage({
   }
 
   return (
-    <div className="translation-tab-page flex min-h-0 flex-1 flex-col gap-2 pt-2">
+    <div className={`translation-tab-page flex min-h-0 flex-col gap-2 pt-2 ${autoHeight ? "flex-none" : "flex-1"}`}>
       <section className="translation-action-area shrink-0">
         <AiForm
           activeFeature={activeFeature}
@@ -484,12 +644,20 @@ function FeatureTabPage({
         />
       </section>
       <section
-        className="translation-content min-h-0 flex-1 overflow-y-auto rounded-lg border border-strong/10 bg-surface/45 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]"
+        className={`translation-content min-h-[220px] overflow-y-auto rounded-lg border border-strong/10 bg-surface/45 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] ${autoHeight ? "max-h-[720px] flex-none" : "flex-1"}`}
       >
         {pageState.status === "idle" ? <IdleState feature={activeFeature} /> : null}
         {pageState.status === "loading" && activeFeature ? <LoadingCard feature={activeFeature} /> : null}
         {pageState.status === "error" ? <ErrorCard feature={activeFeature} message={pageState.message} /> : null}
         {pageState.status === "ready" && activeFeature ? <AiResultPanel feature={activeFeature} result={pageState.result} /> : null}
+        {captureState ? (
+          <CaptureActionPanel
+            capture={captureState}
+            onCancel={onCancelCapture}
+            onEntryTypeChange={onCaptureEntryTypeChange}
+            onSave={onSaveCapture}
+          />
+        ) : null}
       </section>
     </div>
   );
@@ -559,12 +727,12 @@ function ReviewFeaturePage({
   return (
     <div className="translation-tab-page flex min-h-0 flex-1 flex-col gap-2 pt-2">
       <section
-        className="translation-content min-h-0 flex-1 overflow-y-auto rounded-lg border border-strong/10 bg-surface/45 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]"
+        className="translation-content min-h-[220px] flex-1 overflow-y-auto rounded-lg border border-strong/10 bg-surface/45 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]"
       >
         {currentWord ? (
           <div className="grid min-h-[138px] content-between gap-2.5">
             <div className="flex items-center justify-between gap-3 text-xs uppercase tracking-[0.14em] text-muted">
-              <span>Vocabulary</span>
+              <span>{entryTypeLabel(currentWord.entry_type)}</span>
               <span>{index + 1}/{displayWords.length}</span>
             </div>
             <div className="grid gap-1.5">
@@ -588,7 +756,7 @@ function ReviewFeaturePage({
                 onClick={showPreviousWord}
               />
               <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                <span className="truncate">{currentWord.status}</span>
+                <span className="truncate">{entryTypeLabel(currentWord.entry_type)} / {currentWord.status}</span>
                 <span className="shrink-0">{feature.reviewIntervalSeconds}s interval</span>
               </div>
               {feature.speechEnabled ? (
@@ -611,7 +779,7 @@ function ReviewFeaturePage({
             {speechError ? <p className="text-xs text-danger">{speechError}</p> : null}
           </div>
         ) : (
-          <p className="text-sm text-muted">No vocabulary entries to review.</p>
+          <p className="text-sm text-muted">No learning entries to review.</p>
         )}
       </section>
     </div>
@@ -719,9 +887,204 @@ function AiResultPanel({ feature, result }: { feature: AiFeature; result: AiRunR
   );
 }
 
+function CaptureActionPanel({
+  capture,
+  onCancel,
+  onEntryTypeChange,
+  onSave,
+}: {
+  capture: CaptureActionState;
+  onCancel: () => void;
+  onEntryTypeChange: (entryType: LearningEntryType) => void;
+  onSave: () => void | Promise<void>;
+}) {
+  if (capture.status === "loading") {
+    return (
+      <div className="mt-3 rounded-lg border border-strong/10 bg-panel/80 p-2.5">
+        <div className="flex items-center gap-2 text-sm text-muted">
+          <Loader2 className="animate-spin text-accent" size={16} />
+          Capturing learning point
+        </div>
+        <p className="mt-1 break-words text-xs text-muted">{capture.selectedText}</p>
+      </div>
+    );
+  }
+
+  if (capture.status === "error") {
+    return (
+      <div className="mt-3 rounded-lg border border-danger/40 bg-danger/10 p-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm text-danger">
+            <AlertCircle size={16} />
+            Capture failed
+          </div>
+          <Button
+            aria-label="Dismiss capture error"
+            className="h-7 min-h-7 w-7 px-0"
+            icon={<X size={14} />}
+            onClick={onCancel}
+            variant="ghost"
+          />
+        </div>
+        <p className="mt-1 break-words text-xs leading-5 text-content">{capture.message}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 grid gap-2.5 rounded-lg border border-strong/10 bg-panel/85 p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-strong">
+          <BookPlus className="shrink-0 text-accent" size={16} />
+          <span>Capture learning point</span>
+        </div>
+        <div className="flex shrink-0 gap-1">
+          <Button
+            aria-label="Cancel capture"
+            className="h-7 min-h-7 w-7 px-0"
+            icon={<X size={14} />}
+            onClick={onCancel}
+            title="Cancel"
+            variant="ghost"
+          />
+        </div>
+      </div>
+
+      <div className="rounded-md border border-strong/10 bg-surface/60 p-2">
+        <MarkdownRenderer content={capture.result.outputText} />
+      </div>
+
+      <div className="flex flex-col gap-2 border-t border-strong/10 pt-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="min-w-0 truncate text-xs text-muted">
+          Selected: {capture.selectedText}
+        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          <EntryTypeTags
+            entryType={capture.draft.entry_type ?? "phrase"}
+            onEntryTypeChange={onEntryTypeChange}
+          />
+          <Button
+            disabled={capture.saved || !capture.selectedText.trim()}
+            icon={<Save size={15} />}
+            onClick={() => void onSave()}
+            variant="primary"
+          >
+            {capture.saved ? "Saved" : "Save"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EntryTypeTags({
+  entryType,
+  onEntryTypeChange,
+}: {
+  entryType: LearningEntryType;
+  onEntryTypeChange: (entryType: LearningEntryType) => void;
+}) {
+  return (
+    <div className="flex rounded-md border border-strong/10 bg-surface p-0.5">
+      {(["word", "phrase", "pattern"] as LearningEntryType[]).map((type) => (
+        <button
+          className={`rounded px-1.5 py-0.5 text-[11px] font-medium transition ${
+            entryType === type
+              ? "bg-panel text-strong shadow-sm"
+              : "text-muted hover:bg-panel hover:text-strong"
+          }`}
+          key={type}
+          onClick={() => onEntryTypeChange(type)}
+          type="button"
+        >
+          {entryTypeLabel(type)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function emptyFeaturePage(): FeaturePageState {
   return {
     inputText: "",
     state: { status: "idle" },
   };
+}
+
+function popupSelectedText() {
+  const selectedPageText = window.getSelection()?.toString().trim() ?? "";
+  if (selectedPageText) return selectedPageText;
+
+  const activeElement = document.activeElement;
+  if (activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement) {
+    const start = activeElement.selectionStart ?? 0;
+    const end = activeElement.selectionEnd ?? 0;
+    return activeElement.value.slice(start, end).trim();
+  }
+
+  return "";
+}
+
+function captureContextText(page: FeaturePageState) {
+  if (page.state.status === "ready") {
+    return [page.inputText, page.state.result.outputText].filter(Boolean).join("\n\n");
+  }
+
+  return page.inputText;
+}
+
+function learningEntryDraft(selectedText: string, contextText: string, analysis: string): LearningEntryInput {
+  const meaning = markdownLabel(analysis, "Meaning");
+  const usage = markdownLabel(analysis, "Usage");
+  const example = markdownLabel(analysis, "Example");
+  const note = markdownLabel(analysis, "Note");
+
+  return {
+    word: selectedText,
+    translation: meaning || "Learning point captured from popup selection",
+    pos: markdownLabel(analysis, "Type") || inferredEntryType(selectedText),
+    definition: [usage, note].filter(Boolean).join(" "),
+    example,
+    entry_type: parsedEntryType(markdownLabel(analysis, "Type"), selectedText),
+    source_text: contextText,
+    note: analysis,
+  };
+}
+
+function markdownLabel(markdown: string, label: string) {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`(?:^|\\n)\\s*(?:[-*]\\s*)?(?:\\*\\*)?${escapedLabel}:(?:\\*\\*)?\\s*([^\\n]+)`, "i");
+  return cleanInlineMarkdown(pattern.exec(markdown)?.[1] ?? "");
+}
+
+function cleanInlineMarkdown(value: string) {
+  return value
+    .replace(/^[-*: ]+/, "")
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "")
+    .trim();
+}
+
+function parsedEntryType(value: string, selectedText: string): LearningEntryType {
+  const normalized = value.toLowerCase();
+  if (normalized.includes("pattern")) return "pattern";
+  if (normalized.includes("phrase")) return "phrase";
+  if (normalized.includes("word")) return "word";
+  return inferredEntryType(selectedText);
+}
+
+function inferredEntryType(selectedText: string): LearningEntryType {
+  const text = selectedText.trim();
+  if (/\.\.\.|_+|\{\{|}}/.test(text)) return "pattern";
+  if (/[.!?]$/.test(text) || /\b(am|is|are|was|were|be|been|being|do|does|did|have|has|had|can|could|will|would|should|may|might|must)\b/i.test(text)) {
+    return "pattern";
+  }
+  if (/\s/.test(text)) return "phrase";
+  return "word";
+}
+
+function entryTypeLabel(type: LearningEntryType) {
+  if (type === "pattern") return "Pattern";
+  if (type === "phrase") return "Phrase";
+  return "Word";
 }

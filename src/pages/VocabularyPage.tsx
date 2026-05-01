@@ -28,7 +28,8 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
       const matchesQuery =
         !normalizedQuery ||
         word.word.toLowerCase().includes(normalizedQuery) ||
-        word.translation.toLowerCase().includes(normalizedQuery);
+        word.translation.toLowerCase().includes(normalizedQuery) ||
+        (word.note ?? "").toLowerCase().includes(normalizedQuery);
       return matchesStatus && matchesQuery;
     });
   }, [query, status, words]);
@@ -47,7 +48,7 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
     <div className="grid min-h-0 grid-rows-[auto_1fr] gap-2.5">
       <Card className="sticky top-0 z-10 flex flex-col gap-2.5 border-border/80 bg-panel/95 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Vocabulary</h2>
+          <h2 className="text-lg font-semibold">Expressions</h2>
           <p className="text-sm text-muted">{filteredWords.length} of {words.length} entries</p>
         </div>
         <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
@@ -56,7 +57,7 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
             <Input
               className="pl-9"
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search word or translation"
+              placeholder="Search expression or meaning"
               value={query}
             />
           </div>
@@ -80,12 +81,20 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="break-words text-base font-semibold">{word.word}</h3>
+                  <span className="rounded-full border border-border px-1.5 py-0.5 text-[11px] uppercase text-muted">
+                    {entryTypeLabel(word.entry_type)}
+                  </span>
                   <StatusBadge status={word.status} />
                   {word.pos ? <span className="text-xs text-muted">{word.pos}</span> : null}
                 </div>
                 <p className="mt-0.5 text-sm font-medium text-strong">{word.translation}</p>
                 <p className="mt-0.5 text-sm leading-5 text-content">{word.definition}</p>
                 <p className="mt-0.5 text-xs leading-5 text-muted">{word.example}</p>
+                {word.note ? (
+                  <p className="mt-1 rounded-md border border-border bg-example p-2 text-xs leading-5 text-muted">
+                    {word.note}
+                  </p>
+                ) : null}
               </div>
               <div className="flex shrink-0 flex-wrap items-start gap-2">
                 <StatusTags status={word.status} onStatusChange={(nextStatus) => changeStatus(word.id, nextStatus)} />
@@ -93,21 +102,27 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
               </div>
             </div>
             <div className="grid gap-1 border-t border-border pt-1.5 text-[11px] text-muted sm:grid-cols-4">
-              <span>Added {formatDate(word.created_at)}</span>
+              <span>Type {entryTypeLabel(word.entry_type)}</span>
               <span>Reviews {word.review_count}</span>
               <span>Next {formatDate(word.next_review)}</span>
-              <span>Ease {word.ease_factor.toFixed(2)} / {word.interval}d</span>
+              <span>Added {formatDate(word.created_at)}</span>
             </div>
           </Card>
         ))}
 
         {filteredWords.length === 0 ? (
-          <Card className="text-center text-sm text-muted">No matching vocabulary entries.</Card>
+          <Card className="text-center text-sm text-muted">No matching learning entries.</Card>
         ) : null}
         </div>
       </div>
     </div>
   );
+}
+
+function entryTypeLabel(type: WordEntry["entry_type"]) {
+  if (type === "pattern") return "Pattern";
+  if (type === "phrase") return "Phrase";
+  return "Word";
 }
 
 function StatusTags({

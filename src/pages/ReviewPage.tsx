@@ -53,7 +53,7 @@ export function ReviewPage({ words, onWordsChanged }: ReviewPageProps) {
                 <Check size={24} />
               </div>
               <h2 className="mt-4 text-2xl font-semibold">Review complete</h2>
-              <p className="mt-2 text-muted">{completed === 0 ? "No words are due today." : `${completed} words reviewed.`}</p>
+              <p className="mt-2 text-muted">{completed === 0 ? "No entries are due today." : `${completed} entries reviewed.`}</p>
               <Button className="mt-5" onClick={restartSession} icon={<RotateCcw size={16} />}>Refresh</Button>
             </div>
           </Card>
@@ -71,7 +71,7 @@ export function ReviewPage({ words, onWordsChanged }: ReviewPageProps) {
           <Card className="grid min-h-[340px] content-between gap-3 p-4 text-center sm:p-5">
             <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-muted">
               <span>Front</span>
-              <span>{currentWord.status}</span>
+              <span>{entryTypeLabel(currentWord.entry_type)} / {currentWord.status}</span>
             </div>
 
             <div className="grid min-h-[120px] place-items-center rounded-lg border border-border bg-surface/60 px-3 py-5">
@@ -90,6 +90,11 @@ export function ReviewPage({ words, onWordsChanged }: ReviewPageProps) {
                 <p className="rounded-md border border-border bg-panel p-2.5 text-sm leading-6 text-muted">
                   {currentWord.example}
                 </p>
+                {currentWord.note ? (
+                  <p className="rounded-md border border-border bg-panel p-2.5 text-xs leading-5 text-muted">
+                    {currentWord.note}
+                  </p>
+                ) : null}
               </div>
             ) : (
               <div className="grid min-h-[64px] place-items-center">
@@ -144,4 +149,10 @@ function ReviewToolbar({
       </div>
     </Card>
   );
+}
+
+function entryTypeLabel(type: WordEntry["entry_type"]) {
+  if (type === "pattern") return "Pattern";
+  if (type === "phrase") return "Phrase";
+  return "Word";
 }

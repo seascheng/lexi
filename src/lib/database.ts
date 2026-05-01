@@ -1,7 +1,7 @@
 import Database from "@tauri-apps/plugin-sql";
 import { DEFAULT_CUSTOM_PROMPT_TEMPLATE, DEFAULT_PROMPT_TEMPLATE, DEFAULT_REVIEW_FEATURE, DEFAULT_SETTINGS, DEFAULT_TRANSLATION_FEATURE } from "./defaults";
 import { currentIsoDate, isTauriRuntime } from "./platform";
-import type { AiFeature, AiFeatureKind, AiOutputMode, AppSettings, ReviewUpdate, TranslationResult, WordEntry, WordStatus } from "../types";
+import type { AiFeature, AiFeatureKind, AiOutputMode, AppSettings, LearningEntryInput, LearningEntryType, ReviewUpdate, WordEntry, WordStatus } from "../types";
 
 type SqlDatabase = Awaited<ReturnType<typeof Database.load>>;
 
@@ -189,23 +189,28 @@ export async function listWords(): Promise<WordEntry[]> {
   );
 }
 
-export async function addWord(result: TranslationResult): Promise<WordEntry> {
+export async function addWord(result: LearningEntryInput): Promise<WordEntry> {
   if (!isTauriRuntime()) return addBrowserWord(result);
 
   const db = await getSqlDatabase();
   const createdAt = currentIsoDate();
   const nextReview = createdAt;
+  const entry = normalizedLearningEntryInput(result);
 
   await db.execute(
     `INSERT INTO words
-      (word, translation, pos, definition, example, status, created_at, review_count, next_review, ease_factor, interval)
-      VALUES ($1, $2, $3, $4, $5, 'new', $6, 0, $7, 2.5, 0)`,
+      (word, translation, pos, definition, example, entry_type, source_text, note,
+       status, created_at, review_count, next_review, ease_factor, interval)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'new', $9, 0, $10, 2.5, 0)`,
     [
-      result.word,
-      result.translation,
-      result.pos,
-      result.definition,
-      result.example,
+      entry.word,
+      entry.translation,
+      entry.pos,
+      entry.definition,
+      entry.example,
+      entry.entry_type,
+      entry.source_text,
+      entry.note,
       createdAt,
       nextReview,
     ],
@@ -326,16 +331,17 @@ function loadBrowserWords(): WordEntry[] {
   if (!saved) return seedWords();
 
   try {
-    return JSON.parse(saved) as WordEntry[];
+    return (JSON.parse(saved) as WordEntry[]).map(normalizedStoredWord);
   } catch {
     return seedWords();
   }
 }
 
-function addBrowserWord(result: TranslationResult): WordEntry {
+function addBrowserWord(result: LearningEntryInput): WordEntry {
   const words = loadBrowserWords();
+  const entry = normalizedLearningEntryInput(result);
   const word: WordEntry = {
-    ...result,
+    ...entry,
     id: Date.now(),
     status: "new",
     created_at: currentIsoDate(),
@@ -349,7 +355,7 @@ function addBrowserWord(result: TranslationResult): WordEntry {
 }
 
 function saveBrowserWords(words: WordEntry[]) {
-  localStorage.setItem(WORDS_KEY, JSON.stringify(words));
+  localStorage.setItem(WORDS_KEY, JSON.stringify(words.map(normalizedStoredWord)));
 }
 
 function seedWords(): WordEntry[] {
@@ -361,6 +367,9 @@ function seedWords(): WordEntry[] {
       pos: "adjective",
       definition: "Able to recover quickly after difficulty or change.",
       example: "A resilient learner turns mistakes into better habits.",
+      entry_type: "word",
+      source_text: null,
+      note: null,
       status: "learning",
       created_at: currentIsoDate(),
       review_count: 1,
@@ -374,6 +383,33 @@ function seedWords(): WordEntry[] {
 function parseSettingValue(key: string, value: string) {
   if (key === "windowOpacity") return parseWindowOpacity(value);
   return value;
+}
+
+function normalizedLearningEntryInput(result: LearningEntryInput): Required<LearningEntryInput> {
+  return {
+    word: result.word.trim(),
+    translation: result.translation.trim(),
+    pos: result.pos.trim(),
+    definition: result.definition.trim(),
+    example: result.example.trim(),
+    entry_type: normalizedEntryType(result.entry_type),
+    source_text: result.source_text?.trim() ?? "",
+    note: result.note?.trim() ?? "",
+  };
+}
+
+function normalizedEntryType(value: LearningEntryType | undefined): LearningEntryType {
+  if (value === "phrase" || value === "pattern") return value;
+  return "word";
+}
+
+function normalizedStoredWord(word: WordEntry): WordEntry {
+  return {
+    ...word,
+    entry_type: normalizedEntryType(word.entry_type),
+    source_text: word.source_text ?? null,
+    note: word.note ?? null,
+  };
 }
 
 function serializeSettingValue(value: unknown) {
@@ -536,6 +572,7 @@ function normalizedFeatureId(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+  if (normalized.startsWith("custom-")) return normalized;
   return normalized ? `custom-${normalized}` : `custom-${Date.now()}`;
 }
 

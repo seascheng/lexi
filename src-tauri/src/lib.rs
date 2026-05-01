@@ -3,7 +3,7 @@ mod selection;
 
 use commands::ai::run_ai_prompt;
 use commands::speech::speak_text;
-use commands::window::start_popup_resize;
+use commands::window::{set_popup_height, start_popup_resize};
 use selection::{cursor_position, get_selected_text};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -36,6 +36,7 @@ pub fn run() {
             get_selected_text,
             run_ai_prompt,
             speak_text,
+            set_popup_height,
             start_popup_resize
         ])
         .on_window_event(|window, event| {
@@ -84,6 +85,12 @@ fn migrations() -> Vec<Migration> {
             version: 4,
             description: "add feature speech setting",
             sql: include_str!("../migrations/004_feature_speech_enabled.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 5,
+            description: "add learning entry metadata",
+            sql: include_str!("../migrations/005_learning_entry_fields.sql"),
             kind: MigrationKind::Up,
         },
     ]

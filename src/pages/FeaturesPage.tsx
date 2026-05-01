@@ -209,6 +209,15 @@ export function FeaturesPage() {
             ) : null}
 
             {draft.kind !== "review" ? (
+              <div className="rounded-md border border-border bg-surface px-3 py-2">
+                <p className="text-sm font-medium text-strong">Popup actions</p>
+                <p className="mt-1 text-xs leading-5 text-muted">
+                  Capture learning point is enabled for this feature. In the popup, select text from the current result and use Capture selected text to analyze and save it.
+                </p>
+              </div>
+            ) : null}
+
+            {draft.kind !== "review" ? (
               <Field label="Prompt" hint="Use {{text}} for selected/input text. Translation also supports {{targetLanguage}}.">
                 <Textarea
                   className="min-h-64 font-mono"

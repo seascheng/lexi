@@ -48,6 +48,16 @@ export async function runAiFeature(text: string, feature: AiFeature, settings: A
   };
 }
 
+export async function analyzeLearningPoint(
+  selectedText: string,
+  contextText: string,
+  sourceFeature: AiFeature,
+  settings: AppSettings,
+): Promise<AiRunResult> {
+  const promptTemplate = captureLearningPointPrompt(contextText, sourceFeature.name);
+  return runAiFeature(selectedText, captureLearningPointFeature(sourceFeature, promptTemplate), settings);
+}
+
 export async function copyText(text: string) {
   if (isTauriRuntime()) {
     await writeText(text);
@@ -72,6 +82,18 @@ export async function speakText(text: string) {
 }
 
 function browserAiResult(text: string, feature: AiFeature): AiRunResult {
+  if (feature.id.startsWith("capture-learning-point")) {
+    return {
+      outputText: `### Learning point
+
+- **Type:** phrase
+- **Meaning:** Configure the desktop API to analyze "${text}".
+- **Usage:** Use this action after selecting useful text in the popup.
+- **Example:** I saved "${text}" as a learning point.
+- **Note:** This is a local browser preview.`,
+    };
+  }
+
   if (feature.outputMode === "translation_json") {
     const translation = {
       word: text,
@@ -113,6 +135,51 @@ function browserAiResult(text: string, feature: AiFeature): AiRunResult {
   return {
     outputText: `Configure the desktop API settings to run "${feature.name}" on:\n\n${text}`,
   };
+}
+
+function captureLearningPointFeature(sourceFeature: AiFeature, promptTemplate: string): AiFeature {
+  return {
+    id: `capture-learning-point-${sourceFeature.id}`,
+    name: "Capture learning point",
+    kind: "custom",
+    promptTemplate,
+    outputMode: "plain_text",
+    enabled: true,
+    sortOrder: 0,
+    autoSaveToVocabulary: false,
+    targetLanguage: sourceFeature.targetLanguage,
+    reviewIntervalSeconds: 30,
+    speechEnabled: false,
+  };
+}
+
+function captureLearningPointPrompt(contextText: string, featureName: string) {
+  return `Analyze the exact selected English text from the Englist popup.
+
+Selected text:
+{{text}}
+
+Source feature:
+${featureName}
+
+Context:
+${contextText.trim() || "(No extra context)"}
+
+Rules:
+- Treat the whole selected text as the learning point.
+- Do not replace it with one word from inside the selected text.
+- If the selected text is a sentence, analyze the sentence meaning, structure, and reusable pattern.
+- If the selected text is a phrase, analyze the phrase as a complete expression.
+- If the selected text is a single word, analyze the word.
+
+Return concise Markdown only. Keep this exact label style when possible:
+
+### Learning point
+- **Type:** word / phrase / pattern
+- **Meaning:** concise meaning in Chinese
+- **Usage:** how to use it naturally
+- **Example:** one natural English sentence
+- **Note:** one short learning note`;
 }
 
 function parseTranslationMarkdown(feature: AiFeature, outputText: string): AiRunResult["translation"] {

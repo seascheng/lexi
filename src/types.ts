@@ -6,6 +6,7 @@ export type WordStatus = "new" | "learning" | "mastered";
 export type ReviewRating = "again" | "hard" | "good" | "easy";
 export type AiFeatureKind = "translation" | "review" | "custom";
 export type AiOutputMode = "translation_json" | "plain_text";
+export type LearningEntryType = "word" | "phrase" | "pattern";
 
 export interface TranslationResult {
   word: string;
@@ -15,8 +16,17 @@ export interface TranslationResult {
   example: string;
 }
 
+export interface LearningEntryInput extends TranslationResult {
+  entry_type?: LearningEntryType;
+  source_text?: string;
+  note?: string;
+}
+
 export interface WordEntry extends TranslationResult {
   id: number;
+  entry_type: LearningEntryType;
+  source_text: string | null;
+  note: string | null;
   status: WordStatus;
   created_at: string;
   review_count: number;

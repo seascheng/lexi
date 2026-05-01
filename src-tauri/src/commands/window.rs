@@ -7,6 +7,7 @@ use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow};
 
 const MIN_POPUP_WIDTH: u32 = 360;
 const MIN_POPUP_HEIGHT: u32 = 260;
+const MAX_POPUP_HEIGHT: u32 = 900;
 const MAX_RESIZE_DURATION: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Deserialize)]
@@ -69,6 +70,26 @@ pub fn start_popup_resize(window: WebviewWindow, direction: ResizeDirection) -> 
     });
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn set_popup_height(window: WebviewWindow, height: f64) -> Result<(), String> {
+    if window.label() != "popup_card" {
+        return Ok(());
+    }
+
+    let current_size = window
+        .outer_size()
+        .map_err(|error| format!("Could not read popup size: {error}"))?;
+    let scale_factor = window
+        .scale_factor()
+        .map_err(|error| format!("Could not read popup scale factor: {error}"))?;
+    let logical_height = height.round().clamp(MIN_POPUP_HEIGHT as f64, MAX_POPUP_HEIGHT as f64);
+    let physical_height = (logical_height * scale_factor).round() as u32;
+
+    window
+        .set_size(PhysicalSize::new(current_size.width, physical_height))
+        .map_err(|error| format!("Could not set popup height: {error}"))
 }
 
 fn cursor_position(scale_factor: f64) -> Result<(i32, i32), String> {

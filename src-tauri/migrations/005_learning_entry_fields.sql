@@ -1,0 +1,3 @@
+ALTER TABLE words ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'word';
+ALTER TABLE words ADD COLUMN source_text TEXT;
+ALTER TABLE words ADD COLUMN note TEXT;

@@ -1,5 +1,5 @@
 import type { MouseEvent, ReactNode } from "react";
-import { Pin, PinOff } from "lucide-react";
+import { Highlighter, Pin, PinOff } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Button } from "../ui/Button";
 
@@ -23,6 +23,8 @@ interface FloatingFrameProps {
   children: ReactNode;
   className?: string;
   isPinned?: boolean;
+  autoHeight?: boolean;
+  onCaptureSelection?: () => void;
   onTogglePin?: () => void;
   onStartDrag?: () => void | Promise<void>;
   onStartResize?: (resize: PopupResizeStart) => void | Promise<void>;
@@ -32,6 +34,8 @@ export function FloatingFrame({
   children,
   className,
   isPinned = true,
+  autoHeight = false,
+  onCaptureSelection,
   onTogglePin,
   onStartDrag,
   onStartResize,
@@ -56,12 +60,13 @@ export function FloatingFrame({
     <section
       className={cn(
         "translation-frame relative flex h-full min-h-full flex-col overflow-hidden rounded-[18px] border border-strong/10 bg-floating p-2 text-sm text-muted",
+        autoHeight ? "h-auto min-h-0" : "",
         className,
       )}
     >
       <div
         aria-hidden="true"
-        className="absolute left-4 right-12 top-2 z-20 h-7 cursor-grab active:cursor-grabbing"
+        className={`absolute left-4 top-2 z-20 h-7 cursor-grab active:cursor-grabbing ${onCaptureSelection ? "right-20" : "right-12"}`}
         data-tauri-drag-region
         onMouseDown={handleDragMouseDown}
       />
@@ -109,6 +114,21 @@ export function FloatingFrame({
           />
         </>
       ) : null}
+      {onCaptureSelection ? (
+        <Button
+          aria-label="Capture learning point"
+          className="absolute right-11 top-2.5 z-20 h-7 min-h-7 w-7 rounded-full bg-transparent px-0 text-muted hover:bg-surface hover:text-strong"
+          icon={<Highlighter size={15} />}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onCaptureSelection();
+          }}
+          title="Capture learning point"
+          type="button"
+          variant="ghost"
+        />
+      ) : null}
       {onTogglePin ? (
         <Button
           aria-label={isPinned ? "Unpin popup" : "Pin popup"}
@@ -119,7 +139,10 @@ export function FloatingFrame({
           variant="ghost"
         />
       ) : null}
-      <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden pt-7">
+      <div className={cn(
+        "relative z-10 flex min-h-0 flex-col overflow-hidden pt-7",
+        autoHeight ? "flex-none" : "flex-1",
+      )}>
         {children}
       </div>
     </section>
