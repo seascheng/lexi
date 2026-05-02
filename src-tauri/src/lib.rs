@@ -93,6 +93,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/005_learning_entry_fields.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 6,
+            description: "add ai feature icon",
+            sql: include_str!("../migrations/006_feature_icon.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

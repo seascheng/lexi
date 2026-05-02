@@ -54,8 +54,8 @@ export async function analyzeLearningPoint(
   sourceFeature: AiFeature,
   settings: AppSettings,
 ): Promise<AiRunResult> {
-  const promptTemplate = captureLearningPointPrompt(contextText, sourceFeature.name);
-  return runAiFeature(selectedText, captureLearningPointFeature(sourceFeature, promptTemplate), settings);
+  const promptTemplate = extractLearningPointPrompt(contextText, sourceFeature.name);
+  return runAiFeature(selectedText, extractLearningPointFeature(sourceFeature, promptTemplate), settings);
 }
 
 export async function copyText(text: string) {
@@ -82,13 +82,13 @@ export async function speakText(text: string) {
 }
 
 function browserAiResult(text: string, feature: AiFeature): AiRunResult {
-  if (feature.id.startsWith("capture-learning-point")) {
+  if (feature.id.startsWith("extract-learning-point")) {
     return {
       outputText: `### Learning point
 
 - **Type:** phrase
 - **Meaning:** Configure the desktop API to analyze "${text}".
-- **Usage:** Use this action after selecting useful text in the popup.
+- **Usage:** Use this action after selecting useful text.
 - **Example:** I saved "${text}" as a learning point.
 - **Note:** This is a local browser preview.`,
     };
@@ -137,10 +137,10 @@ function browserAiResult(text: string, feature: AiFeature): AiRunResult {
   };
 }
 
-function captureLearningPointFeature(sourceFeature: AiFeature, promptTemplate: string): AiFeature {
+function extractLearningPointFeature(sourceFeature: AiFeature, promptTemplate: string): AiFeature {
   return {
-    id: `capture-learning-point-${sourceFeature.id}`,
-    name: "Capture learning point",
+    id: `extract-learning-point-${sourceFeature.id}`,
+    name: "Extract learning point",
     kind: "custom",
     promptTemplate,
     outputMode: "plain_text",
@@ -150,13 +150,14 @@ function captureLearningPointFeature(sourceFeature: AiFeature, promptTemplate: s
     targetLanguage: sourceFeature.targetLanguage,
     reviewIntervalSeconds: 30,
     speechEnabled: false,
+    icon: "highlighter",
   };
 }
 
-function captureLearningPointPrompt(contextText: string, featureName: string) {
-  return `Analyze the exact selected English text from the Englist popup.
+function extractLearningPointPrompt(contextText: string, featureName: string) {
+  return `Analyze the exact selected or entered English text from Englist.
 
-Selected text:
+Text:
 {{text}}
 
 Source feature:

@@ -1,33 +1,40 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AlertCircle, BookPlus, ChevronLeft, ChevronRight, Clipboard, Loader2, Save, Volume2, Wand2, X } from "lucide-react";
+import { AlertCircle, BookPlus, Clipboard, Highlighter, Loader2, Save, Volume2, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { AiFeature, AiRunResult, AppSettings, DisplayMode, LearningEntryInput, LearningEntryType, WordEntry } from "../../types";
+import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, DisplayMode, LearningEntryInput, LearningEntryType } from "../../types";
 import { analyzeLearningPoint, copyText, runAiFeature, speakText } from "../../lib/ai";
 import { applyAppearanceSettings } from "../../lib/appearance";
-import { addWord, dueWords, listAiFeatures, listWords, loadSettings, savePopupPosition, savePopupSize } from "../../lib/database";
+import { addWord, listAiFeatures, loadSettings, savePopupPosition, savePopupSize } from "../../lib/database";
 import { errorMessage } from "../../lib/errors";
+import { FeatureIcon } from "../../lib/featureIcons";
+import { captureSelectedText } from "../../lib/translation";
 import { Button } from "../ui/Button";
 import { FloatingFrame, type PopupResizeStart } from "./FloatingFrame";
 import { MarkdownRenderer } from "../ui/MarkdownRenderer";
 
-type AiState =
-  | { status: "idle" }
-  | { status: "loading"; text: string; mode: DisplayMode }
-  | { status: "ready"; text: string; mode: DisplayMode; result: AiRunResult }
-  | { status: "error"; message: string; mode: DisplayMode };
+const DEFAULT_POPUP_SIZE = 360;
 
-interface FeaturePageState {
+type WorkspaceRunStatus = "loading" | "ready" | "error";
+type WorkspaceRunKind = "feature" | "extract";
+
+interface WorkspaceRun {
+  id: string;
+  kind: WorkspaceRunKind;
+  title: string;
+  featureId?: string;
+  icon?: AiFeatureIcon;
   inputText: string;
-  state: AiState;
-  capture?: CaptureActionState;
+  mode: DisplayMode;
+  status: WorkspaceRunStatus;
+  result?: AiRunResult;
+  message?: string;
+  learningEntry?: LearningEntryInput;
+  saved?: boolean;
+  createdAt: number;
 }
-
-type CaptureActionState =
-  | { status: "loading"; selectedText: string; contextText: string }
-  | { status: "ready"; selectedText: string; contextText: string; result: AiRunResult; draft: LearningEntryInput; saved?: boolean }
-  | { status: "error"; message: string; selectedText?: string; contextText?: string };
 
 interface RequestPayload {
   text: string;
@@ -50,36 +57,39 @@ interface ReadyPayload {
 
 export function TranslationWindow() {
   const [features, setFeatures] = useState<AiFeature[]>([]);
-  const [activeFeatureId, setActiveFeatureId] = useState("");
-  const [pages, setPages] = useState<Record<string, FeaturePageState>>({});
+  const [inputText, setInputText] = useState("");
+  const [runs, setRuns] = useState<WorkspaceRun[]>([]);
+  const [activeRunId, setActiveRunId] = useState("");
   const [isPinned, setIsPinned] = useState(true);
   const positionSaveTimerRef = useRef<number>();
   const sizeSaveTimerRef = useRef<number>();
   const shellRef = useRef<HTMLElement>(null);
   const featuresRef = useRef<AiFeature[]>([]);
-  const activeFeatureIdRef = useRef("");
+  const inputTextRef = useRef("");
+  const runsRef = useRef<WorkspaceRun[]>([]);
   const isPinnedRef = useRef(true);
-  const pagesRef = useRef<Record<string, FeaturePageState>>({});
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const windowName = params.get("window");
   const isBar = windowName === "float_bar";
-  const enabledFeatures = useMemo(() => features.filter((feature) => feature.enabled), [features]);
-  const activeFeature = enabledFeatures.find((feature) => feature.id === activeFeatureId) ?? enabledFeatures[0];
-  const activePage = activeFeature
-    ? pages[activeFeature.id] ?? emptyFeaturePage()
-    : pages["missing-feature"] ?? emptyFeaturePage();
+  const actionFeatures = useMemo(
+    () => features.filter((feature) => feature.enabled && feature.kind !== "review"),
+    [features],
+  );
+  const defaultFeature = actionFeatures[0];
+  const latestRun = runs[0];
+  const activeRun = runs.find((run) => run.id === activeRunId) ?? runs[0];
 
   useEffect(() => {
     featuresRef.current = features;
   }, [features]);
 
   useEffect(() => {
-    activeFeatureIdRef.current = activeFeatureId;
-  }, [activeFeatureId]);
+    inputTextRef.current = inputText;
+  }, [inputText]);
 
   useEffect(() => {
-    pagesRef.current = pages;
-  }, [pages]);
+    runsRef.current = runs;
+  }, [runs]);
 
   useEffect(() => {
     isPinnedRef.current = isPinned;
@@ -96,45 +106,45 @@ export function TranslationWindow() {
         void runActiveFeature(event.payload.text, event.payload.mode, event.payload.featureId);
       }),
       listen<RequestPayload>("englist://ai-loading", (event) => {
-        const feature = currentFeature(event.payload.featureId);
-        if (feature) {
-          setActiveFeatureId(feature.id);
-          activeFeatureIdRef.current = feature.id;
-          setFeaturePage(feature.id, {
-            inputText: event.payload.text,
-            state: {
-              status: "loading",
-              text: event.payload.text,
-              mode: event.payload.mode,
-            },
-          });
-        }
+        const feature = currentActionFeature(event.payload.featureId);
+        if (!feature) return;
+        const text = event.payload.text.trim();
+        if (text) setInputText(text);
+        addWorkspaceRun({
+          kind: "feature",
+          title: feature.name,
+          featureId: feature.id,
+          icon: feature.icon,
+          inputText: text,
+          mode: event.payload.mode,
+          status: "loading",
+        });
       }),
       listen<ErrorPayload>("englist://ai-error", (event) => {
-        const feature = currentFeature(event.payload.featureId);
-        if (feature) {
-          setActiveFeatureId(feature.id);
-          activeFeatureIdRef.current = feature.id;
-          setFeaturePage(feature.id, {
-            state: {
-              status: "error",
-              message: event.payload.message,
-              mode: event.payload.mode,
-            },
-          });
-        }
+        const feature = currentActionFeature(event.payload.featureId);
+        addWorkspaceRun({
+          kind: "feature",
+          title: feature?.name ?? "AI action",
+          featureId: feature?.id,
+          icon: feature?.icon,
+          inputText: inputTextRef.current,
+          mode: event.payload.mode,
+          status: "error",
+          message: event.payload.message,
+        });
       }),
       listen<ReadyPayload>("englist://ai-ready", (event) => {
-        setActiveFeatureId(event.payload.feature.id);
-        activeFeatureIdRef.current = event.payload.feature.id;
-        setFeaturePage(event.payload.feature.id, {
-          inputText: event.payload.text,
-          state: {
-            status: "ready",
-            text: event.payload.text,
-            mode: event.payload.mode,
-            result: event.payload.result,
-          },
+        const text = event.payload.text.trim();
+        if (text) setInputText(text);
+        addWorkspaceRun({
+          kind: "feature",
+          title: event.payload.feature.name,
+          featureId: event.payload.feature.id,
+          icon: event.payload.feature.icon,
+          inputText: text,
+          mode: event.payload.mode,
+          status: "ready",
+          result: event.payload.result,
         });
       }),
       listen<AppSettings>("englist://settings-changed", (event) => {
@@ -142,6 +152,9 @@ export function TranslationWindow() {
       }),
       listen("englist://features-changed", () => {
         void reloadFeatures();
+      }),
+      listen("englist://popup-shown", () => {
+        resetPopupWorkspace();
       }),
     ];
 
@@ -151,11 +164,6 @@ export function TranslationWindow() {
       });
     };
   }, []);
-
-  useEffect(() => {
-    if (activeFeatureId || enabledFeatures.length === 0) return;
-    setActiveFeatureId(enabledFeatures[0].id);
-  }, [activeFeatureId, enabledFeatures]);
 
   useEffect(() => {
     if (isBar) return;
@@ -251,12 +259,20 @@ export function TranslationWindow() {
   }, []);
 
   useEffect(() => {
-    if (isPinned || activePage.state.status === "idle" || activePage.state.mode !== "auto_bar" || activePage.state.status === "loading") return;
+    if (
+      isPinned ||
+      !latestRun ||
+      latestRun.mode !== "auto_bar" ||
+      latestRun.status === "loading"
+    ) {
+      return;
+    }
+
     const timeoutId = window.setTimeout(() => {
       getCurrentWindow().hide();
     }, 5000);
     return () => window.clearTimeout(timeoutId);
-  }, [activePage.state, isPinned]);
+  }, [latestRun, isPinned]);
 
   useEffect(() => {
     if (isBar) return;
@@ -283,7 +299,7 @@ export function TranslationWindow() {
       observer.disconnect();
       if (resizeTimer) window.clearTimeout(resizeTimer);
     };
-  }, [activeFeatureId, activePage.capture, activePage.inputText, activePage.state, isBar]);
+  }, [inputText, isBar, runs]);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -306,33 +322,24 @@ export function TranslationWindow() {
   function applyFeatureList(nextFeatures: AiFeature[]) {
     setFeatures(nextFeatures);
     featuresRef.current = nextFeatures;
-    setPages((currentPages) => {
-      const nextPages = nextFeatures.reduce<Record<string, FeaturePageState>>((accumulator, feature) => {
-        accumulator[feature.id] = currentPages[feature.id] ?? emptyFeaturePage();
-        return accumulator;
-      }, {});
-      pagesRef.current = nextPages;
-      return nextPages;
-    });
-    const enabled = nextFeatures.filter((feature) => feature.enabled);
-    const active = enabled.find((feature) => feature.id === activeFeatureIdRef.current) ?? enabled[0];
-    if (active) {
-      setActiveFeatureId(active.id);
-      activeFeatureIdRef.current = active.id;
-    }
   }
 
-  function submitFeature(event: FormEvent) {
+  function submitDefaultFeature(event: FormEvent) {
     event.preventDefault();
-    if (!activeFeature) return;
-    void runFeature(activePage.inputText, currentMode(), activeFeature);
+    if (!defaultFeature) return;
+    void runFeature(inputText, currentMode(), defaultFeature);
   }
 
   async function runActiveFeature(rawText: string, mode: DisplayMode, featureId?: string) {
-    const feature = await loadCurrentFeature(featureId);
+    const feature = await loadCurrentActionFeature(featureId);
     if (!feature) {
-      setFeaturePage("missing-feature", {
-        state: { status: "error", message: "No enabled AI features are available.", mode },
+      addWorkspaceRun({
+        kind: "feature",
+        title: "AI action",
+        inputText: rawText,
+        mode,
+        status: "error",
+        message: "No enabled AI actions are available.",
       });
       return;
     }
@@ -344,56 +351,57 @@ export function TranslationWindow() {
     const text = rawText.trim();
     if (!text) return;
 
-    setActiveFeatureId(feature.id);
-    setFeaturePage(feature.id, {
+    setInputText(text);
+    const runId = addWorkspaceRun({
+      kind: "feature",
+      title: feature.name,
+      featureId: feature.id,
+      icon: feature.icon,
       inputText: text,
-      state: { status: "loading", text, mode },
+      mode,
+      status: "loading",
     });
 
     try {
       const settings = await loadSettings();
       await applyAppearanceSettings(settings);
       const result = await runAiFeature(text, feature, settings);
-      setFeaturePage(feature.id, {
-        inputText: text,
-        state: { status: "ready", text, mode, result },
-      });
+      let saved = false;
 
-      if (feature.kind === "translation" && feature.autoSaveToVocabulary && result.translation) {
-        await addWord(result.translation);
+      if (feature.kind === "translation" && feature.autoSaveToVocabulary && isSingleWordTranslation(text, result)) {
+        await addWord(wordLearningEntry(text, result));
         await emit("englist://words-changed");
+        saved = true;
       }
+
+      updateWorkspaceRun(runId, {
+        status: "ready",
+        result,
+        saved,
+      });
     } catch (error) {
-      setFeaturePage(feature.id, {
-        state: {
-          status: "error",
-          message: errorMessage(error, `${feature.name} failed.`),
-          mode,
-        },
+      updateWorkspaceRun(runId, {
+        status: "error",
+        message: errorMessage(error, `${feature.name} failed.`),
       });
     }
   }
 
-  async function loadCurrentFeature(featureId?: string) {
+  async function loadCurrentActionFeature(featureId?: string) {
     const loadedFeatures = featuresRef.current.length > 0 ? featuresRef.current : await listAiFeatures();
     if (featuresRef.current.length === 0) {
       setFeatures(loadedFeatures);
       featuresRef.current = loadedFeatures;
     }
 
-    const enabled = loadedFeatures.filter((feature) => feature.enabled);
-    return (
-      enabled.find((feature) => feature.id === featureId) ??
-      enabled.find((feature) => feature.id === activeFeatureIdRef.current) ??
-      enabled[0]
-    );
+    return currentActionFeature(featureId);
   }
 
-  function currentFeature(featureId?: string) {
-    const enabled = featuresRef.current.filter((feature) => feature.enabled);
+  function currentActionFeature(featureId?: string) {
+    const enabled = featuresRef.current.filter((feature) => feature.enabled && feature.kind !== "review");
     return (
       enabled.find((feature) => feature.id === featureId) ??
-      enabled.find((feature) => feature.id === activeFeatureIdRef.current) ??
+      enabled.find((feature) => feature.id === runsRef.current[0]?.featureId) ??
       enabled[0]
     );
   }
@@ -403,9 +411,225 @@ export function TranslationWindow() {
     return "popup_card";
   }
 
-  function updateActiveInput(value: string) {
-    if (!activeFeature) return;
-    setFeaturePage(activeFeature.id, { inputText: value });
+  function addWorkspaceRun(run: Omit<WorkspaceRun, "id" | "createdAt">) {
+    const id = newRunId();
+    const nextRun: WorkspaceRun = {
+      ...run,
+      id,
+      createdAt: Date.now(),
+    };
+
+    setActiveRunId(id);
+    setRuns((currentRuns) => {
+      const nextRuns = [nextRun, ...currentRuns].slice(0, 12);
+      runsRef.current = nextRuns;
+      return nextRuns;
+    });
+    return id;
+  }
+
+  function updateWorkspaceRun(runId: string, update: Partial<WorkspaceRun>) {
+    setRuns((currentRuns) => {
+      const nextRuns = currentRuns.map((run) => (run.id === runId ? { ...run, ...update } : run));
+      runsRef.current = nextRuns;
+      return nextRuns;
+    });
+  }
+
+  function dismissWorkspaceRun(runId: string) {
+    setRuns((currentRuns) => {
+      const nextRuns = currentRuns.filter((run) => run.id !== runId);
+      runsRef.current = nextRuns;
+      setActiveRunId((currentActiveRunId) => {
+        if (currentActiveRunId !== runId) return currentActiveRunId;
+        return nextRuns[0]?.id ?? "";
+      });
+      return nextRuns;
+    });
+  }
+
+  function clearWorkspaceRuns() {
+    runsRef.current = [];
+    setRuns([]);
+    setActiveRunId("");
+  }
+
+  function resetPopupWorkspace() {
+    clearWorkspaceRuns();
+    if (isBar) return;
+
+    void getCurrentWindow().setSize(new LogicalSize(DEFAULT_POPUP_SIZE, DEFAULT_POPUP_SIZE)).catch((error) => {
+      console.warn("Failed to reset popup size", error);
+    });
+  }
+
+  async function hidePopup() {
+    await getCurrentWindow().hide();
+  }
+
+  async function runFeatureFromSelectedText(feature: AiFeature) {
+    const text = await selectedTextOnly();
+    if (!text) {
+      addWorkspaceRun({
+        kind: "feature",
+        title: feature.name,
+        featureId: feature.id,
+        icon: feature.icon,
+        inputText: "",
+        mode: currentMode(),
+        status: "error",
+        message: "Select text first.",
+      });
+      return;
+    }
+
+    await runFeature(text, currentMode(), feature);
+  }
+
+  async function runFeatureFromInput(feature: AiFeature) {
+    const text = inputTextRef.current.trim();
+    if (!text) {
+      addWorkspaceRun({
+        kind: "feature",
+        title: feature.name,
+        featureId: feature.id,
+        icon: feature.icon,
+        inputText: "",
+        mode: currentMode(),
+        status: "error",
+        message: "Enter text first.",
+      });
+      return;
+    }
+
+    await runFeature(text, currentMode(), feature);
+  }
+
+  async function extractSelectedLearningPoint() {
+    const text = await selectedTextOnly();
+    if (!text) {
+      addWorkspaceRun({
+        kind: "extract",
+        title: "Extract",
+        inputText: "",
+        mode: currentMode(),
+        status: "error",
+        message: "Select text first.",
+      });
+      return;
+    }
+
+    await extractLearningPointFromText(text);
+  }
+
+  async function extractInputLearningPoint() {
+    const text = inputTextRef.current.trim();
+    if (!text) {
+      addWorkspaceRun({
+        kind: "extract",
+        title: "Extract",
+        inputText: "",
+        mode: currentMode(),
+        status: "error",
+        message: "Enter text first.",
+      });
+      return;
+    }
+
+    await extractLearningPointFromText(text);
+  }
+
+  async function extractLearningPointFromText(text: string) {
+    const sourceFeature = currentActionFeature();
+    if (!sourceFeature) {
+      addWorkspaceRun({
+        kind: "extract",
+        title: "Extract",
+        inputText: text,
+        mode: currentMode(),
+        status: "error",
+        message: "No enabled AI actions are available.",
+      });
+      return;
+    }
+
+    setInputText(text);
+    await runExtractAction(sourceFeature, text, workspaceContextText(text, runsRef.current));
+  }
+
+  async function runExtractAction(sourceFeature: AiFeature, selectedText: string, contextText: string) {
+    const runId = addWorkspaceRun({
+      kind: "extract",
+      title: "Extract",
+      featureId: sourceFeature.id,
+      inputText: selectedText,
+      mode: currentMode(),
+      status: "loading",
+    });
+
+    try {
+      const settings = await loadSettings();
+      const result = await analyzeLearningPoint(selectedText, contextText, sourceFeature, settings);
+      updateWorkspaceRun(runId, {
+        status: "ready",
+        result,
+        learningEntry: learningEntryDraft(selectedText, contextText, result.outputText),
+      });
+    } catch (error) {
+      updateWorkspaceRun(runId, {
+        status: "error",
+        message: errorMessage(error, "Extract failed."),
+      });
+    }
+  }
+
+  async function selectedTextOnly() {
+    const selectedInPopup = popupSelectedText();
+    if (selectedInPopup) return selectedInPopup;
+
+    try {
+      const selectedInSystem = (await captureSelectedText()).trim();
+      if (selectedInSystem) return selectedInSystem;
+    } catch (error) {
+      console.warn("Failed to capture selected system text", error);
+    }
+
+    return "";
+  }
+
+  async function speakSelectedText() {
+    const text = await selectedTextOnly();
+    if (!text) throw new Error("Select text first.");
+    await speakText(text);
+  }
+
+  async function speakInputText() {
+    const text = inputTextRef.current.trim();
+    if (!text) throw new Error("Enter text first.");
+    await speakText(text);
+  }
+
+  async function saveLearningEntry(runId: string) {
+    const run = runsRef.current.find((item) => item.id === runId);
+    if (!run?.learningEntry || run.saved) return;
+
+    await addWord(run.learningEntry);
+    await emit("englist://words-changed");
+    updateWorkspaceRun(runId, { saved: true });
+  }
+
+  function updateRunEntryType(runId: string, entryType: LearningEntryType) {
+    const run = runsRef.current.find((item) => item.id === runId);
+    if (!run?.learningEntry) return;
+    if (run.saved) return;
+
+    updateWorkspaceRun(runId, {
+      saved: false,
+      learningEntry: {
+        ...run.learningEntry,
+        entry_type: entryType,
+      },
+    });
   }
 
   return (
@@ -413,120 +637,36 @@ export function TranslationWindow() {
       <FloatingFrame
         autoHeight={!isBar}
         isPinned={isPinned}
-        onCaptureSelection={activeFeature && activeFeature.kind !== "review" ? captureLearningPoint : undefined}
+        onClose={hidePopup}
         onStartDrag={startWindowDrag}
         onStartResize={startWindowResize}
         onTogglePin={() => setIsPinned((currentIsPinned) => !currentIsPinned)}
       >
-        <FeatureTabs
-          activeFeatureId={activeFeature?.id ?? ""}
-          features={enabledFeatures}
-          onFeatureChange={setActiveFeatureId}
-        />
-        <FeatureTabPage
-          activeFeature={activeFeature}
+        <WorkspacePage
+          actionFeatures={actionFeatures}
+          activeRun={activeRun}
+          activeRunId={activeRunId}
           autoHeight={!isBar}
-          captureState={activePage.capture}
-          inputText={activePage.inputText}
-          pageState={activePage.state}
-          onCancelCapture={cancelCaptureAction}
-          onCaptureEntryTypeChange={updateCaptureEntryType}
-          onInputChange={updateActiveInput}
-          onSaveCapture={saveCaptureDraft}
-          onSubmit={submitFeature}
+          defaultFeature={defaultFeature}
+          inputText={inputText}
+          runs={runs}
+          onDismissRun={dismissWorkspaceRun}
+          onEntryTypeChange={updateRunEntryType}
+          onExtractInput={extractInputLearningPoint}
+          onExtractSelection={extractSelectedLearningPoint}
+          onClearRuns={clearWorkspaceRuns}
+          onInputChange={setInputText}
+          onRunFeatureInput={(feature) => void runFeatureFromInput(feature)}
+          onRunFeatureSelection={(feature) => void runFeatureFromSelectedText(feature)}
+          onSaveLearningEntry={saveLearningEntry}
+          onSelectRun={setActiveRunId}
+          onSpeakInput={speakInputText}
+          onSpeakSelection={speakSelectedText}
+          onSubmitDefault={submitDefaultFeature}
         />
       </FloatingFrame>
     </main>
   );
-
-  function setFeaturePage(featureId: string, update: Partial<FeaturePageState>) {
-    setPages((currentPages) => {
-      const currentPage = currentPages[featureId] ?? emptyFeaturePage();
-      const nextPages = {
-        ...currentPages,
-        [featureId]: {
-          inputText: update.inputText ?? currentPage.inputText,
-          state: update.state ?? currentPage.state,
-          capture: "capture" in update ? update.capture : currentPage.capture,
-        },
-      };
-      pagesRef.current = nextPages;
-      return nextPages;
-    });
-  }
-
-  async function captureLearningPoint() {
-    if (!activeFeature || activeFeature.kind === "review") return;
-
-    const selectedText = popupSelectedText();
-    if (!selectedText) {
-      setFeaturePage(activeFeature.id, {
-        capture: { status: "error", message: "Select text inside the popup first." },
-      });
-      return;
-    }
-
-    await runCaptureAction(activeFeature, selectedText, captureContextText(activePage));
-  }
-
-  async function runCaptureAction(feature: AiFeature, selectedText: string, contextText: string) {
-    setFeaturePage(feature.id, {
-      capture: { status: "loading", selectedText, contextText },
-    });
-
-    try {
-      const settings = await loadSettings();
-      const result = await analyzeLearningPoint(selectedText, contextText, feature, settings);
-      setFeaturePage(feature.id, {
-        capture: {
-          status: "ready",
-          selectedText,
-          contextText,
-          result,
-          draft: learningEntryDraft(selectedText, contextText, result.outputText),
-        },
-      });
-    } catch (error) {
-      setFeaturePage(feature.id, {
-        capture: {
-          status: "error",
-          selectedText,
-          contextText,
-          message: errorMessage(error, "Capture learning point failed."),
-        },
-      });
-    }
-  }
-
-  async function saveCaptureDraft() {
-    if (!activeFeature) return;
-    const capture = pagesRef.current[activeFeature.id]?.capture;
-    if (!capture || capture.status !== "ready" || capture.saved) return;
-
-    await addWord(capture.draft);
-    await emit("englist://words-changed");
-    setFeaturePage(activeFeature.id, {
-      capture: { ...capture, saved: true },
-    });
-  }
-
-  function cancelCaptureAction() {
-    if (!activeFeature) return;
-    setFeaturePage(activeFeature.id, { capture: undefined });
-  }
-
-  function updateCaptureEntryType(entryType: LearningEntryType) {
-    if (!activeFeature) return;
-    const capture = pagesRef.current[activeFeature.id]?.capture;
-    if (!capture || capture.status !== "ready") return;
-    setFeaturePage(activeFeature.id, {
-      capture: {
-        ...capture,
-        saved: false,
-        draft: { ...capture.draft, entry_type: entryType },
-      },
-    });
-  }
 }
 
 async function startWindowDrag() {
@@ -574,425 +714,435 @@ function contentPaddingY(content: HTMLElement) {
   return parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
 }
 
-interface FeatureTabsProps {
-  features: AiFeature[];
-  activeFeatureId: string;
-  onFeatureChange: (featureId: string) => void;
-}
-
-function FeatureTabs({ activeFeatureId, features, onFeatureChange }: FeatureTabsProps) {
-  if (features.length <= 1) return null;
-
-  return (
-    <div className="min-h-9 w-full shrink-0 overflow-x-auto rounded-lg border border-strong/10 bg-surface/70 p-0.5">
-      <div className="flex min-w-full gap-1">
-        {features.map((feature) => (
-          <button
-            className={`h-8 shrink-0 rounded-md px-2.5 text-xs font-medium transition ${
-              feature.id === activeFeatureId ? "bg-panel text-strong shadow-sm" : "text-muted hover:bg-panel hover:text-strong"
-            }`}
-            key={feature.id}
-            onClick={() => onFeatureChange(feature.id)}
-            type="button"
-          >
-            {feature.name}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-interface FeatureTabPageProps {
-  activeFeature?: AiFeature;
+interface WorkspacePageProps {
+  actionFeatures: AiFeature[];
+  activeRun?: WorkspaceRun;
+  activeRunId: string;
   autoHeight?: boolean;
-  captureState?: CaptureActionState;
+  defaultFeature?: AiFeature;
   inputText: string;
-  pageState: AiState;
-  onCancelCapture: () => void;
-  onCaptureEntryTypeChange: (entryType: LearningEntryType) => void;
+  runs: WorkspaceRun[];
+  onClearRuns: () => void;
+  onDismissRun: (runId: string) => void;
+  onEntryTypeChange: (runId: string, entryType: LearningEntryType) => void;
+  onExtractInput: () => void | Promise<void>;
+  onExtractSelection: () => void | Promise<void>;
   onInputChange: (value: string) => void;
-  onSaveCapture: () => void | Promise<void>;
-  onSubmit: (event: FormEvent) => void;
+  onRunFeatureInput: (feature: AiFeature) => void;
+  onRunFeatureSelection: (feature: AiFeature) => void;
+  onSaveLearningEntry: (runId: string) => void | Promise<void>;
+  onSelectRun: (runId: string) => void;
+  onSpeakInput: () => Promise<void>;
+  onSpeakSelection: () => Promise<void>;
+  onSubmitDefault: (event: FormEvent) => void;
 }
 
-function FeatureTabPage({
-  activeFeature,
+function WorkspacePage({
+  actionFeatures,
+  activeRun,
+  activeRunId,
   autoHeight = false,
-  captureState,
+  defaultFeature,
   inputText,
-  pageState,
-  onCancelCapture,
-  onCaptureEntryTypeChange,
+  runs,
+  onClearRuns,
+  onDismissRun,
+  onEntryTypeChange,
+  onExtractInput,
+  onExtractSelection,
   onInputChange,
-  onSaveCapture,
-  onSubmit,
-}: FeatureTabPageProps) {
-  if (activeFeature?.kind === "review") {
-    return <ReviewFeaturePage feature={activeFeature} />;
-  }
-
+  onRunFeatureInput,
+  onRunFeatureSelection,
+  onSaveLearningEntry,
+  onSelectRun,
+  onSpeakInput,
+  onSpeakSelection,
+  onSubmitDefault,
+}: WorkspacePageProps) {
   return (
     <div className={`translation-tab-page flex min-h-0 flex-col gap-2 pt-2 ${autoHeight ? "flex-none" : "flex-1"}`}>
       <section className="translation-action-area shrink-0">
         <AiForm
-          activeFeature={activeFeature}
+          actionFeatures={actionFeatures}
+          canSpeak={actionFeatures.some((feature) => feature.speechEnabled)}
+          defaultFeature={defaultFeature}
           inputText={inputText}
-          isSubmitting={pageState.status === "loading"}
+          runs={runs}
+          onExtractInput={onExtractInput}
+          onExtractSelection={onExtractSelection}
           onInputChange={onInputChange}
-          onSubmit={onSubmit}
+          onRunFeatureInput={onRunFeatureInput}
+          onRunFeatureSelection={onRunFeatureSelection}
+          onSpeakInput={onSpeakInput}
+          onSpeakSelection={onSpeakSelection}
+          onSubmit={onSubmitDefault}
         />
       </section>
       <section
-        className={`translation-content min-h-[220px] overflow-y-auto rounded-lg border border-strong/10 bg-surface/45 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] ${autoHeight ? "max-h-[720px] flex-none" : "flex-1"}`}
+        className={`translation-content min-h-[220px] overflow-y-auto rounded-lg border border-strong/10 bg-surface/35 p-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] ${autoHeight ? "max-h-[720px] flex-none" : "flex-1"}`}
       >
-        {pageState.status === "idle" ? <IdleState feature={activeFeature} /> : null}
-        {pageState.status === "loading" && activeFeature ? <LoadingCard feature={activeFeature} /> : null}
-        {pageState.status === "error" ? <ErrorCard feature={activeFeature} message={pageState.message} /> : null}
-        {pageState.status === "ready" && activeFeature ? <AiResultPanel feature={activeFeature} result={pageState.result} /> : null}
-        {captureState ? (
-          <CaptureActionPanel
-            capture={captureState}
-            onCancel={onCancelCapture}
-            onEntryTypeChange={onCaptureEntryTypeChange}
-            onSave={onSaveCapture}
-          />
+        {runs.length === 0 ? <div className="p-2.5"><IdleState hasActions={actionFeatures.length > 0} /></div> : null}
+        {runs.length > 0 && activeRun ? (
+          <div className="grid">
+            <RunTabs
+              activeRunId={activeRunId || activeRun.id}
+              runs={runs}
+              onClearRuns={onClearRuns}
+              onDismissRun={onDismissRun}
+              onSelectRun={onSelectRun}
+            />
+            <WorkspaceRunCard
+              run={activeRun}
+              onEntryTypeChange={(entryType) => onEntryTypeChange(activeRun.id, entryType)}
+              onSave={() => void onSaveLearningEntry(activeRun.id)}
+            />
+          </div>
         ) : null}
       </section>
     </div>
   );
 }
 
-function ReviewFeaturePage({
-  feature,
+function RunTabs({
+  activeRunId,
+  runs,
+  onClearRuns,
+  onDismissRun,
+  onSelectRun,
 }: {
-  feature: AiFeature;
+  activeRunId: string;
+  runs: WorkspaceRun[];
+  onClearRuns: () => void;
+  onDismissRun: (runId: string) => void;
+  onSelectRun: (runId: string) => void;
 }) {
-  const [words, setWords] = useState<WordEntry[]>([]);
-  const [index, setIndex] = useState(0);
-  const [speechError, setSpeechError] = useState("");
-  const displayWords = useMemo(() => {
-    const due = dueWords(words);
-    return due.length > 0 ? due : words.filter((word) => word.status !== "mastered");
-  }, [words]);
-  const currentWord = displayWords[index % Math.max(1, displayWords.length)];
-
-  useEffect(() => {
-    void refreshWords();
-    const cleanupPromise = listen("englist://words-changed", () => {
-      void refreshWords();
-    });
-    return () => {
-      cleanupPromise.then((cleanup) => cleanup());
-    };
-  }, []);
-
-  useEffect(() => {
-    if (displayWords.length <= 1) return;
-    const intervalId = window.setInterval(() => {
-      setIndex((currentIndex) => (currentIndex + 1) % displayWords.length);
-    }, feature.reviewIntervalSeconds * 1000);
-    return () => window.clearInterval(intervalId);
-  }, [displayWords.length, feature.reviewIntervalSeconds]);
-
-  useEffect(() => {
-    if (index < displayWords.length) return;
-    setIndex(0);
-  }, [displayWords.length, index]);
-
-  async function refreshWords() {
-    setWords(await listWords());
-  }
-
-  function showPreviousWord() {
-    if (displayWords.length === 0) return;
-    setIndex((currentIndex) => (currentIndex - 1 + displayWords.length) % displayWords.length);
-  }
-
-  function showNextWord() {
-    if (displayWords.length === 0) return;
-    setIndex((currentIndex) => (currentIndex + 1) % displayWords.length);
-  }
-
-  async function speakCurrentWord() {
-    if (!currentWord) return;
-    setSpeechError("");
-    try {
-      await speakText(currentWord.word);
-    } catch (error) {
-      setSpeechError(errorMessage(error, "Speech failed."));
-    }
-  }
-
   return (
-    <div className="translation-tab-page flex min-h-0 flex-1 flex-col gap-2 pt-2">
-      <section
-        className="translation-content min-h-[220px] flex-1 overflow-y-auto rounded-lg border border-strong/10 bg-surface/45 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]"
+    <div className="flex min-h-9 items-end gap-1 bg-surface/35 px-1 pt-1">
+      <div className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto">
+        {runs.map((run) => (
+          <button
+            className={`group flex h-8 max-w-[150px] shrink-0 items-center gap-1.5 rounded-t-md px-2 text-left text-xs transition ${
+              run.id === activeRunId
+                ? "bg-panel/85 text-strong"
+                : "text-muted hover:bg-panel/45 hover:text-strong"
+            }`}
+            key={run.id}
+            onClick={() => onSelectRun(run.id)}
+            title={`${run.title}: ${run.inputText}`}
+            type="button"
+          >
+            {run.status === "loading" ? <Loader2 className="shrink-0 animate-spin" size={13} /> : run.kind === "extract" ? <BookPlus className="shrink-0" size={13} /> : <FeatureIcon icon={run.icon ?? "wand"} size={13} />}
+            <span className="truncate">{run.title}</span>
+            <span
+              aria-label="Close result"
+              className="ml-0.5 grid h-4 w-4 shrink-0 place-items-center rounded text-muted hover:bg-surface/80 hover:text-strong"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onDismissRun(run.id);
+              }}
+              role="button"
+              tabIndex={0}
+              title="Close result"
+            >
+              <X size={11} />
+            </span>
+          </button>
+        ))}
+      </div>
+      <Button
+        aria-label="Close all results"
+        className="h-8 min-h-8 shrink-0 rounded-t-md rounded-b-none px-2 text-xs"
+        icon={<X size={13} />}
+        onClick={onClearRuns}
+        title="Close all results"
+        type="button"
+        variant="ghost"
       >
-        {currentWord ? (
-          <div className="grid min-h-[138px] content-between gap-2.5">
-            <div className="flex items-center justify-between gap-3 text-xs uppercase tracking-[0.14em] text-muted">
-              <span>{entryTypeLabel(currentWord.entry_type)}</span>
-              <span>{index + 1}/{displayWords.length}</span>
-            </div>
-            <div className="grid gap-1.5">
-              <h2 className="break-words text-xl font-semibold leading-tight text-strong">{currentWord.word}</h2>
-              <p className="break-words text-base font-medium text-accent">{currentWord.translation}</p>
-              {currentWord.definition ? (
-                <p className="break-words text-sm leading-5 text-content">{currentWord.definition}</p>
-              ) : null}
-              {currentWord.example ? (
-                <p className="rounded-md border border-strong/10 bg-example p-2 text-xs leading-5 text-muted">
-                  {currentWord.example}
-                </p>
-              ) : null}
-            </div>
-            <div className="flex items-center justify-between gap-2 text-xs text-muted">
-              <Button
-                aria-label="Previous vocabulary"
-                className="h-7 min-h-7 w-7 rounded-md px-0"
-                disabled={displayWords.length <= 1}
-                icon={<ChevronLeft size={15} />}
-                onClick={showPreviousWord}
-              />
-              <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                <span className="truncate">{entryTypeLabel(currentWord.entry_type)} / {currentWord.status}</span>
-                <span className="shrink-0">{feature.reviewIntervalSeconds}s interval</span>
-              </div>
-              {feature.speechEnabled ? (
-                <Button
-                  aria-label="Speak vocabulary"
-                  className="h-7 min-h-7 w-7 rounded-md px-0"
-                  icon={<Volume2 size={14} />}
-                  onClick={speakCurrentWord}
-                  title="Speak vocabulary"
-                />
-              ) : null}
-              <Button
-                aria-label="Next vocabulary"
-                className="h-7 min-h-7 w-7 rounded-md px-0"
-                disabled={displayWords.length <= 1}
-                icon={<ChevronRight size={15} />}
-                onClick={showNextWord}
-              />
-            </div>
-            {speechError ? <p className="text-xs text-danger">{speechError}</p> : null}
-          </div>
-        ) : (
-          <p className="text-sm text-muted">No learning entries to review.</p>
-        )}
-      </section>
+        All
+      </Button>
     </div>
   );
 }
 
 interface AiFormProps {
-  activeFeature?: AiFeature;
+  actionFeatures: AiFeature[];
+  canSpeak: boolean;
+  defaultFeature?: AiFeature;
   inputText: string;
-  isSubmitting: boolean;
+  runs: WorkspaceRun[];
+  onExtractInput: () => void | Promise<void>;
+  onExtractSelection: () => void | Promise<void>;
   onInputChange: (value: string) => void;
+  onRunFeatureInput: (feature: AiFeature) => void;
+  onRunFeatureSelection: (feature: AiFeature) => void;
+  onSpeakInput: () => Promise<void>;
+  onSpeakSelection: () => Promise<void>;
   onSubmit: (event: FormEvent) => void;
 }
 
-function AiForm({ activeFeature, inputText, isSubmitting, onInputChange, onSubmit }: AiFormProps) {
+function AiForm({
+  actionFeatures,
+  canSpeak,
+  defaultFeature,
+  inputText,
+  runs,
+  onExtractInput,
+  onExtractSelection,
+  onInputChange,
+  onRunFeatureInput,
+  onRunFeatureSelection,
+  onSpeakInput,
+  onSpeakSelection,
+  onSubmit,
+}: AiFormProps) {
   const [speechError, setSpeechError] = useState("");
-  const canSpeak = Boolean(activeFeature?.speechEnabled);
+  const isSubmittingDefault = Boolean(
+    defaultFeature && runs.some((run) => run.status === "loading" && run.featureId === defaultFeature.id),
+  );
+  const isExtracting = runs.some((run) => run.status === "loading" && run.kind === "extract");
 
-  async function speakInputText() {
+  async function speakFromSource(action: () => Promise<void>) {
     setSpeechError("");
     try {
-      await speakText(inputText);
+      await action();
     } catch (error) {
       setSpeechError(errorMessage(error, "Speech failed."));
     }
   }
 
+  function resizeTextarea(element: HTMLTextAreaElement) {
+    element.style.height = "auto";
+    element.style.height = `${Math.min(140, element.scrollHeight)}px`;
+  }
+
   return (
-    <div className="grid gap-1.5">
-      <form className="translation-form flex w-full gap-1.5 rounded-lg border border-strong/10 bg-input p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]" onSubmit={onSubmit}>
-        <input
-          className="h-8 min-w-0 flex-1 rounded-md border-0 bg-transparent px-2 text-sm text-strong outline-none placeholder:text-muted"
-          onChange={(event) => onInputChange(event.target.value)}
+    <form className="grid gap-1.5" onSubmit={onSubmit}>
+      <div className="flex justify-center overflow-x-auto">
+        <div className="inline-flex min-h-8 max-w-full overflow-x-auto rounded-lg border border-strong/10 bg-surface/45">
+          {actionFeatures.map((feature) => {
+            const isLoading = runs.some((run) => run.status === "loading" && run.featureId === feature.id && run.kind === "feature");
+            return (
+              <Button
+                aria-label={`${feature.name} selected text`}
+                className="h-8 min-h-8 w-[86px] shrink-0 rounded-none border-r border-strong/10 px-2 text-xs first:rounded-l-md"
+                disabled={isLoading}
+                icon={isLoading ? <Loader2 className="animate-spin" size={15} /> : <FeatureIcon icon={feature.icon} size={15} />}
+                key={feature.id}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onRunFeatureSelection(feature);
+                }}
+                title={`${feature.name} selected text`}
+                type="button"
+                variant={feature.id === defaultFeature?.id && isSubmittingDefault ? "primary" : "ghost"}
+              >
+                <span className="min-w-0 truncate">{feature.name}</span>
+              </Button>
+            );
+          })}
+          <Button
+            aria-label="Extract selected text"
+            className="h-8 min-h-8 w-[86px] shrink-0 rounded-none border-r border-strong/10 px-2 text-xs"
+            disabled={isExtracting}
+            icon={isExtracting ? <Loader2 className="animate-spin" size={15} /> : <Highlighter size={15} />}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void onExtractSelection();
+            }}
+            title="Extract selected text"
+            type="button"
+            variant="ghost"
+          >
+            <span className="min-w-0 truncate">Extract</span>
+          </Button>
+          {canSpeak ? (
+            <Button
+              aria-label="Speak selected text"
+              className="h-8 min-h-8 w-[86px] shrink-0 rounded-none rounded-r-md px-2 text-xs"
+              icon={<Volume2 size={16} />}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void speakFromSource(onSpeakSelection);
+              }}
+              title="Speak selected text"
+              type="button"
+              variant="ghost"
+            >
+              <span className="min-w-0 truncate">Speak</span>
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      <div className="translation-form flex w-full rounded-lg border border-strong/10 bg-input p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+        <textarea
+          className="max-h-[140px] min-h-8 min-w-0 flex-1 resize-none rounded-md border-0 bg-transparent px-2 py-1.5 text-sm leading-5 text-strong outline-none placeholder:text-muted"
+          onChange={(event) => {
+            onInputChange(event.target.value);
+            resizeTextarea(event.currentTarget);
+          }}
+          onInput={(event) => resizeTextarea(event.currentTarget)}
           placeholder="Enter text"
+          rows={1}
           value={inputText}
         />
-        <Button
-          aria-label="Run feature"
-          className="h-8 min-h-8 w-8 shrink-0 rounded-md px-0"
-          disabled={isSubmitting || !inputText.trim() || !activeFeature}
-          icon={isSubmitting ? <Loader2 className="animate-spin" size={16} /> : <Wand2 size={16} />}
-          title="Run feature"
-          type="submit"
-          variant="primary"
-        />
-        {canSpeak ? (
+        <div className="ml-1 flex max-w-[52%] shrink-0 items-start overflow-x-auto rounded-md border border-strong/10 bg-surface/45">
+          {actionFeatures.map((feature) => {
+            const isLoading = runs.some((run) => run.status === "loading" && run.featureId === feature.id && run.kind === "feature");
+            return (
+              <Button
+                aria-label={`${feature.name} input text`}
+                className="h-8 min-h-8 w-8 shrink-0 rounded-none border-r border-strong/10 p-0"
+                disabled={isLoading || !inputText.trim()}
+                icon={isLoading ? <Loader2 className="animate-spin" size={15} /> : <FeatureIcon icon={feature.icon} size={15} />}
+                key={feature.id}
+                onClick={() => onRunFeatureInput(feature)}
+                title={`${feature.name} input text`}
+                type="button"
+                variant="ghost"
+              />
+            );
+          })}
           <Button
-            aria-label="Speak input text"
-            className="h-8 min-h-8 w-8 shrink-0 rounded-md px-0"
-            disabled={!inputText.trim()}
-            icon={<Volume2 size={16} />}
-            onClick={speakInputText}
-            title="Speak input text"
+            aria-label="Extract input text"
+            className="h-8 min-h-8 w-8 shrink-0 rounded-none border-r border-strong/10 p-0"
+            disabled={isExtracting || !inputText.trim()}
+            icon={isExtracting ? <Loader2 className="animate-spin" size={15} /> : <Highlighter size={15} />}
+            onClick={() => void onExtractInput()}
+            title="Extract input text"
             type="button"
+            variant="ghost"
           />
-        ) : null}
-      </form>
+          {canSpeak ? (
+            <Button
+              aria-label="Speak input text"
+              className="h-8 min-h-8 w-8 shrink-0 rounded-none p-0"
+              disabled={!inputText.trim()}
+              icon={<Volume2 size={15} />}
+              onClick={() => void speakFromSource(onSpeakInput)}
+              title="Speak input text"
+              type="button"
+              variant="ghost"
+            />
+          ) : null}
+        </div>
+      </div>
       {speechError ? <p className="text-xs text-danger">{speechError}</p> : null}
-    </div>
+    </form>
   );
 }
 
-function IdleState({ feature }: { feature?: AiFeature }) {
+function IdleState({ hasActions }: { hasActions: boolean }) {
   return (
     <p className="text-sm text-muted">
-      {feature ? `${feature.name} is ready. Select text with the shortcut, or type above.` : "No enabled AI feature."}
+      {hasActions ? "Enter text, then choose an action." : "No enabled AI actions."}
     </p>
   );
 }
 
-function LoadingCard({ feature }: { feature: AiFeature }) {
+function WorkspaceRunCard({
+  run,
+  onEntryTypeChange,
+  onSave,
+}: {
+  run: WorkspaceRun;
+  onEntryTypeChange: (entryType: LearningEntryType) => void;
+  onSave: () => void;
+}) {
+  return (
+    <article className="grid min-w-0 gap-2 rounded-b-lg bg-panel/85 p-2.5">
+      {run.status === "loading" ? <LoadingRun title={run.title} /> : null}
+      {run.status === "error" ? <ErrorRun title={run.title} message={run.message ?? "Action failed."} /> : null}
+      {run.status === "ready" && run.result ? (
+        <>
+          <div className="rounded-md bg-surface/40 p-2">
+            <MarkdownRenderer content={run.result.outputText} />
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            {run.learningEntry ? (
+              <EntryTypeTags
+                disabled={run.saved}
+                entryType={run.learningEntry.entry_type ?? "phrase"}
+                onEntryTypeChange={onEntryTypeChange}
+              />
+            ) : <span />}
+            <div className="flex justify-end gap-1.5">
+              <Button
+                aria-label="Copy result"
+                className="h-7 min-h-7 px-2 text-xs"
+                icon={<Clipboard size={14} />}
+                onClick={() => copyText(run.result?.outputText ?? "")}
+                title="Copy result"
+                type="button"
+                variant="ghost"
+              >
+                Copy
+              </Button>
+              {run.learningEntry ? (
+              <Button
+                disabled={run.saved}
+                className="h-7 min-h-7 px-2 text-xs"
+                icon={<Save size={15} />}
+                onClick={onSave}
+                type="button"
+                variant="primary"
+              >
+                {run.saved ? "Saved" : "Save"}
+              </Button>
+              ) : null}
+            </div>
+          </div>
+        </>
+      ) : null}
+    </article>
+  );
+}
+
+function LoadingRun({ title }: { title: string }) {
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-2 text-sm text-muted">
         <Loader2 className="animate-spin text-accent" size={16} />
-        Running {feature.name}
+        Running...
       </div>
-      <p className="mt-2 text-sm text-muted">Waiting for the AI result...</p>
     </div>
   );
 }
 
-function ErrorCard({ feature, message }: { feature?: AiFeature; message: string }) {
+function ErrorRun({ title, message }: { title: string; message: string }) {
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-2 text-sm text-danger">
         <AlertCircle size={16} />
-        {feature ? `${feature.name} failed` : "AI feature failed"}
+        Action failed
       </div>
       <p className="mt-2 break-words text-sm leading-5 text-content">{message}</p>
     </div>
   );
 }
 
-function AiResultPanel({ feature, result }: { feature: AiFeature; result: AiRunResult }) {
-  return (
-    <div className="grid min-w-0 gap-2">
-      <MarkdownRenderer content={result.outputText} />
-      {feature.kind !== "translation" ? <div className="flex justify-end border-t border-strong/10 pt-3">
-        <Button onClick={() => copyText(result.outputText)} icon={<Clipboard size={16} />}>
-          Copy
-        </Button>
-      </div> : null}
-    </div>
-  );
-}
-
-function CaptureActionPanel({
-  capture,
-  onCancel,
-  onEntryTypeChange,
-  onSave,
-}: {
-  capture: CaptureActionState;
-  onCancel: () => void;
-  onEntryTypeChange: (entryType: LearningEntryType) => void;
-  onSave: () => void | Promise<void>;
-}) {
-  if (capture.status === "loading") {
-    return (
-      <div className="mt-3 rounded-lg border border-strong/10 bg-panel/80 p-2.5">
-        <div className="flex items-center gap-2 text-sm text-muted">
-          <Loader2 className="animate-spin text-accent" size={16} />
-          Capturing learning point
-        </div>
-        <p className="mt-1 break-words text-xs text-muted">{capture.selectedText}</p>
-      </div>
-    );
-  }
-
-  if (capture.status === "error") {
-    return (
-      <div className="mt-3 rounded-lg border border-danger/40 bg-danger/10 p-2.5">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-sm text-danger">
-            <AlertCircle size={16} />
-            Capture failed
-          </div>
-          <Button
-            aria-label="Dismiss capture error"
-            className="h-7 min-h-7 w-7 px-0"
-            icon={<X size={14} />}
-            onClick={onCancel}
-            variant="ghost"
-          />
-        </div>
-        <p className="mt-1 break-words text-xs leading-5 text-content">{capture.message}</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-3 grid gap-2.5 rounded-lg border border-strong/10 bg-panel/85 p-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-strong">
-          <BookPlus className="shrink-0 text-accent" size={16} />
-          <span>Capture learning point</span>
-        </div>
-        <div className="flex shrink-0 gap-1">
-          <Button
-            aria-label="Cancel capture"
-            className="h-7 min-h-7 w-7 px-0"
-            icon={<X size={14} />}
-            onClick={onCancel}
-            title="Cancel"
-            variant="ghost"
-          />
-        </div>
-      </div>
-
-      <div className="rounded-md border border-strong/10 bg-surface/60 p-2">
-        <MarkdownRenderer content={capture.result.outputText} />
-      </div>
-
-      <div className="flex flex-col gap-2 border-t border-strong/10 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="min-w-0 truncate text-xs text-muted">
-          Selected: {capture.selectedText}
-        </p>
-        <div className="flex shrink-0 items-center gap-2">
-          <EntryTypeTags
-            entryType={capture.draft.entry_type ?? "phrase"}
-            onEntryTypeChange={onEntryTypeChange}
-          />
-          <Button
-            disabled={capture.saved || !capture.selectedText.trim()}
-            icon={<Save size={15} />}
-            onClick={() => void onSave()}
-            variant="primary"
-          >
-            {capture.saved ? "Saved" : "Save"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function EntryTypeTags({
+  disabled = false,
   entryType,
   onEntryTypeChange,
 }: {
+  disabled?: boolean;
   entryType: LearningEntryType;
   onEntryTypeChange: (entryType: LearningEntryType) => void;
 }) {
   return (
-    <div className="flex rounded-md border border-strong/10 bg-surface p-0.5">
+    <div className="flex w-fit rounded-md border border-strong/10 bg-surface p-0.5">
       {(["word", "phrase", "pattern"] as LearningEntryType[]).map((type) => (
         <button
           className={`rounded px-1.5 py-0.5 text-[11px] font-medium transition ${
             entryType === type
               ? "bg-panel text-strong shadow-sm"
               : "text-muted hover:bg-panel hover:text-strong"
-          }`}
+          } disabled:cursor-not-allowed disabled:opacity-60`}
+          disabled={disabled}
           key={type}
           onClick={() => onEntryTypeChange(type)}
           type="button"
@@ -1004,11 +1154,8 @@ function EntryTypeTags({
   );
 }
 
-function emptyFeaturePage(): FeaturePageState {
-  return {
-    inputText: "",
-    state: { status: "idle" },
-  };
+function newRunId() {
+  return `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function popupSelectedText() {
@@ -1025,12 +1172,13 @@ function popupSelectedText() {
   return "";
 }
 
-function captureContextText(page: FeaturePageState) {
-  if (page.state.status === "ready") {
-    return [page.inputText, page.state.result.outputText].filter(Boolean).join("\n\n");
-  }
+function workspaceContextText(inputText: string, runs: WorkspaceRun[]) {
+  const resultContext = runs
+    .filter((run) => run.status === "ready" && run.result?.outputText)
+    .slice(0, 3)
+    .map((run) => `${run.title}:\n${run.result?.outputText}`);
 
-  return page.inputText;
+  return [inputText.trim(), ...resultContext].filter(Boolean).join("\n\n");
 }
 
 function learningEntryDraft(selectedText: string, contextText: string, analysis: string): LearningEntryInput {
@@ -1041,7 +1189,7 @@ function learningEntryDraft(selectedText: string, contextText: string, analysis:
 
   return {
     word: selectedText,
-    translation: meaning || "Learning point captured from popup selection",
+    translation: meaning || "Learning point extracted from selected text",
     pos: markdownLabel(analysis, "Type") || inferredEntryType(selectedText),
     definition: [usage, note].filter(Boolean).join(" "),
     example,
@@ -1049,6 +1197,34 @@ function learningEntryDraft(selectedText: string, contextText: string, analysis:
     source_text: contextText,
     note: analysis,
   };
+}
+
+function isSingleWordTranslation(inputText: string, result: AiRunResult) {
+  return Boolean(result.translation && singleWordText(inputText));
+}
+
+function wordLearningEntry(inputText: string, result: AiRunResult): LearningEntryInput {
+  const translation = result.translation;
+  if (!translation) {
+    throw new Error("Translation result was empty.");
+  }
+
+  return {
+    ...translation,
+    word: translation.word.trim() || normalizedWordText(inputText),
+    entry_type: "word",
+    source_text: inputText,
+    note: result.outputText,
+  };
+}
+
+function singleWordText(text: string) {
+  const word = normalizedWordText(text);
+  return /^[A-Za-z]+(?:[-'][A-Za-z]+)*$/.test(word);
+}
+
+function normalizedWordText(text: string) {
+  return text.trim().replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, "");
 }
 
 function markdownLabel(markdown: string, label: string) {

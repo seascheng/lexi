@@ -1,5 +1,5 @@
 import type { MouseEvent, ReactNode } from "react";
-import { Highlighter, Pin, PinOff } from "lucide-react";
+import { Pin, PinOff, X } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Button } from "../ui/Button";
 
@@ -24,7 +24,7 @@ interface FloatingFrameProps {
   className?: string;
   isPinned?: boolean;
   autoHeight?: boolean;
-  onCaptureSelection?: () => void;
+  onClose?: () => void | Promise<void>;
   onTogglePin?: () => void;
   onStartDrag?: () => void | Promise<void>;
   onStartResize?: (resize: PopupResizeStart) => void | Promise<void>;
@@ -35,7 +35,7 @@ export function FloatingFrame({
   className,
   isPinned = true,
   autoHeight = false,
-  onCaptureSelection,
+  onClose,
   onTogglePin,
   onStartDrag,
   onStartResize,
@@ -66,7 +66,7 @@ export function FloatingFrame({
     >
       <div
         aria-hidden="true"
-        className={`absolute left-4 top-2 z-20 h-7 cursor-grab active:cursor-grabbing ${onCaptureSelection ? "right-20" : "right-12"}`}
+        className="absolute left-11 right-11 top-2 z-20 h-7 cursor-grab active:cursor-grabbing"
         data-tauri-drag-region
         onMouseDown={handleDragMouseDown}
       />
@@ -114,17 +114,13 @@ export function FloatingFrame({
           />
         </>
       ) : null}
-      {onCaptureSelection ? (
+      {onClose ? (
         <Button
-          aria-label="Capture learning point"
-          className="absolute right-11 top-2.5 z-20 h-7 min-h-7 w-7 rounded-full bg-transparent px-0 text-muted hover:bg-surface hover:text-strong"
-          icon={<Highlighter size={15} />}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onCaptureSelection();
-          }}
-          title="Capture learning point"
+          aria-label="Hide popup"
+          className="absolute left-2.5 top-2.5 z-20 h-7 min-h-7 w-7 rounded-full bg-transparent px-0 text-muted hover:bg-surface hover:text-strong"
+          icon={<X size={15} />}
+          onClick={() => void onClose()}
+          title="Hide popup"
           type="button"
           variant="ghost"
         />

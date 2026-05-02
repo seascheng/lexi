@@ -6,6 +6,7 @@ export type WordStatus = "new" | "learning" | "mastered";
 export type ReviewRating = "again" | "hard" | "good" | "easy";
 export type AiFeatureKind = "translation" | "review" | "custom";
 export type AiOutputMode = "translation_json" | "plain_text";
+export type AiFeatureIcon = "languages" | "wand" | "pen" | "sparkles" | "book-plus" | "highlighter" | "file-text" | "message";
 export type LearningEntryType = "word" | "phrase" | "pattern";
 
 export interface TranslationResult {
@@ -67,6 +68,7 @@ export interface AiFeature {
   targetLanguage: string;
   reviewIntervalSeconds: number;
   speechEnabled: boolean;
+  icon: AiFeatureIcon;
   createdAt?: string;
   updatedAt?: string;
 }

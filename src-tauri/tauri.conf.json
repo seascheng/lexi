@@ -46,7 +46,7 @@
         "label": "popup_card",
         "title": "Englist Translation",
         "url": "index.html?window=popup_card",
-        "width": 440,
+        "width": 360,
         "height": 360,
         "decorations": false,
         "transparent": true,
@@ -54,7 +54,7 @@
         "alwaysOnTop": true,
         "resizable": true,
         "minWidth": 360,
-        "minHeight": 260,
+        "minHeight": 360,
         "skipTaskbar": true,
         "visible": false
       }

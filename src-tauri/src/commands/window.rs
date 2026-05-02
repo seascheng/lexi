@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow};
 
 const MIN_POPUP_WIDTH: u32 = 360;
-const MIN_POPUP_HEIGHT: u32 = 260;
+const MIN_POPUP_HEIGHT: u32 = 360;
 const MAX_POPUP_HEIGHT: u32 = 900;
 const MAX_RESIZE_DURATION: Duration = Duration::from_secs(30);
 

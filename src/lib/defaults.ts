@@ -30,6 +30,7 @@ export const DEFAULT_TRANSLATION_FEATURE: AiFeature = {
   targetLanguage: "Chinese",
   reviewIntervalSeconds: 30,
   speechEnabled: true,
+  icon: "languages",
 };
 
 export const DEFAULT_REVIEW_FEATURE: AiFeature = {
@@ -44,6 +45,7 @@ export const DEFAULT_REVIEW_FEATURE: AiFeature = {
   targetLanguage: "",
   reviewIntervalSeconds: 30,
   speechEnabled: true,
+  icon: "book-plus",
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {

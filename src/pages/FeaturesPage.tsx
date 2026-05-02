@@ -1,14 +1,15 @@
 import { emit } from "@tauri-apps/api/event";
 import { Eye, EyeOff, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { AiFeature } from "../types";
+import type { AiFeature, AiFeatureIcon } from "../types";
 import { DEFAULT_CUSTOM_PROMPT_TEMPLATE } from "../lib/defaults";
 import { deleteAiFeature, listAiFeatures, saveAiFeature } from "../lib/database";
 import { errorMessage } from "../lib/errors";
+import { FEATURE_ICON_OPTIONS, FeatureIcon, isFeatureIcon } from "../lib/featureIcons";
 import { isTauriRuntime } from "../lib/platform";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { Field, Input, Textarea } from "../components/ui/Field";
+import { Field, Input, Select, Textarea } from "../components/ui/Field";
 
 export function FeaturesPage() {
   const [features, setFeatures] = useState<AiFeature[]>([]);
@@ -44,6 +45,7 @@ export function FeaturesPage() {
       targetLanguage: "",
       reviewIntervalSeconds: 30,
       speechEnabled: false,
+      icon: "wand",
     };
     setDraft(feature);
   }
@@ -108,7 +110,10 @@ export function FeaturesPage() {
               onClick={() => setDraft(feature)}
               type="button"
             >
-              <span className="block truncate text-sm font-medium text-strong">{feature.name}</span>
+              <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-strong">
+                <FeatureIcon icon={feature.icon} size={15} />
+                <span className="truncate">{feature.name}</span>
+              </span>
               <span className="mt-1 block text-xs text-muted">
                 {featureLabel(feature)}
                 {feature.enabled ? "" : " / disabled"}
@@ -129,7 +134,7 @@ export function FeaturesPage() {
                     ? "Built-in translation feature for selected text."
                     : draft.kind === "review"
                       ? "Built-in vocabulary display for daily memory."
-                      : "Plain text AI result shown in the popup tab."}
+                      : "Plain text AI result shown in the popup workspace."}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -165,6 +170,18 @@ export function FeaturesPage() {
                   type="number"
                   value={draft.sortOrder}
                 />
+              </Field>
+              <Field label="Icon" hint="Shown on the popup action button.">
+                <Select
+                  onChange={(event) => updateDraft({ icon: selectedFeatureIcon(event.target.value) })}
+                  value={draft.icon}
+                >
+                  {FEATURE_ICON_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
               </Field>
               {draft.kind === "translation" ? (
                 <Field label="Target language">
@@ -212,7 +229,7 @@ export function FeaturesPage() {
               <div className="rounded-md border border-border bg-surface px-3 py-2">
                 <p className="text-sm font-medium text-strong">Popup actions</p>
                 <p className="mt-1 text-xs leading-5 text-muted">
-                  Capture learning point is enabled for this feature. In the popup, select text from the current result and use Capture selected text to analyze and save it.
+                  This feature appears as an icon action next to the popup input. Extract is available as a learning-point action beside it.
                 </p>
               </div>
             ) : null}
@@ -257,4 +274,8 @@ function featureLabel(feature: AiFeature) {
   if (feature.kind === "translation") return "Translation";
   if (feature.kind === "review") return "Vocabulary display";
   return "Custom prompt";
+}
+
+function selectedFeatureIcon(value: string): AiFeatureIcon {
+  return isFeatureIcon(value) ? value : "wand";
 }
