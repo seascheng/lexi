@@ -6,13 +6,13 @@
 <claude-mem-context>
 # Memory Context
 
-# [englist-tool] recent context, 2026-05-02 3:11pm GMT+8
+# [englist-tool] recent context, 2026-05-02 8:20pm GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (11,004t read) | 0t work
+Stats: 50 obs (13,448t read) | 0t work
 
 ### Apr 30, 2026
 S58 Enhanced Review interface with manual navigation and window pinning controls (Apr 30 at 8:48 PM)
@@ -26,19 +26,7 @@ S62 Approved architectural direction for phrase/sentence learning feature with r
 S63 Refinement of phrase/sentence learning feature with minimal viable product approach and product principle establishment (May 1 at 10:43 AM)
 S65 Approved architectural direction with minimal viable product implementation strategy for phrase/sentence learning feature (May 1 at 10:43 AM)
 S67 Product philosophy clarification establishing popup as primary daily learning workspace followed by codebase exploration for implementation planning (May 1 at 10:46 AM)
-312 9:37p 🔵 Tauri macOS app bundle location confirmed
-314 9:48p 🔵 Rust toolchain missing prevents Tauri desktop app build
-315 " 🔵 Tauri build requires interactive shell for Rust toolchain access
-316 " 🔵 Tauri build process successfully started with interactive shell
-317 9:49p 🟣 Tauri desktop application successfully built with workspace-based UI
-319 " ⚖️ UI layout restructure and workflow redesign for TranslationWindow
-320 " 🟣 Capture feature renamed to Extract throughout workspace UI
-318 " 🟣 Tauri desktop application build completed with distributable artifacts
-321 10:04p 🟣 Selected text auto-population workflow implemented for feature buttons
-322 10:05p 🟣 UI layout restructured: action buttons moved above input field
-323 " 🟣 ActionToolbar simplified with automatic text selection workflow
-324 " 🔵 Incomplete capture-to-extract refactoring discovered in codebase
-325 " 🟣 Completed capture-to-extract renaming in WorkspaceRunCard
+323 10:05p 🟣 ActionToolbar simplified with automatic text selection workflow
 326 " 🟣 AI library functions renamed from capture to extract terminology
 327 10:06p 🟣 Extract feature workflow compiled successfully
 328 10:07p 🟣 Complete UI restructure implemented and production-ready
@@ -77,4 +65,16 @@ S67 Product philosophy clarification establishing popup as primary daily learnin
 360 " 🟣 Added button text labels and auto-expanding textarea input
 361 3:01p 🟣 Implemented auto-resizing textarea with responsive button grid layout
 362 3:04p 🔄 Refactored button layout from responsive grid to horizontal scrollable flex
+363 " ✅ Tauri application built successfully
+364 3:12p 🔵 Button layout and logic architecture analyzed for refactoring
+365 " 🔵 Repository state shows extensive modifications from previous popup window improvements
+366 3:13p 🟣 Separated selected text and input text operations for button context distinction
+367 3:14p 🔵 Button logic refactoring partially complete - old functions remain in codebase
+368 " 🔄 Updated WorkspacePage and AiForm interfaces to support separated selection/input operations
+369 " 🟣 Implemented two-tier button architecture separating selected text and input text operations
+370 " 🔴 Discovered function signature mismatch in speech handling wrapper
+371 " ✅ TypeScript compilation and Vite build succeeded with two-tier button architecture changes
+372 " 🟣 System-wide text selection toolbar requested
+374 3:16p 🔵 System-wide floating toolbar infrastructure assessed
+373 3:23p 🟣 Pipclip-like floating toolbar feasibility explored
 </claude-mem-context>

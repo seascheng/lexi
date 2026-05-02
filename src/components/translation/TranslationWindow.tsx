@@ -10,7 +10,6 @@ import { applyAppearanceSettings } from "../../lib/appearance";
 import { addWord, listAiFeatures, loadSettings, savePopupPosition, savePopupSize } from "../../lib/database";
 import { errorMessage } from "../../lib/errors";
 import { FeatureIcon } from "../../lib/featureIcons";
-import { captureSelectedText } from "../../lib/translation";
 import { Button } from "../ui/Button";
 import { FloatingFrame, type PopupResizeStart } from "./FloatingFrame";
 import { MarkdownRenderer } from "../ui/MarkdownRenderer";
@@ -42,6 +41,11 @@ interface RequestPayload {
   featureId?: string;
 }
 
+interface ExtractRequestPayload {
+  text: string;
+  mode: DisplayMode;
+}
+
 interface ErrorPayload {
   message: string;
   mode: DisplayMode;
@@ -53,6 +57,12 @@ interface ReadyPayload {
   feature: AiFeature;
   text: string;
   mode: DisplayMode;
+}
+
+interface NativeToolbarAction {
+  id: string;
+  title: string;
+  icon: string;
 }
 
 export function TranslationWindow() {
@@ -104,6 +114,9 @@ export function TranslationWindow() {
     const cleanups = [
       listen<RequestPayload>("englist://ai-request", (event) => {
         void runActiveFeature(event.payload.text, event.payload.mode, event.payload.featureId);
+      }),
+      listen<ExtractRequestPayload>("englist://extract-request", (event) => {
+        void extractLearningPointFromText(event.payload.text.trim(), event.payload.mode);
       }),
       listen<RequestPayload>("englist://ai-loading", (event) => {
         const feature = currentActionFeature(event.payload.featureId);
@@ -322,6 +335,26 @@ export function TranslationWindow() {
   function applyFeatureList(nextFeatures: AiFeature[]) {
     setFeatures(nextFeatures);
     featuresRef.current = nextFeatures;
+    void syncNativeToolbarActions(nextFeatures);
+  }
+
+  async function syncNativeToolbarActions(nextFeatures: AiFeature[]) {
+    const enabledFeatures = nextFeatures.filter((feature) => feature.enabled && feature.kind !== "review");
+    const actions: NativeToolbarAction[] = enabledFeatures.map((feature) => ({
+      id: feature.id,
+      title: feature.name,
+      icon: feature.icon,
+    }));
+
+    actions.push({ id: "extract", title: "Extract", icon: "highlighter" });
+
+    if (enabledFeatures.some((feature) => feature.speechEnabled)) {
+      actions.push({ id: "speak", title: "Speak", icon: "volume" });
+    }
+
+    await invoke("set_native_toolbar_actions", { actions }).catch((error) => {
+      console.warn("Failed to sync native toolbar actions", error);
+    });
   }
 
   function submitDefaultFeature(event: FormEvent) {
@@ -399,8 +432,10 @@ export function TranslationWindow() {
 
   function currentActionFeature(featureId?: string) {
     const enabled = featuresRef.current.filter((feature) => feature.enabled && feature.kind !== "review");
+    const normalizedFeatureId = featureId?.toLowerCase();
     return (
       enabled.find((feature) => feature.id === featureId) ??
+      enabled.find((feature) => featureAliasMatches(feature, normalizedFeatureId)) ??
       enabled.find((feature) => feature.id === runsRef.current[0]?.featureId) ??
       enabled[0]
     );
@@ -519,7 +554,7 @@ export function TranslationWindow() {
       return;
     }
 
-    await extractLearningPointFromText(text);
+    await extractLearningPointFromText(text, currentMode());
   }
 
   async function extractInputLearningPoint() {
@@ -536,17 +571,29 @@ export function TranslationWindow() {
       return;
     }
 
-    await extractLearningPointFromText(text);
+    await extractLearningPointFromText(text, currentMode());
   }
 
-  async function extractLearningPointFromText(text: string) {
+  async function extractLearningPointFromText(text: string, mode: DisplayMode) {
+    if (!text) {
+      addWorkspaceRun({
+        kind: "extract",
+        title: "Extract",
+        inputText: "",
+        mode,
+        status: "error",
+        message: "Enter text first.",
+      });
+      return;
+    }
+
     const sourceFeature = currentActionFeature();
     if (!sourceFeature) {
       addWorkspaceRun({
         kind: "extract",
         title: "Extract",
         inputText: text,
-        mode: currentMode(),
+        mode,
         status: "error",
         message: "No enabled AI actions are available.",
       });
@@ -554,16 +601,16 @@ export function TranslationWindow() {
     }
 
     setInputText(text);
-    await runExtractAction(sourceFeature, text, workspaceContextText(text, runsRef.current));
+    await runExtractAction(sourceFeature, text, workspaceContextText(text, runsRef.current), mode);
   }
 
-  async function runExtractAction(sourceFeature: AiFeature, selectedText: string, contextText: string) {
+  async function runExtractAction(sourceFeature: AiFeature, selectedText: string, contextText: string, mode: DisplayMode) {
     const runId = addWorkspaceRun({
       kind: "extract",
       title: "Extract",
       featureId: sourceFeature.id,
       inputText: selectedText,
-      mode: currentMode(),
+      mode,
       status: "loading",
     });
 
@@ -584,17 +631,7 @@ export function TranslationWindow() {
   }
 
   async function selectedTextOnly() {
-    const selectedInPopup = popupSelectedText();
-    if (selectedInPopup) return selectedInPopup;
-
-    try {
-      const selectedInSystem = (await captureSelectedText()).trim();
-      if (selectedInSystem) return selectedInSystem;
-    } catch (error) {
-      console.warn("Failed to capture selected system text", error);
-    }
-
-    return "";
+    return popupSelectedText();
   }
 
   async function speakSelectedText() {
@@ -1263,4 +1300,12 @@ function entryTypeLabel(type: LearningEntryType) {
   if (type === "pattern") return "Pattern";
   if (type === "phrase") return "Phrase";
   return "Word";
+}
+
+function featureAliasMatches(feature: AiFeature, featureId?: string) {
+  if (!featureId) return false;
+  const name = feature.name.toLowerCase();
+  if (featureId === "translate") return feature.kind === "translation" || name.includes("translate");
+  if (featureId === "rewrite") return feature.id.toLowerCase().includes("rewrite") || name.includes("rewrite");
+  return false;
 }

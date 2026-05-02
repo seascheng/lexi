@@ -1,14 +1,15 @@
 mod commands;
-mod selection;
+mod cursor;
+mod native_toolbar;
 
 use commands::ai::run_ai_prompt;
 use commands::speech::speak_text;
 use commands::window::{set_popup_height, start_popup_resize};
-use selection::{cursor_position, get_selected_text};
+use cursor::cursor_position;
+use native_toolbar::{set_native_toolbar_actions, set_native_toolbar_theme};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, WindowEvent};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -22,19 +23,11 @@ pub fn run() {
                 .add_migrations("sqlite:englist.db", migrations())
                 .build(),
         )
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    if event.state() == ShortcutState::Released {
-                        let _ = app.emit("englist://shortcut-triggered", ());
-                    }
-                })
-                .build(),
-        )
         .invoke_handler(tauri::generate_handler![
             cursor_position,
-            get_selected_text,
             run_ai_prompt,
+            set_native_toolbar_actions,
+            set_native_toolbar_theme,
             speak_text,
             set_popup_height,
             start_popup_resize
@@ -49,7 +42,7 @@ pub fn run() {
         })
         .setup(|app| {
             setup_tray(app)?;
-            register_default_shortcut(app)?;
+            native_toolbar::setup_native_toolbar(app)?;
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -161,10 +154,4 @@ fn show_main_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
-}
-
-fn register_default_shortcut(app: &tauri::App) -> anyhow::Result<()> {
-    let shortcut = Shortcut::new(Some(Modifiers::META | Modifiers::SHIFT), Code::KeyT);
-    app.global_shortcut().register(shortcut)?;
-    Ok(())
 }

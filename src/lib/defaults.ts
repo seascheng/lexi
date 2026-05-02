@@ -54,7 +54,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   windowOpacity: 100,
   backgroundStyle: "macos_glass_clear",
   dockMode: "dock_and_menu_bar",
-  shortcut: "CommandOrControl+Shift+T",
   apiBaseUrl: "https://api.openai.com/v1",
   apiKey: "",
   model: "gpt-4o-mini",

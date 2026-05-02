@@ -112,7 +112,7 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
       </Card>
 
       <Card className="grid gap-2.5">
-        <h2 className="text-base font-semibold">Display and Shortcut</h2>
+        <h2 className="text-base font-semibold">Display</h2>
         <div className="grid gap-2.5 md:grid-cols-2">
           <Field label="Display mode">
             <Select
@@ -123,12 +123,6 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
               <option value="auto_bar">Auto-hide bar</option>
               <option value="popup_card">Popup card</option>
             </Select>
-          </Field>
-          <Field label="Global shortcut" hint="Registered by the Tauri global shortcut plugin.">
-            <Input
-              onChange={(event) => setDraft({ ...draft, shortcut: event.target.value })}
-              value={draft.shortcut}
-            />
           </Field>
         </div>
       </Card>
@@ -156,7 +150,6 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
         <div className="rounded-md border border-border bg-example px-2.5 py-1.5 text-xs leading-5 text-muted">
           Runtime: {isTauriRuntime() ? "Desktop app SQLite" : "Browser preview localStorage"}.
           Saved API key: {savedApiKeyLength > 0 ? `${savedApiKeyLength} characters` : "not saved"}.
-          {!isTauriRuntime() ? " Browser settings are not used by the global shortcut." : ""}
         </div>
       </Card>
 

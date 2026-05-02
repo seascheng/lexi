@@ -63,6 +63,10 @@
   "bundle": {
     "active": true,
     "targets": ["app"],
+    "macOS": {
+      "signingIdentity": "Englist Tool Stable Signing"
+    },
+    "resources": ["native/EnglistSelectionHelper.app"],
     "icon": ["icons/icon.png"]
   }
 }

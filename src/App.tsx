@@ -1,16 +1,11 @@
 import { emit, listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { BookOpen, Languages, Settings, Sparkles, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppSettings, WordEntry } from "./types";
 import { applyAppearanceSettings } from "./lib/appearance";
 import { DEFAULT_SETTINGS } from "./lib/defaults";
 import { listWords, loadSettings, saveSettings } from "./lib/database";
-import { errorMessage } from "./lib/errors";
-import {
-  captureSelectedText,
-  showAiError,
-  showAiRequest,
-} from "./lib/translation";
 import { isTauriRuntime } from "./lib/platform";
 import { Button } from "./components/ui/Button";
 import { TranslationWindow } from "./components/translation/TranslationWindow";
@@ -43,7 +38,6 @@ function MainWindow() {
   const [page, setPage] = useState<Page>("vocabulary");
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [words, setWords] = useState<WordEntry[]>([]);
-  const [shortcutError, setShortcutError] = useState("");
   const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS);
 
   useEffect(() => {
@@ -52,21 +46,16 @@ function MainWindow() {
     void applyAppearanceSettings(settings).catch((error) => {
       console.error("Failed to apply appearance settings", error);
     });
+    if (isTauriRuntime()) {
+      void invoke("set_native_toolbar_theme", { theme: settings.theme }).catch((error) => {
+        console.warn("Failed to sync native toolbar theme", error);
+      });
+    }
   }, [settings]);
 
   useEffect(() => {
     refreshSettings();
     refreshWords();
-  }, []);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-
-    returnEffect(
-      listen("englist://shortcut-triggered", async () => {
-        await translateSelection(settingsRef.current);
-      }),
-    );
   }, []);
 
   useEffect(() => {
@@ -110,23 +99,6 @@ function MainWindow() {
     }
   }, []);
 
-  async function translateSelection(currentSettings: AppSettings) {
-    setShortcutError("");
-
-    try {
-      const selectedText = await captureSelectedText();
-      if (looksLikeSecret(selectedText)) {
-        throw new Error("Selected text looks like an API key. Select a word or phrase instead.");
-      }
-
-      await showAiRequest(selectedText, currentSettings.displayMode);
-    } catch (error) {
-      const message = errorMessage(error, "Global AI feature failed.");
-      setShortcutError(message);
-      await showAiError(message, currentSettings.displayMode);
-    }
-  }
-
   const activeSettings = settings ?? DEFAULT_SETTINGS;
   const pageContent =
     page === "vocabulary" ? (
@@ -154,7 +126,7 @@ function MainWindow() {
               </div>
               <div className="min-w-0">
                 <h1 className="truncate text-base font-semibold">Englist Tool</h1>
-                <p className="text-xs text-muted">{activeSettings.shortcut}</p>
+                <p className="text-xs text-muted">{activeSettings.displayMode}</p>
               </div>
             </div>
 
@@ -175,11 +147,6 @@ function MainWindow() {
         </aside>
 
         <section className="flex h-[calc(100vh-32px)] min-h-[calc(100vh-32px)] flex-col gap-3 overflow-hidden">
-          {shortcutError ? (
-            <div className="shrink-0 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
-              {shortcutError}
-            </div>
-          ) : null}
           <div className="min-h-0 flex-1 overflow-hidden">{pageContent}</div>
         </section>
       </div>
@@ -207,9 +174,4 @@ function nextDisplayMode(mode: AppSettings["displayMode"]): AppSettings["display
   if (mode === "always_bar") return "auto_bar";
   if (mode === "auto_bar") return "popup_card";
   return "always_bar";
-}
-
-function looksLikeSecret(text: string) {
-  const trimmed = text.trim();
-  return /^sk-[A-Za-z0-9_-]{16,}$/.test(trimmed) || /^sk-[A-Za-z0-9_-]+/.test(trimmed);
 }

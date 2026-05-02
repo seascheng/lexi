@@ -22,7 +22,6 @@
     "core:window:allow-start-resize-dragging",
     "core:webview:allow-set-webview-background-color",
     "clipboard-manager:default",
-    "global-shortcut:default",
     "liquid-glass:default",
     "opener:default",
     "sql:default",

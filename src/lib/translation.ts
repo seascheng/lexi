@@ -8,23 +8,11 @@ import { isTauriRuntime } from "./platform";
 
 const DEFAULT_POPUP_SIZE = 360;
 
-export async function captureSelectedText() {
-  if (!isTauriRuntime()) return "";
-  return invoke<string>("get_selected_text");
-}
-
 export async function showAiLoading(text: string, mode: DisplayMode) {
   if (!isTauriRuntime()) return;
 
   await showAiWindow(mode);
   await emit("englist://ai-loading", { text, mode, featureId: "translation" });
-}
-
-export async function showAiRequest(text: string, mode: DisplayMode) {
-  if (!isTauriRuntime()) return;
-
-  await showAiWindow(mode);
-  await emit("englist://ai-request", { text, mode, featureId: "translation" });
 }
 
 export async function showAiResult(result: AiRunResult, feature: AiFeature, text: string, mode: DisplayMode) {

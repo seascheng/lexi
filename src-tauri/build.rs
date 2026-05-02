@@ -1,3 +1,86 @@
 fn main() {
+    #[cfg(target_os = "macos")]
+    build_native_selection_toolbar();
+
     tauri_build::build();
+}
+
+#[cfg(target_os = "macos")]
+fn build_native_selection_toolbar() {
+    use std::fs;
+    use std::process::Command;
+
+    // Must match bundle.macOS.signingIdentity in tauri.conf.json for stable TCC permissions.
+    const SIGNING_IDENTITY: &str = "Englist Tool Stable Signing";
+
+    let app_dir = "native/EnglistSelectionHelper.app";
+    let contents_dir = format!("{app_dir}/Contents");
+    let macos_dir = format!("{contents_dir}/MacOS");
+    fs::create_dir_all(&macos_dir).expect("failed to create native helper app bundle");
+    fs::write(
+        format!("{contents_dir}/Info.plist"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>EnglistSelectionHelper</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.englist.tool.selection-helper</string>
+  <key>CFBundleName</key>
+  <string>Englist Selection Helper</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.1.0</string>
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
+"#,
+    )
+    .expect("failed to write native helper Info.plist");
+
+    let status = Command::new("xcrun")
+        .args([
+            "swiftc",
+            "native/SelectionToolbarHelper.swift",
+            "-o",
+            "native/EnglistSelectionHelper.app/Contents/MacOS/EnglistSelectionHelper",
+            "-framework",
+            "AppKit",
+            "-framework",
+            "ApplicationServices",
+            "-framework",
+            "Foundation",
+            "-framework",
+            "Network",
+        ])
+        .status()
+        .expect("failed to start swiftc for native selection toolbar helper");
+
+    if !status.success() {
+        panic!("failed to compile native selection toolbar helper");
+    }
+
+    let status = Command::new("codesign")
+        .args([
+            "--force",
+            "--sign",
+            SIGNING_IDENTITY,
+            "--options",
+            "runtime",
+            "--timestamp=none",
+            app_dir,
+        ])
+        .status()
+        .expect("failed to start codesign for native selection toolbar helper");
+
+    if !status.success() {
+        panic!("failed to codesign native selection toolbar helper");
+    }
+
+    println!("cargo:rerun-if-changed=native/SelectionToolbarHelper.swift");
 }

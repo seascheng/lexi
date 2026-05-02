@@ -42,7 +42,6 @@ export interface AppSettings {
   windowOpacity: number;
   backgroundStyle: BackgroundStyle;
   dockMode: DockMode;
-  shortcut: string;
   apiBaseUrl: string;
   apiKey: string;
   model: string;

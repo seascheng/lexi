@@ -50,7 +50,9 @@ pub async fn run_ai_prompt(request: AiRunRequest) -> Result<AiRunResult, String>
     }
 
     if request.api_key.trim().is_empty() {
-        return Err("API key is not saved. Open Settings, enter the key, then click Save settings.".into());
+        return Err(
+            "API key is not saved. Open Settings, enter the key, then click Save settings.".into(),
+        );
     }
 
     let content = request_completion(&request, text).await?;
@@ -71,7 +73,10 @@ pub async fn run_ai_prompt(request: AiRunRequest) -> Result<AiRunResult, String>
 
 async fn request_completion(request: &AiRunRequest, text: &str) -> Result<String, String> {
     let client = reqwest::Client::new();
-    let url = format!("{}/chat/completions", request.api_base_url.trim_end_matches('/'));
+    let url = format!(
+        "{}/chat/completions",
+        request.api_base_url.trim_end_matches('/')
+    );
     let prompt = render_prompt(request, text);
     let system_message = if request.output_mode == "translation_json" {
         "Return compact JSON only. Do not wrap it in markdown."

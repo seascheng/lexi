@@ -84,7 +84,9 @@ pub fn set_popup_height(window: WebviewWindow, height: f64) -> Result<(), String
     let scale_factor = window
         .scale_factor()
         .map_err(|error| format!("Could not read popup scale factor: {error}"))?;
-    let logical_height = height.round().clamp(MIN_POPUP_HEIGHT as f64, MAX_POPUP_HEIGHT as f64);
+    let logical_height = height
+        .round()
+        .clamp(MIN_POPUP_HEIGHT as f64, MAX_POPUP_HEIGHT as f64);
     let physical_height = (logical_height * scale_factor).round() as u32;
 
     window
@@ -149,25 +151,34 @@ fn resize_geometry(
 }
 
 fn grows_east(direction: ResizeDirection) -> bool {
-    matches!(direction, ResizeDirection::East | ResizeDirection::NorthEast | ResizeDirection::SouthEast)
+    matches!(
+        direction,
+        ResizeDirection::East | ResizeDirection::NorthEast | ResizeDirection::SouthEast
+    )
 }
 
 fn grows_west(direction: ResizeDirection) -> bool {
-    matches!(direction, ResizeDirection::West | ResizeDirection::NorthWest | ResizeDirection::SouthWest)
+    matches!(
+        direction,
+        ResizeDirection::West | ResizeDirection::NorthWest | ResizeDirection::SouthWest
+    )
 }
 
 fn grows_north(direction: ResizeDirection) -> bool {
-    matches!(direction, ResizeDirection::North | ResizeDirection::NorthEast | ResizeDirection::NorthWest)
+    matches!(
+        direction,
+        ResizeDirection::North | ResizeDirection::NorthEast | ResizeDirection::NorthWest
+    )
 }
 
 fn grows_south(direction: ResizeDirection) -> bool {
-    matches!(direction, ResizeDirection::South | ResizeDirection::SouthEast | ResizeDirection::SouthWest)
+    matches!(
+        direction,
+        ResizeDirection::South | ResizeDirection::SouthEast | ResizeDirection::SouthWest
+    )
 }
 
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
-    fn CGEventSourceButtonState(
-        state_id: CGEventSourceStateID,
-        button: CGMouseButton,
-    ) -> bool;
+    fn CGEventSourceButtonState(state_id: CGEventSourceStateID, button: CGMouseButton) -> bool;
 }

@@ -6,6 +6,8 @@ dist/
 
 # Tauri / Rust build output
 src-tauri/target/
+src-tauri/native/bin/
+src-tauri/native/EnglistSelectionHelper.app/
 
 # Local environment and secrets
 .env

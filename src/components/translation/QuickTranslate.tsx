@@ -61,7 +61,7 @@ export function QuickTranslate({ settings, onWordAdded }: QuickTranslateProps) {
             <Input
               className="flex-1"
               onChange={(event) => setText(event.target.value)}
-              placeholder="Type a word or phrase, or use the global shortcut"
+              placeholder="Type a word or phrase"
               value={text}
             />
             <Button disabled={isTranslating} type="submit" variant="primary" icon={isTranslating ? <Loader2 className="animate-spin" size={16} /> : <Wand2 size={16} />}>
