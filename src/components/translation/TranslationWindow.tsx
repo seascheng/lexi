@@ -672,7 +672,6 @@ export function TranslationWindow() {
   return (
     <main className="translation-window-shell h-screen bg-transparent" ref={shellRef}>
       <FloatingFrame
-        autoHeight={!isBar}
         isPinned={isPinned}
         onClose={hidePopup}
         onStartResize={startWindowResize}
@@ -682,7 +681,6 @@ export function TranslationWindow() {
           actionFeatures={actionFeatures}
           activeRun={activeRun}
           activeRunId={activeRunId}
-          autoHeight={!isBar}
           defaultFeature={defaultFeature}
           inputText={inputText}
           runs={runs}
@@ -754,7 +752,6 @@ interface WorkspacePageProps {
   actionFeatures: AiFeature[];
   activeRun?: WorkspaceRun;
   activeRunId: string;
-  autoHeight?: boolean;
   defaultFeature?: AiFeature;
   inputText: string;
   runs: WorkspaceRun[];
@@ -777,7 +774,6 @@ function WorkspacePage({
   actionFeatures,
   activeRun,
   activeRunId,
-  autoHeight = false,
   defaultFeature,
   inputText,
   runs,
@@ -796,7 +792,7 @@ function WorkspacePage({
   onSubmitDefault,
 }: WorkspacePageProps) {
   return (
-    <div className={`translation-tab-page flex min-h-0 flex-col gap-2 pt-2 ${autoHeight ? "flex-none" : "flex-1"}`}>
+    <div className="translation-tab-page flex min-h-0 flex-col gap-2 pt-2">
       <section className="translation-action-area shrink-0">
         <AiForm
           actionFeatures={actionFeatures}
@@ -815,7 +811,7 @@ function WorkspacePage({
         />
       </section>
       <section
-        className={`translation-content min-h-[220px] overflow-y-auto rounded-lg border border-strong/10 bg-surface/35 p-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] ${autoHeight ? "max-h-[720px] flex-none" : "flex-1"}`}
+        className="translation-content overflow-y-auto"
       >
         {runs.length === 0 ? <div className="p-2.5"><IdleState hasActions={actionFeatures.length > 0} /></div> : null}
         {runs.length > 0 && activeRun ? (
@@ -853,7 +849,7 @@ function RunTabs({
   onSelectRun: (runId: string) => void;
 }) {
   return (
-    <div className="sticky top-0 z-10 flex min-h-9 items-end gap-1 bg-surface/35 px-1 pt-1">
+    <div className="sticky top-0 z-10 flex min-h-9 items-end gap-1 border-b border-strong/10 px-1 pt-1">
       <div className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto">
         {runs.map((run) => (
           <button
@@ -952,9 +948,15 @@ function AiForm({
     element.style.height = `${Math.min(140, element.scrollHeight)}px`;
   }
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (textareaRef.current) resizeTextarea(textareaRef.current);
+  }, [inputText]);
+
   return (
     <form className="grid gap-1.5" onSubmit={onSubmit}>
-      <div className="translation-form flex w-full rounded-lg border border-strong/10 bg-input p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <div className="translation-form flex w-full items-end rounded-lg border border-strong/10 bg-input p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
         <textarea
           className="max-h-[140px] min-h-8 min-w-0 flex-1 resize-none rounded-md border-0 bg-transparent px-2 py-1.5 text-sm leading-5 text-strong outline-none placeholder:text-muted"
           onChange={(event) => {
@@ -963,10 +965,11 @@ function AiForm({
           }}
           onInput={(event) => resizeTextarea(event.currentTarget)}
           placeholder="Enter text"
+          ref={textareaRef}
           rows={1}
           value={inputText}
         />
-        <div className="ml-1 flex max-w-[52%] shrink-0 items-start overflow-x-auto rounded-md border border-strong/10 bg-surface/45">
+        <div className="ml-1 flex max-w-[52%] shrink-0 items-end overflow-x-auto rounded-md border border-strong/10 bg-surface/45">
           {actionFeatures.map((feature) => {
             const isLoading = runs.some((run) => run.status === "loading" && run.featureId === feature.id && run.kind === "feature");
             return (
@@ -1030,12 +1033,12 @@ function WorkspaceRunCard({
   onSave: () => void;
 }) {
   return (
-    <article className="grid min-w-0 gap-2 rounded-b-lg bg-panel/85 p-2.5">
+    <article className="grid min-w-0 gap-2 p-2.5">
       {run.status === "loading" ? <LoadingRun title={run.title} /> : null}
       {run.status === "error" ? <ErrorRun title={run.title} message={run.message ?? "Action failed."} /> : null}
       {run.status === "ready" && run.result ? (
         <>
-          <div className="rounded-md bg-surface/40 p-2">
+          <div className="p-2">
             <MarkdownRenderer content={run.result.outputText} />
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

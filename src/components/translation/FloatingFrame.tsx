@@ -23,7 +23,6 @@ interface FloatingFrameProps {
   children: ReactNode;
   className?: string;
   isPinned?: boolean;
-  autoHeight?: boolean;
   onClose?: () => void | Promise<void>;
   onTogglePin?: () => void;
   onStartResize?: (resize: PopupResizeStart) => void | Promise<void>;
@@ -33,7 +32,6 @@ export function FloatingFrame({
   children,
   className,
   isPinned = true,
-  autoHeight = false,
   onClose,
   onTogglePin,
   onStartResize,
@@ -52,8 +50,7 @@ export function FloatingFrame({
   return (
     <section
       className={cn(
-        "translation-frame relative flex h-full min-h-full flex-col overflow-hidden rounded-[18px] border border-strong/10 bg-floating p-2 text-sm text-muted",
-        autoHeight ? "h-auto min-h-0" : "",
+        "translation-frame relative flex h-full min-h-full flex-col overflow-hidden rounded-[14px] bg-floating px-1 pb-0.5 text-sm text-muted",
         className,
       )}
     >
@@ -127,10 +124,7 @@ export function FloatingFrame({
           variant="ghost"
         />
       ) : null}
-      <div className={cn(
-        "relative z-10 flex min-h-0 flex-col overflow-hidden pt-7",
-        autoHeight ? "flex-none" : "flex-1",
-      )}>
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden pt-7">
         {children}
       </div>
     </section>

@@ -571,6 +571,15 @@ fn show_popup(app: &tauri::AppHandle) -> Result<(), String> {
         return Err("popup window was not found".into());
     };
 
+    let already_visible = window.is_visible().unwrap_or(false);
+
+    if already_visible {
+        window
+            .set_focus()
+            .map_err(|error| format!("Could not focus popup: {error}"))?;
+        return Ok(());
+    }
+
     let cursor = cursor_position();
     window
         .set_size(LogicalSize::new(DEFAULT_POPUP_SIZE, DEFAULT_POPUP_SIZE))
