@@ -7,15 +7,15 @@ const labels: Record<WordStatus, string> = {
   mastered: "Mastered",
 };
 
-const colors: Record<WordStatus, string> = {
-  new: "border-accent/40 bg-accent/10 text-accent",
-  learning: "border-warning/40 bg-warning/10 text-warning",
-  mastered: "border-muted/40 bg-muted/10 text-muted",
+const styles: Record<WordStatus, string> = {
+  new: "border-strong/15 bg-strong/5 text-strong",
+  learning: "border-strong/25 bg-strong/8 text-strong",
+  mastered: "border-muted/30 bg-muted/8 text-muted",
 };
 
 export function StatusBadge({ status, className }: { status: WordStatus; className?: string }) {
   return (
-    <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-medium", colors[status], className)}>
+    <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-medium", styles[status], className)}>
       {labels[status]}
     </span>
   );

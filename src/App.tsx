@@ -146,7 +146,7 @@ function MainWindow() {
           </div>
         </aside>
 
-        <section className="flex h-[calc(100vh-32px)] min-h-[calc(100vh-32px)] flex-col gap-3 overflow-hidden">
+        <section className="flex h-[calc(100vh-32px)] min-h-[calc(100vh-32px)] flex-col gap-3 overflow-hidden rounded-lg border border-border bg-panel p-3">
           <div className="min-h-0 flex-1 overflow-hidden">{pageContent}</div>
         </section>
       </div>

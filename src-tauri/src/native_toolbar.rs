@@ -1,10 +1,16 @@
 use crate::cursor::{cursor_position, CursorPosition};
+use core_foundation::array::CFArray;
+use core_foundation::base::{CFRelease, CFType, CFTypeRef, TCFType};
+use core_foundation::dictionary::CFDictionary;
 use core_foundation::runloop::CFRunLoop;
+use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::{
     CGEvent, CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
     CGEventType, CallbackResult, EventField, KeyCode,
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+use core_graphics::geometry::CGRect;
+use core_graphics::window::{create_description_from_array, kCGWindowBounds, CGWindowID};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::OpenOptions;
@@ -12,6 +18,7 @@ use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::ptr;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -21,7 +28,11 @@ const DEFAULT_POPUP_SIZE: f64 = 360.0;
 const IPC_HOST: &str = "127.0.0.1";
 const LOG_PATH: &str = "/tmp/englist-native-toolbar.log";
 const SELECTION_DRAG_THRESHOLD: f64 = 6.0;
+const WINDOW_MOVE_THRESHOLD: f64 = 4.0;
 const SELECTION_COPY_ATTEMPTS: usize = 2;
+const AX_ERROR_SUCCESS: i32 = 0;
+
+type AXUIElementRef = *const std::ffi::c_void;
 
 static TOOLBAR_PORT: OnceLock<Mutex<Option<u16>>> = OnceLock::new();
 static TOOLBAR_ACTIONS: OnceLock<Mutex<Vec<ToolbarActionItem>>> = OnceLock::new();
@@ -78,6 +89,14 @@ struct MouseDownState {
     y: f64,
     dragged: bool,
     started_at: Instant,
+    window: Option<WindowSnapshot>,
+    window_chrome: bool,
+}
+
+#[derive(Clone, Copy)]
+struct WindowSnapshot {
+    id: CGWindowID,
+    bounds: CGRect,
 }
 
 pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
@@ -338,6 +357,8 @@ fn remember_mouse_down(mouse_down: &Arc<Mutex<Option<MouseDownState>>>, event: &
             y: location.y,
             dragged: false,
             started_at: Instant::now(),
+            window: window_snapshot_from_event(event),
+            window_chrome: pointer_is_on_window_chrome(event),
         });
     }
 }
@@ -359,6 +380,21 @@ fn mark_mouse_dragged(mouse_down: &Arc<Mutex<Option<MouseDownState>>>, event: &C
 }
 
 fn looks_like_selection(mouse_down: &Arc<Mutex<Option<MouseDownState>>>, event: &CGEvent) -> bool {
+    let Some(start) = mouse_down.lock().ok().and_then(|mut state| state.take()) else {
+        log_native("mouse up ignored no mouse down state");
+        return false;
+    };
+
+    if start.window_chrome {
+        log_native("mouse up ignored window chrome drag candidate");
+        return false;
+    }
+
+    if window_changed_since_mouse_down(&start) {
+        log_native("mouse up ignored window moved during drag");
+        return false;
+    }
+
     let click_count = event.get_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE);
     if click_count >= 2 {
         log_native(&format!(
@@ -367,10 +403,6 @@ fn looks_like_selection(mouse_down: &Arc<Mutex<Option<MouseDownState>>>, event: 
         return true;
     }
 
-    let Some(start) = mouse_down.lock().ok().and_then(|mut state| state.take()) else {
-        log_native("mouse up ignored no mouse down state");
-        return false;
-    };
     let location = event.location();
     let delta_x = location.x - start.x;
     let delta_y = location.y - start.y;
@@ -387,6 +419,124 @@ fn looks_like_selection(mouse_down: &Arc<Mutex<Option<MouseDownState>>>, event: 
     ));
 
     is_selection
+}
+
+fn window_snapshot_from_event(event: &CGEvent) -> Option<WindowSnapshot> {
+    let window_id = event_window_id(event)?;
+    let bounds = window_bounds(window_id)?;
+    Some(WindowSnapshot {
+        id: window_id,
+        bounds,
+    })
+}
+
+fn event_window_id(event: &CGEvent) -> Option<CGWindowID> {
+    let id = event
+        .get_integer_value_field(
+            EventField::MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER_THAT_CAN_HANDLE_THIS_EVENT,
+        )
+        .max(event.get_integer_value_field(EventField::MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER));
+
+    (id > 0).then_some(id as CGWindowID)
+}
+
+fn window_bounds(window_id: CGWindowID) -> Option<CGRect> {
+    let window_ids = CFArray::from_copyable(&[window_id]);
+    let descriptions = create_description_from_array(window_ids)?;
+    let description = descriptions.get(0)?;
+    let bounds_key = unsafe { CFString::wrap_under_get_rule(kCGWindowBounds) };
+    let bounds_value = description.find(&bounds_key)?;
+    let bounds_dictionary = bounds_value.downcast::<CFDictionary>()?;
+
+    CGRect::from_dict_representation(&bounds_dictionary)
+}
+
+fn window_changed_since_mouse_down(start: &MouseDownState) -> bool {
+    let Some(window) = start.window else {
+        return false;
+    };
+    let Some(current_bounds) = window_bounds(window.id) else {
+        return false;
+    };
+
+    rect_delta(window.bounds, current_bounds) >= WINDOW_MOVE_THRESHOLD
+}
+
+fn rect_delta(start: CGRect, current: CGRect) -> f64 {
+    let origin_delta_x = current.origin.x - start.origin.x;
+    let origin_delta_y = current.origin.y - start.origin.y;
+    let size_delta_width = current.size.width - start.size.width;
+    let size_delta_height = current.size.height - start.size.height;
+
+    origin_delta_x
+        .abs()
+        .max(origin_delta_y.abs())
+        .max(size_delta_width.abs())
+        .max(size_delta_height.abs())
+}
+
+fn pointer_is_on_window_chrome(event: &CGEvent) -> bool {
+    let location = event.location();
+    let Some((role, subrole)) = accessibility_role_at_position(location.x, location.y) else {
+        return false;
+    };
+
+    is_window_chrome_role(role.as_deref(), subrole.as_deref())
+}
+
+fn accessibility_role_at_position(x: f64, y: f64) -> Option<(Option<String>, Option<String>)> {
+    unsafe {
+        let system = AXUIElementCreateSystemWide();
+        if system.is_null() {
+            return None;
+        }
+
+        let mut element: AXUIElementRef = ptr::null();
+        let result = AXUIElementCopyElementAtPosition(system, x as f32, y as f32, &mut element);
+        CFRelease(system as CFTypeRef);
+        if result != AX_ERROR_SUCCESS || element.is_null() {
+            return None;
+        }
+
+        let role = accessibility_string_attribute(element, "AXRole");
+        let subrole = accessibility_string_attribute(element, "AXSubrole");
+        CFRelease(element as CFTypeRef);
+        Some((role, subrole))
+    }
+}
+
+fn accessibility_string_attribute(
+    element: AXUIElementRef,
+    attribute: &'static str,
+) -> Option<String> {
+    unsafe {
+        let attribute = CFString::from_static_string(attribute);
+        let mut value: CFTypeRef = ptr::null();
+        let result =
+            AXUIElementCopyAttributeValue(element, attribute.as_concrete_TypeRef(), &mut value);
+        if result != AX_ERROR_SUCCESS || value.is_null() {
+            return None;
+        }
+
+        let value = CFType::wrap_under_create_rule(value);
+        value.downcast::<CFString>().map(|text| text.to_string())
+    }
+}
+
+fn is_window_chrome_role(role: Option<&str>, subrole: Option<&str>) -> bool {
+    matches!(
+        role,
+        Some("AXTitleBar" | "AXToolbar" | "AXMenuBar" | "AXMenuItem" | "AXButton" | "AXWindow")
+    ) || matches!(
+        subrole,
+        Some(
+            "AXCloseButton"
+                | "AXMinimizeButton"
+                | "AXZoomButton"
+                | "AXFullScreenButton"
+                | "AXToolbarButton"
+        )
+    )
 }
 
 fn is_translate_shortcut(event: &CGEvent) -> bool {
@@ -505,10 +655,6 @@ fn show_toolbar(toolbar_port: u16, text: String, position: CursorPosition, pendi
             log_native(&format!("toolbar show post failed: {error}"));
         }
     }
-}
-
-fn hide_toolbar(toolbar_port: u16) {
-    let _ = post_to_helper(toolbar_port, "/hide", "{}");
 }
 
 fn post_to_helper(port: u16, path: &str, body: &str) -> std::io::Result<()> {
@@ -759,9 +905,22 @@ fn open_privacy_settings(pane: &str) {
 }
 
 #[link(name = "CoreGraphics", kind = "framework")]
+#[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn CGPreflightListenEventAccess() -> bool;
     fn CGRequestListenEventAccess() -> bool;
     fn CGPreflightPostEventAccess() -> bool;
     fn CGRequestPostEventAccess() -> bool;
+    fn AXUIElementCreateSystemWide() -> AXUIElementRef;
+    fn AXUIElementCopyElementAtPosition(
+        application: AXUIElementRef,
+        x: f32,
+        y: f32,
+        element: *mut AXUIElementRef,
+    ) -> i32;
+    fn AXUIElementCopyAttributeValue(
+        element: AXUIElementRef,
+        attribute: CFStringRef,
+        value: *mut CFTypeRef,
+    ) -> i32;
 }

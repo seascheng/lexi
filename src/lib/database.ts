@@ -192,6 +192,27 @@ export async function listWords(): Promise<WordEntry[]> {
   );
 }
 
+export async function countWords(): Promise<number> {
+  if (!isTauriRuntime()) return loadBrowserWords().length;
+
+  const db = await getSqlDatabase();
+  const rows = await db.select<{ count: number }[]>("SELECT COUNT(*) as count FROM words");
+  return rows[0]?.count ?? 0;
+}
+
+export async function listWordsPage(limit: number, offset: number): Promise<WordEntry[]> {
+  if (!isTauriRuntime()) {
+    const all = loadBrowserWords();
+    return all.slice(offset, offset + limit);
+  }
+
+  const db = await getSqlDatabase();
+  return db.select<WordEntry[]>(
+    "SELECT * FROM words ORDER BY datetime(created_at) DESC, id DESC LIMIT $1 OFFSET $2",
+    [limit, offset],
+  );
+}
+
 export async function addWord(result: LearningEntryInput): Promise<WordEntry> {
   if (!isTauriRuntime()) return addBrowserWord(result);
 
