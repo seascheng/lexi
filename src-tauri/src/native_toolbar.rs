@@ -299,7 +299,6 @@ fn handle_system_event(
             }
 
             let position = appkit_position_from_event(event);
-            show_toolbar(toolbar_port, String::new(), position, true);
             thread::spawn(move || match read_selected_text_from_clipboard_probe() {
                 Ok(Some(text)) => {
                     log_native(&format!("selected text captured length={}", text.len()));
@@ -307,12 +306,10 @@ fn handle_system_event(
                 }
                 Ok(None) => {
                     log_native("selection probe returned empty");
-                    hide_toolbar(toolbar_port);
                 }
                 Err(error) => {
                     log_native(&format!("selection probe failed: {error}"));
                     eprintln!("Could not read selected text: {error}");
-                    hide_toolbar(toolbar_port);
                 }
             });
         }

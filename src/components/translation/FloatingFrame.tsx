@@ -26,7 +26,6 @@ interface FloatingFrameProps {
   autoHeight?: boolean;
   onClose?: () => void | Promise<void>;
   onTogglePin?: () => void;
-  onStartDrag?: () => void | Promise<void>;
   onStartResize?: (resize: PopupResizeStart) => void | Promise<void>;
 }
 
@@ -37,14 +36,8 @@ export function FloatingFrame({
   autoHeight = false,
   onClose,
   onTogglePin,
-  onStartDrag,
   onStartResize,
 }: FloatingFrameProps) {
-  function handleDragMouseDown(event: MouseEvent<HTMLDivElement>) {
-    if (!onStartDrag || event.button !== 0) return;
-    void onStartDrag();
-  }
-
   function handleResizeMouseDown(event: MouseEvent<HTMLDivElement>, direction: PopupResizeDirection) {
     if (!onStartResize || event.button !== 0) return;
     event.preventDefault();
@@ -68,7 +61,6 @@ export function FloatingFrame({
         aria-hidden="true"
         className="absolute left-11 right-11 top-2 z-20 h-7 cursor-grab active:cursor-grabbing"
         data-tauri-drag-region
-        onMouseDown={handleDragMouseDown}
       />
       {onStartResize ? (
         <>

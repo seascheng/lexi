@@ -675,7 +675,6 @@ export function TranslationWindow() {
         autoHeight={!isBar}
         isPinned={isPinned}
         onClose={hidePopup}
-        onStartDrag={startWindowDrag}
         onStartResize={startWindowResize}
         onTogglePin={() => setIsPinned((currentIsPinned) => !currentIsPinned)}
       >
@@ -820,7 +819,7 @@ function WorkspacePage({
       >
         {runs.length === 0 ? <div className="p-2.5"><IdleState hasActions={actionFeatures.length > 0} /></div> : null}
         {runs.length > 0 && activeRun ? (
-          <div className="grid">
+          <>
             <RunTabs
               activeRunId={activeRunId || activeRun.id}
               runs={runs}
@@ -833,7 +832,7 @@ function WorkspacePage({
               onEntryTypeChange={(entryType) => onEntryTypeChange(activeRun.id, entryType)}
               onSave={() => void onSaveLearningEntry(activeRun.id)}
             />
-          </div>
+          </>
         ) : null}
       </section>
     </div>
@@ -854,7 +853,7 @@ function RunTabs({
   onSelectRun: (runId: string) => void;
 }) {
   return (
-    <div className="flex min-h-9 items-end gap-1 bg-surface/35 px-1 pt-1">
+    <div className="sticky top-0 z-10 flex min-h-9 items-end gap-1 bg-surface/35 px-1 pt-1">
       <div className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto">
         {runs.map((run) => (
           <button
@@ -955,65 +954,6 @@ function AiForm({
 
   return (
     <form className="grid gap-1.5" onSubmit={onSubmit}>
-      <div className="flex justify-center overflow-x-auto">
-        <div className="inline-flex min-h-8 max-w-full overflow-x-auto rounded-lg border border-strong/10 bg-surface/45">
-          {actionFeatures.map((feature) => {
-            const isLoading = runs.some((run) => run.status === "loading" && run.featureId === feature.id && run.kind === "feature");
-            return (
-              <Button
-                aria-label={`${feature.name} selected text`}
-                className="h-8 min-h-8 w-[86px] shrink-0 rounded-none border-r border-strong/10 px-2 text-xs first:rounded-l-md"
-                disabled={isLoading}
-                icon={isLoading ? <Loader2 className="animate-spin" size={15} /> : <FeatureIcon icon={feature.icon} size={15} />}
-                key={feature.id}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onRunFeatureSelection(feature);
-                }}
-                title={`${feature.name} selected text`}
-                type="button"
-                variant={feature.id === defaultFeature?.id && isSubmittingDefault ? "primary" : "ghost"}
-              >
-                <span className="min-w-0 truncate">{feature.name}</span>
-              </Button>
-            );
-          })}
-          <Button
-            aria-label="Extract selected text"
-            className="h-8 min-h-8 w-[86px] shrink-0 rounded-none border-r border-strong/10 px-2 text-xs"
-            disabled={isExtracting}
-            icon={isExtracting ? <Loader2 className="animate-spin" size={15} /> : <Highlighter size={15} />}
-            onMouseDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              void onExtractSelection();
-            }}
-            title="Extract selected text"
-            type="button"
-            variant="ghost"
-          >
-            <span className="min-w-0 truncate">Extract</span>
-          </Button>
-          {canSpeak ? (
-            <Button
-              aria-label="Speak selected text"
-              className="h-8 min-h-8 w-[86px] shrink-0 rounded-none rounded-r-md px-2 text-xs"
-              icon={<Volume2 size={16} />}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                void speakFromSource(onSpeakSelection);
-              }}
-              title="Speak selected text"
-              type="button"
-              variant="ghost"
-            >
-              <span className="min-w-0 truncate">Speak</span>
-            </Button>
-          ) : null}
-        </div>
-      </div>
       <div className="translation-form flex w-full rounded-lg border border-strong/10 bg-input p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
         <textarea
           className="max-h-[140px] min-h-8 min-w-0 flex-1 resize-none rounded-md border-0 bg-transparent px-2 py-1.5 text-sm leading-5 text-strong outline-none placeholder:text-muted"
