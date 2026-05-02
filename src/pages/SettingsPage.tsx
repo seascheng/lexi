@@ -62,7 +62,7 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
     <div className="grid gap-2.5">
       <Card className="grid gap-2.5">
         <h2 className="text-base font-semibold">Appearance</h2>
-        <div className="grid gap-2.5 md:grid-cols-4">
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Theme">
             <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-surface p-1">
               <ThemeButton
@@ -79,15 +79,15 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
               />
             </div>
           </Field>
-          <Field label={`Popup opacity: ${normalizedOpacity(draft.windowOpacity)}%`}>
-            <Input
-              max={100}
-              min={0}
-              onChange={(event) => setDraft({ ...draft, windowOpacity: Number(event.target.value) })}
-              step={5}
-              type="range"
-              value={normalizedOpacity(draft.windowOpacity)}
-            />
+          <Field label="Display mode">
+            <Select
+              onChange={(event) => setDraft({ ...draft, displayMode: event.target.value as DisplayMode })}
+              value={draft.displayMode}
+            >
+              <option value="always_bar">Always-on bar</option>
+              <option value="auto_bar">Auto-hide bar</option>
+              <option value="popup_card">Popup card</option>
+            </Select>
           </Field>
           <Field label="Popup background" hint="Applied only to the translation popup and bar.">
             <Select
@@ -98,6 +98,16 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
               <option value="transparent">Transparent</option>
               <option value="macos_glass_clear">Liquid Glass</option>
             </Select>
+          </Field>
+          <Field label={`Popup opacity: ${normalizedOpacity(draft.windowOpacity)}%`}>
+            <Input
+              max={100}
+              min={0}
+              onChange={(event) => setDraft({ ...draft, windowOpacity: Number(event.target.value) })}
+              step={5}
+              type="range"
+              value={normalizedOpacity(draft.windowOpacity)}
+            />
           </Field>
           <Field label="App location" hint="Menu bar only hides the Dock icon.">
             <Select
@@ -112,40 +122,26 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
       </Card>
 
       <Card className="grid gap-2.5">
-        <h2 className="text-base font-semibold">Display</h2>
-        <div className="grid gap-2.5 md:grid-cols-2">
-          <Field label="Display mode">
-            <Select
-              onChange={(event) => setDraft({ ...draft, displayMode: event.target.value as DisplayMode })}
-              value={draft.displayMode}
-            >
-              <option value="always_bar">Always-on bar</option>
-              <option value="auto_bar">Auto-hide bar</option>
-              <option value="popup_card">Popup card</option>
-            </Select>
-          </Field>
-        </div>
-      </Card>
-
-      <Card className="grid gap-2.5">
         <h2 className="text-base font-semibold">AI API</h2>
-        <div className="grid gap-2.5 md:grid-cols-2">
+        <div className="grid gap-2.5">
           <Field label="Base URL">
             <Input
               onChange={(event) => setDraft({ ...draft, apiBaseUrl: event.target.value })}
               value={draft.apiBaseUrl}
             />
           </Field>
-          <Field label="Model">
-            <Input onChange={(event) => setDraft({ ...draft, model: event.target.value })} value={draft.model} />
-          </Field>
-          <Field label="API key">
-            <Input
-              onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
-              type="password"
-              value={draft.apiKey}
-            />
-          </Field>
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            <Field label="Model">
+              <Input onChange={(event) => setDraft({ ...draft, model: event.target.value })} value={draft.model} />
+            </Field>
+            <Field label="API key">
+              <Input
+                onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
+                type="password"
+                value={draft.apiKey}
+              />
+            </Field>
+          </div>
         </div>
         <div className="rounded-md border border-border bg-example px-2.5 py-1.5 text-xs leading-5 text-muted">
           Runtime: {isTauriRuntime() ? "Desktop app SQLite" : "Browser preview localStorage"}.

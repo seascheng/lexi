@@ -5,6 +5,7 @@ import { applyReviewUpdate, dueWords } from "../lib/database";
 import { scheduleReview } from "../lib/sm2";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { MarkdownRenderer } from "../components/ui/MarkdownRenderer";
 
 interface ReviewPageProps {
   words: WordEntry[];
@@ -86,15 +87,7 @@ export function ReviewPage({ words, onWordsChanged }: ReviewPageProps) {
                   <p className="text-sm text-muted">Translation</p>
                   <p className="mt-1 text-xl font-medium text-accent">{currentWord.translation}</p>
                 </div>
-                <p className="leading-7 text-content">{currentWord.definition}</p>
-                <p className="rounded-md border border-border bg-panel p-2.5 text-sm leading-6 text-muted">
-                  {currentWord.example}
-                </p>
-                {currentWord.note ? (
-                  <p className="rounded-md border border-border bg-panel p-2.5 text-xs leading-5 text-muted">
-                    {currentWord.note}
-                  </p>
-                ) : null}
+                <MarkdownRenderer content={[currentWord.definition, currentWord.example, currentWord.note].filter(Boolean).join("\n\n")} />
               </div>
             ) : (
               <div className="grid min-h-[64px] place-items-center">
