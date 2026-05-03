@@ -150,7 +150,7 @@ export function FeaturesPage() {
     });
   }
 
-  const toolbarItems = useMemo(() => {
+  const allItems = useMemo(() => {
     const items: Array<{
       id: string;
       name: string;
@@ -158,9 +158,10 @@ export function FeaturesPage() {
       enabled: boolean;
       sortOrder: number;
       kind: "tool" | "ai";
+      label: string;
     }> = [
-      ...tools.map((tool) => ({ id: tool.id, name: tool.name, icon: tool.icon, enabled: tool.enabled, sortOrder: tool.sortOrder, kind: "tool" as const })),
-      ...features.filter((f) => f.enabled && f.kind !== "review").map((f) => ({ id: f.id, name: f.name, icon: f.icon, enabled: f.enabled, sortOrder: f.sortOrder, kind: "ai" as const })),
+      ...tools.map((tool) => ({ id: tool.id, name: tool.name, icon: tool.icon, enabled: tool.enabled, sortOrder: tool.sortOrder, kind: "tool" as const, label: "Tool" })),
+      ...features.map((f) => ({ id: f.id, name: f.name, icon: f.icon, enabled: f.enabled, sortOrder: f.sortOrder, kind: "ai" as const, label: featureLabel(f) })),
     ];
     return items.sort((a, b) => a.sortOrder - b.sortOrder);
   }, [tools, features]);
@@ -171,15 +172,18 @@ export function FeaturesPage() {
   return (
     <div className="grid h-full min-h-0 gap-3 overflow-hidden lg:grid-cols-[260px_1fr]">
       <Card className="grid h-full min-h-0 content-start gap-2.5 overflow-y-auto">
-        <div>
-          <h2 className="text-lg font-semibold">Toolbar</h2>
-          <p className="text-sm text-muted">{toolbarItems.filter((item) => item.enabled).length} items shown</p>
+        <div className="flex items-center justify-between gap-2.5">
+          <div>
+            <h2 className="text-lg font-semibold">Toolbar</h2>
+            <p className="text-sm text-muted">{allItems.filter((item) => item.enabled).length} items shown</p>
+          </div>
+          <Button aria-label="New feature" onClick={createFeature} icon={<Plus size={16} />} />
         </div>
 
         <div className="grid gap-1.5">
-          {toolbarItems.map((item) => (
+          {allItems.map((item) => (
             <button
-              className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-left transition ${
+              className={`rounded-md border px-2.5 py-2 text-left transition ${
                 selectedDraftId === item.id ? "border-accent bg-accent/10" : "border-border bg-surface hover:bg-surfaceHover"
               }`}
               key={item.id}
@@ -194,61 +198,14 @@ export function FeaturesPage() {
               }}
               type="button"
             >
-              <FeatureIcon icon={item.icon} size={15} />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium text-strong">{item.name}</span>
-              <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${item.kind === "tool" ? "bg-accent/15 text-accent" : "bg-surface text-muted"}`}>
-                {item.kind === "tool" ? "Tool" : "AI"}
-              </span>
-              {!item.enabled ? <span className="text-[10px] text-muted">off</span> : null}
-            </button>
-          ))}
-        </div>
-
-        <div className="my-1 border-t border-border" />
-
-        <div className="flex items-center justify-between gap-2.5">
-          <h3 className="text-sm font-semibold text-muted">AI Features</h3>
-          <Button aria-label="New feature" onClick={createFeature} icon={<Plus size={16} />} />
-        </div>
-
-        <div className="grid gap-1.5">
-          {features.map((feature) => (
-            <button
-              className={`rounded-md border px-2.5 py-2 text-left transition ${
-                draft?.kind === "feature" && draft.data.id === feature.id ? "border-accent bg-accent/10" : "border-border bg-surface hover:bg-surfaceHover"
-              }`}
-              key={feature.id}
-              onClick={() => setDraft({ kind: "feature", data: feature })}
-              type="button"
-            >
               <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-strong">
-                <FeatureIcon icon={feature.icon} size={15} />
-                <span className="truncate">{feature.name}</span>
+                <FeatureIcon icon={item.icon} size={15} />
+                <span className="truncate">{item.name}</span>
               </span>
               <span className="mt-1 block text-xs text-muted">
-                {featureLabel(feature)}
-                {feature.enabled ? "" : " / disabled"}
+                {item.label}
+                {item.enabled ? "" : " / disabled"}
               </span>
-            </button>
-          ))}
-        </div>
-
-        <div className="my-1 border-t border-border" />
-
-        <h3 className="text-sm font-semibold text-muted">Tools</h3>
-        <div className="grid gap-1.5">
-          {[...tools].sort((a, b) => a.sortOrder - b.sortOrder).map((tool) => (
-            <button
-              className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-left transition ${
-                draft?.kind === "tool" && draft.data.id === tool.id ? "border-accent bg-accent/10" : "border-border bg-surface hover:bg-surfaceHover"
-              }`}
-              key={tool.id}
-              onClick={() => setDraft({ kind: "tool", data: tool })}
-              type="button"
-            >
-              <FeatureIcon icon={tool.icon} size={15} />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium text-strong">{tool.name}</span>
-              {!tool.enabled ? <span className="text-[10px] text-muted">off</span> : null}
             </button>
           ))}
         </div>
