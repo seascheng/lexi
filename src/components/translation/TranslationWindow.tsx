@@ -73,7 +73,7 @@ export function TranslationWindow() {
   const windowName = params.get("window");
   const isBar = windowName === "float_bar";
   const actionFeatures = useMemo(
-    () => features.filter((feature) => feature.panelEnabled && feature.kind !== "review").sort((a, b) => a.panelSortOrder - b.panelSortOrder),
+    () => features.filter((feature) => feature.panelEnabled).sort((a, b) => a.panelSortOrder - b.panelSortOrder),
     [features],
   );
 
@@ -82,7 +82,7 @@ export function TranslationWindow() {
   const panelItems = useMemo<PanelItem[]>(() => {
     const items: PanelItem[] = [
       ...tools.filter((t) => t.panelEnabled).map((t) => ({ kind: "tool" as const, tool: t })),
-      ...features.filter((f) => f.panelEnabled && f.kind !== "review").map((f) => ({ kind: "feature" as const, feature: f })),
+      ...features.filter((f) => f.panelEnabled).map((f) => ({ kind: "feature" as const, feature: f })),
     ];
     return items.sort((a, b) => {
       const orderA = a.kind === "tool" ? a.tool.panelSortOrder : a.feature.panelSortOrder;
@@ -425,7 +425,7 @@ export function TranslationWindow() {
   }
 
   function currentActionFeature(featureId?: string) {
-    const enabled = featuresRef.current.filter((feature) => feature.enabled && feature.kind !== "review");
+    const enabled = featuresRef.current.filter((feature) => feature.enabled);
     const normalizedFeatureId = featureId?.toLowerCase();
     return (
       enabled.find((feature) => feature.id === featureId) ??

@@ -29,7 +29,7 @@ export async function syncNativeToolbar(
 }
 
 function nativeToolbarActions(features: AiFeature[], tools: ToolbarTool[]): NativeToolbarAction[] {
-  const enabledFeatures = features.filter((feature) => feature.enabled && feature.kind !== "review");
+  const enabledFeatures = features.filter((feature) => feature.enabled);
   const enabledTools = tools.filter((tool) => tool.enabled);
   const items: Array<{ id: string; name: string; icon: AiFeatureIcon; sortOrder: number }> = [
     ...enabledTools.map((tool) => ({ id: tool.id, name: tool.name, icon: tool.icon, sortOrder: tool.sortOrder })),
