@@ -2,34 +2,34 @@ import { emit } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { LogicalPosition, LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import type { AiFeature, AiRunResult, DisplayMode } from "../types";
+import type { AiFeature, AiRunResult } from "../types";
 import { loadPopupPosition } from "./database";
 import { isTauriRuntime } from "./platform";
 
 const DEFAULT_POPUP_SIZE = 360;
 
-export async function showAiLoading(text: string, mode: DisplayMode) {
+export async function showAiLoading(text: string) {
   if (!isTauriRuntime()) return;
 
-  await showAiWindow(mode);
-  await emit("englist://ai-loading", { text, mode, featureId: "translation" });
+  await showAiWindow();
+  await emit("englist://ai-loading", { text, featureId: "translation" });
 }
 
-export async function showAiResult(result: AiRunResult, feature: AiFeature, text: string, mode: DisplayMode) {
+export async function showAiResult(result: AiRunResult, feature: AiFeature, text: string) {
   if (!isTauriRuntime()) return;
 
-  await showAiWindow(mode);
-  await emit("englist://ai-ready", { result, feature, text, mode });
+  await showAiWindow();
+  await emit("englist://ai-ready", { result, feature, text });
 }
 
-export async function showAiError(message: string, mode: DisplayMode) {
+export async function showAiError(message: string) {
   if (!isTauriRuntime()) return;
 
-  await showAiWindow(mode);
-  await emit("englist://ai-error", { message, mode, featureId: "translation" });
+  await showAiWindow();
+  await emit("englist://ai-error", { message, featureId: "translation" });
 }
 
-async function showAiWindow(mode: DisplayMode) {
+async function showAiWindow() {
   const windowLabel = "popup_card";
   const targetWindow = await WebviewWindow.getByLabel(windowLabel);
 
@@ -48,5 +48,5 @@ async function showAiWindow(mode: DisplayMode) {
   await targetWindow.show();
   await targetWindow.setSize(new LogicalSize(DEFAULT_POPUP_SIZE, DEFAULT_POPUP_SIZE));
   await targetWindow.setFocus();
-  await emit("englist://popup-shown", { mode });
+  await emit("englist://popup-shown", {});
 }

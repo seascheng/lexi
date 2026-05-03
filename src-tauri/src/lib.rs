@@ -12,7 +12,7 @@ use native_toolbar::{
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Emitter, Manager, WindowEvent};
+use tauri::{Manager, WindowEvent};
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -109,9 +109,8 @@ fn migrations() -> Vec<Migration> {
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Lexicon", true, None::<&str>)?;
-    let mode = MenuItem::with_id(app, "mode", "Switch Mode", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Lexicon", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &mode, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &quit])?;
 
     TrayIconBuilder::new()
         .icon(tauri::image::Image::from_path(
@@ -123,9 +122,6 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
-            "mode" => {
-                let _ = app.emit("englist://cycle-display-mode", ());
-            }
             "quit" => app.exit(0),
             _ => {}
         })

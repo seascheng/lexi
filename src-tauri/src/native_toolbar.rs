@@ -813,6 +813,7 @@ fn write_clipboard(text: &str) -> Result<(), String> {
 
 fn write_clipboard_bytes(data: &[u8]) -> Result<(), String> {
     let mut child = Command::new("pbcopy")
+        .env("LANG", "en_US.UTF-8")
         .stdin(Stdio::piped())
         .spawn()
         .map_err(|error| format!("Failed to run pbcopy: {error}"))?;

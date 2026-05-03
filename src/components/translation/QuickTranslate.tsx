@@ -33,12 +33,12 @@ export function QuickTranslate({ settings, onWordAdded }: QuickTranslateProps) {
 
     try {
       const feature = (await listAiFeatures()).find((item) => item.kind === "translation") ?? DEFAULT_TRANSLATION_FEATURE;
-      await showAiLoading(text, settings.displayMode);
+      await showAiLoading(text);
       const runResult = await runAiFeature(text, feature, settings);
       if (!runResult.translation) throw new Error("Translation result was empty.");
       const nextResult = runResult.translation;
       setResult(nextResult);
-      await showAiResult(runResult, feature, text, settings.displayMode);
+      await showAiResult(runResult, feature, text);
 
       if (feature.autoSaveToVocabulary) {
         await addWord(nextResult);
@@ -47,7 +47,7 @@ export function QuickTranslate({ settings, onWordAdded }: QuickTranslateProps) {
     } catch (translationError) {
       const message = errorMessage(translationError, "Translation failed.");
       setError(message);
-      await showAiError(message, settings.displayMode);
+      await showAiError(message);
     } finally {
       setIsTranslating(false);
     }

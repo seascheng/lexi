@@ -152,7 +152,7 @@ function parseMarkdownBlocks(content: string): MarkdownBlock[] {
 }
 
 function renderInlineMarkdown(content: string): ReactNode[] {
-  const tokens = content.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  const tokens = content.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g);
   return tokens.map((token, index) => {
     if (token.startsWith("`") && token.endsWith("`")) {
       return (
@@ -164,6 +164,10 @@ function renderInlineMarkdown(content: string): ReactNode[] {
 
     if (token.startsWith("**") && token.endsWith("**")) {
       return <strong className="font-semibold text-strong" key={index}>{token.slice(2, -2)}</strong>;
+    }
+
+    if (token.startsWith("*") && token.endsWith("*") && token.length > 2) {
+      return <em key={index}>{token.slice(1, -1)}</em>;
     }
 
     return <span key={index}>{token}</span>;

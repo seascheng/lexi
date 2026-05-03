@@ -1,12 +1,12 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { BookOpen, Languages, Settings, Sparkles } from "lucide-react";
+import { BookOpen, Eye, Settings, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppSettings, WordEntry } from "./types";
 import logoUrl from "../logo.svg";
 import { applyAppearanceSettings } from "./lib/appearance";
 import { DEFAULT_SETTINGS } from "./lib/defaults";
-import { listAiFeatures, listWords, loadSettings, loadToolbarTools, saveSettings } from "./lib/database";
+import { listAiFeatures, listWords, loadSettings, loadToolbarTools } from "./lib/database";
 import { syncNativeToolbar } from "./lib/nativeToolbar";
 import { isTauriRuntime } from "./lib/platform";
 import { Button } from "./components/ui/Button";
@@ -20,7 +20,7 @@ type Page = "vocabulary" | "review" | "configs" | "settings";
 
 const navItems: Array<{ page: Page; label: string; icon: JSX.Element }> = [
   { page: "vocabulary", label: "Expressions", icon: <BookOpen size={17} /> },
-  { page: "review", label: "Review", icon: <Languages size={17} /> },
+  { page: "review", label: "Review", icon: <Eye size={17} /> },
   { page: "configs", label: "Configs", icon: <Sparkles size={17} /> },
   { page: "settings", label: "Settings", icon: <Settings size={17} /> },
 ];
@@ -59,22 +59,6 @@ function MainWindow() {
   useEffect(() => {
     refreshSettings();
     refreshWords();
-  }, []);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-
-    returnEffect(
-      listen("englist://cycle-display-mode", async () => {
-        const currentSettings = settingsRef.current;
-        const nextSettings = {
-          ...currentSettings,
-          displayMode: nextDisplayMode(currentSettings.displayMode),
-        };
-        await saveSettings(nextSettings);
-        setSettings(nextSettings);
-      }),
-    );
   }, []);
 
   useEffect(() => {
@@ -124,9 +108,9 @@ function MainWindow() {
 
   return (
     <main className="app-shell">
-      <div className="mx-auto grid min-h-screen max-w-7xl items-stretch gap-4 px-3 py-4 md:grid-cols-[216px_1fr] md:px-4 lg:px-5">
-        <aside className="md:sticky md:top-4 md:h-[calc(100vh-32px)]">
-          <div className="flex h-full flex-col rounded-lg border border-border bg-panel p-3">
+      <div className="mx-auto grid min-h-screen max-w-7xl items-stretch bg-panel md:h-screen md:grid-cols-[180px_1fr]">
+        <aside className="md:sticky md:top-0 md:h-screen">
+          <div className="flex h-full flex-col border-b border-border/50 p-4 md:border-b-0 md:border-r">
             <div className="flex items-center gap-2.5 px-1">
               <img src={logoUrl} alt="Lexicon" className="h-8 w-8" />
               <h1 className="truncate text-base font-semibold">Lexicon</h1>
@@ -148,8 +132,8 @@ function MainWindow() {
           </div>
         </aside>
 
-        <section className="flex h-[calc(100vh-32px)] min-h-[calc(100vh-32px)] flex-col gap-3 overflow-hidden rounded-lg border border-border bg-panel p-3">
-          <div className="min-h-0 flex-1 overflow-hidden">{pageContent}</div>
+        <section className="flex flex-col overflow-hidden md:h-screen">
+          <div className="min-h-0 flex-1 overflow-hidden p-4 md:p-5">{pageContent}</div>
         </section>
       </div>
     </main>
@@ -172,8 +156,3 @@ function returnEffect(cleanup: Promise<() => void>) {
   };
 }
 
-function nextDisplayMode(mode: AppSettings["displayMode"]): AppSettings["displayMode"] {
-  if (mode === "always_bar") return "auto_bar";
-  if (mode === "auto_bar") return "popup_card";
-  return "always_bar";
-}

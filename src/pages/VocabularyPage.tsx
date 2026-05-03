@@ -19,6 +19,16 @@ const PAGE_SIZE = 30;
 const statuses: Array<"all" | WordStatus> = ["all", "new", "learning", "mastered"];
 const entryTypes: Array<"all" | LearningEntryType> = ["all", "word", "phrase", "pattern"];
 
+function buildDetailMarkdown(word: WordEntry): string {
+  const parts: string[] = [];
+  if (word.pos) parts.push(`*${word.pos}*`);
+  if (word.translation) parts.push(`**${word.translation}**`);
+  if (word.definition) parts.push(word.definition);
+  if (word.example) parts.push(`> "${word.example}"`);
+  if (word.note) parts.push(`---\n${word.note}`);
+  return parts.join("\n\n");
+}
+
 export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"all" | WordStatus>("all");
@@ -138,15 +148,7 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
                 {/* Expanded detail */}
                 {isExpanded ? (
                   <div className="grid gap-2 px-3 pb-3 pt-1">
-                    {word.pos ? <p className="text-xs text-muted">{word.pos}</p> : null}
-                    <p className="text-sm font-medium text-strong">{word.translation}</p>
-                    {word.definition ? <p className="text-sm leading-5 text-content">{word.definition}</p> : null}
-                    {word.example ? <p className="text-xs italic leading-5 text-muted">"{word.example}"</p> : null}
-                    {word.note ? (
-                      <div className="rounded-md border border-border/50 bg-surface/30 p-2">
-                        <MarkdownRenderer content={word.note} />
-                      </div>
-                    ) : null}
+                    <MarkdownRenderer content={buildDetailMarkdown(word)} />
                     <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex flex-wrap gap-3 text-[11px] text-muted">
                         <span>Reviews {word.review_count}</span>

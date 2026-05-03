@@ -1,4 +1,3 @@
-export type DisplayMode = "always_bar" | "auto_bar" | "popup_card";
 export type AppTheme = "dark" | "light";
 export type DockMode = "dock_and_menu_bar" | "menu_bar_only";
 export type BackgroundStyle = "solid" | "transparent" | "macos_glass_clear";
@@ -38,7 +37,6 @@ export interface WordEntry extends TranslationResult {
 }
 
 export interface AppSettings {
-  displayMode: DisplayMode;
   theme: AppTheme;
   windowOpacity: number;
   backgroundStyle: BackgroundStyle;

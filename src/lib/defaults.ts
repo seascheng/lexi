@@ -40,7 +40,6 @@ export const DEFAULT_PANELS: Panel[] = [
 ];
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  displayMode: "popup_card",
   theme: "dark",
   windowOpacity: 100,
   backgroundStyle: "macos_glass_clear",

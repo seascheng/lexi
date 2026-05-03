@@ -4,7 +4,7 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AlertCircle, Clipboard, Loader2, Save, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, DisplayMode, LearningEntryInput, LearningEntryType, Panel, ToolbarTool, WordEntry } from "../../types";
+import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, LearningEntryInput, LearningEntryType, Panel, ToolbarTool, WordEntry } from "../../types";
 import { copyText, runAiFeature, speakText } from "../../lib/ai";
 import { applyAppearanceSettings } from "../../lib/appearance";
 import { addWord, listAiFeatures, listPanels, listWords, loadSettings, loadToolbarTools, savePopupPosition, savePopupSize, saveSettings } from "../../lib/database";
@@ -31,7 +31,6 @@ interface WorkspaceRun {
   featureId?: string;
   icon?: AiFeatureIcon;
   inputText: string;
-  mode: DisplayMode;
   status: WorkspaceRunStatus;
   result?: AiRunResult;
   message?: string;
@@ -42,13 +41,11 @@ interface WorkspaceRun {
 
 interface RequestPayload {
   text: string;
-  mode: DisplayMode;
   featureId?: string;
 }
 
 interface ErrorPayload {
   message: string;
-  mode: DisplayMode;
   featureId?: string;
 }
 
@@ -56,7 +53,6 @@ interface ReadyPayload {
   result: AiRunResult;
   feature: AiFeature;
   text: string;
-  mode: DisplayMode;
 }
 
 export function TranslationWindow() {
@@ -126,7 +122,7 @@ export function TranslationWindow() {
 
     const cleanups = [
       listen<RequestPayload>("englist://ai-request", (event) => {
-        void runActiveFeature(event.payload.text, event.payload.mode, event.payload.featureId);
+        void runActiveFeature(event.payload.text, event.payload.featureId);
       }),
       listen<RequestPayload>("englist://ai-loading", (event) => {
         const feature = currentActionFeature(event.payload.featureId);
@@ -139,7 +135,6 @@ export function TranslationWindow() {
           featureId: feature.id,
           icon: feature.icon,
           inputText: text,
-          mode: event.payload.mode,
           status: "loading",
         });
       }),
@@ -151,7 +146,6 @@ export function TranslationWindow() {
           featureId: feature?.id,
           icon: feature?.icon,
           inputText: inputTextRef.current,
-          mode: event.payload.mode,
           status: "error",
           message: event.payload.message,
         });
@@ -165,7 +159,6 @@ export function TranslationWindow() {
           featureId: event.payload.feature.id,
           icon: event.payload.feature.icon,
           inputText: text,
-          mode: event.payload.mode,
           status: "ready",
           result: event.payload.result,
         });
@@ -290,7 +283,7 @@ export function TranslationWindow() {
     if (
       isPinned ||
       !latestRun ||
-      latestRun.mode !== "auto_bar" ||
+      !isBar ||
       latestRun.status === "loading"
     ) {
       return;
@@ -374,27 +367,26 @@ export function TranslationWindow() {
   function submitDefaultFeature(event: FormEvent) {
     event.preventDefault();
     if (!defaultFeature) return;
-    void runFeature(inputText, currentMode(), defaultFeature);
+    void runFeature(inputText, defaultFeature);
   }
 
-  async function runActiveFeature(rawText: string, mode: DisplayMode, featureId?: string) {
+  async function runActiveFeature(rawText: string, featureId?: string) {
     const feature = await loadCurrentActionFeature(featureId);
     if (!feature) {
       addWorkspaceRun({
         kind: "feature",
         title: "AI action",
         inputText: rawText,
-        mode,
         status: "error",
         message: "No enabled AI actions are available.",
       });
       return;
     }
 
-    await runFeature(rawText, mode, feature);
+    await runFeature(rawText, feature);
   }
 
-  async function runFeature(rawText: string, mode: DisplayMode, feature: AiFeature) {
+  async function runFeature(rawText: string, feature: AiFeature) {
     const text = rawText.trim();
     if (!text) return;
 
@@ -405,7 +397,6 @@ export function TranslationWindow() {
       featureId: feature.id,
       icon: feature.icon,
       inputText: text,
-      mode,
       status: "loading",
     });
 
@@ -453,11 +444,6 @@ export function TranslationWindow() {
       enabled.find((feature) => feature.id === runsRef.current[0]?.featureId) ??
       enabled[0]
     );
-  }
-
-  function currentMode(): DisplayMode {
-    if (isBar) return "auto_bar";
-    return "popup_card";
   }
 
   function addWorkspaceRun(run: Omit<WorkspaceRun, "id" | "createdAt">) {
@@ -531,14 +517,13 @@ export function TranslationWindow() {
         featureId: feature.id,
         icon: feature.icon,
         inputText: "",
-        mode: currentMode(),
         status: "error",
         message: "Enter text first.",
       });
       return;
     }
 
-    await runFeature(text, currentMode(), feature);
+    await runFeature(text, feature);
   }
 
   async function handleToolAction(toolId: string) {

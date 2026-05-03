@@ -1,5 +1,6 @@
 import { emit } from "@tauri-apps/api/event";
 import { Plus, Save, Trash2 } from "lucide-react";
+import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AiFeature,
@@ -33,7 +34,6 @@ import {
 import { syncNativeToolbar } from "../lib/nativeToolbar";
 import { isTauriRuntime } from "../lib/platform";
 import { Button } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
 
 type DraftItem =
@@ -378,9 +378,9 @@ export function ConfigsPage() {
             : "__none__";
 
   return (
-    <div className="grid h-full min-h-0 gap-3 overflow-hidden lg:grid-cols-[220px_1fr]">
+    <div className="grid h-full min-h-0 overflow-hidden lg:grid-cols-[180px_1fr]">
       {/* Left Panel */}
-      <Card className="grid h-full min-h-0 content-start gap-3 overflow-y-auto px-2.5 py-3">
+      <div className="grid h-full min-h-0 content-start gap-3 overflow-y-auto border-r border-border/30 px-1 py-3 pr-3 mr-4">
         {/* Config Section */}
         <SectionLabel>Config</SectionLabel>
         <NavItem
@@ -437,10 +437,10 @@ export function ConfigsPage() {
             onClick={() => setDraft({ kind: "panel", panelId: panel.id })}
           />
         ))}
-      </Card>
+      </div>
 
       {/* Right Panel */}
-      <Card className="grid h-full min-h-0 content-start gap-3 overflow-y-auto">
+      <div className="grid h-full min-h-0 content-start gap-3 overflow-y-auto">
         {draft?.kind === "toolbar-config" ? (
           <ToolbarConfigPanel
             items={allToolbarItems}
@@ -483,7 +483,7 @@ export function ConfigsPage() {
             onRemove={() => void removeFeature(draft.data)}
           />
         ) : null}
-      </Card>
+      </div>
     </div>
   );
 }
@@ -962,7 +962,7 @@ function ToolConfigPanel({
       </div>
 
       {tool.id === "copy" && (
-        <div className="rounded-md border border-border bg-surface px-3 py-2">
+        <div className="rounded-md bg-surface/50 px-3 py-2">
           <p className="text-sm text-muted">
             Copies selected text to clipboard. No additional configuration.
           </p>
@@ -1150,7 +1150,7 @@ function FeatureConfigPanel({
         />
       </Field>
 
-      <div className="rounded-md border border-border bg-example px-3 py-2 text-xs leading-5 text-muted">
+      <div className="rounded-md bg-surface/50 px-3 py-2 text-xs leading-5 text-muted">
         Output:{" "}
         {draft.outputMode === "translation_json"
           ? "structured translation JSON"
