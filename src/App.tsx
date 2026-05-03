@@ -1,8 +1,9 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { BookOpen, Languages, Settings, Sparkles, Wand2 } from "lucide-react";
+import { BookOpen, Languages, Settings, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppSettings, WordEntry } from "./types";
+import logoUrl from "../logo.svg";
 import { applyAppearanceSettings } from "./lib/appearance";
 import { DEFAULT_SETTINGS } from "./lib/defaults";
 import { listAiFeatures, listWords, loadSettings, loadToolbarTools, saveSettings } from "./lib/database";
@@ -106,7 +107,6 @@ function MainWindow() {
     }
   }, []);
 
-  const activeSettings = settings ?? DEFAULT_SETTINGS;
   const pageContent =
     page === "vocabulary" ? (
       <VocabularyPage words={words} onWordsChanged={refreshWords} />
@@ -127,14 +127,9 @@ function MainWindow() {
       <div className="mx-auto grid min-h-screen max-w-7xl items-stretch gap-4 px-3 py-4 md:grid-cols-[216px_1fr] md:px-4 lg:px-5">
         <aside className="md:sticky md:top-4 md:h-[calc(100vh-32px)]">
           <div className="flex h-full flex-col rounded-lg border border-border bg-panel p-3">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-md bg-accent text-accentForeground">
-                <Wand2 size={18} />
-              </div>
-              <div className="min-w-0">
-                <h1 className="truncate text-base font-semibold">Englist Tool</h1>
-                <p className="text-xs text-muted">{activeSettings.displayMode}</p>
-              </div>
+            <div className="flex items-center gap-2.5 px-1">
+              <img src={logoUrl} alt="Lexicon" className="h-8 w-8" />
+              <h1 className="truncate text-base font-semibold">Lexicon</h1>
             </div>
 
             <nav className="mt-5 grid gap-1.5">

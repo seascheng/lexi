@@ -2,7 +2,7 @@
 name = "englist-tool"
 version = "0.1.0"
 description = "Mac English learning app with translation, vocabulary, and review."
-authors = ["Englist Tool"]
+authors = ["Lexicon"]
 edition = "2021"
 
 [lib]
@@ -19,7 +19,7 @@ core-graphics = "0.25"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-liquid-glass = "0.1.6"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"

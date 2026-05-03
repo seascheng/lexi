@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Englist Tool",
+  "productName": "Lexicon",
   "version": "0.1.0",
   "identifier": "com.englist.tool",
   "build": {
@@ -17,7 +17,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Englist Tool",
+        "title": "Lexicon",
         "url": "index.html",
         "width": 1180,
         "height": 820,
@@ -28,7 +28,7 @@
       },
       {
         "label": "float_bar",
-        "title": "Englist Translation Bar",
+        "title": "Lexicon",
         "url": "index.html?window=float_bar",
         "width": 980,
         "height": 260,
@@ -44,7 +44,7 @@
       },
       {
         "label": "popup_card",
-        "title": "Englist Translation",
+        "title": "Lexicon",
         "url": "index.html?window=popup_card",
         "width": 360,
         "height": 360,
@@ -64,9 +64,9 @@
     "active": true,
     "targets": ["app"],
     "macOS": {
-      "signingIdentity": "Englist Tool Stable Signing"
+      "signingIdentity": "Lexicon Stable Signing"
     },
-    "resources": ["native/EnglistSelectionHelper.app"],
+    "resources": ["native/LexiconSelectionHelper.app"],
     "icon": ["icons/icon.png"]
   }
 }

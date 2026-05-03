@@ -152,7 +152,7 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
       <Card className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-base font-semibold">About</h2>
-          <p className="mt-1 text-sm text-muted">Englist Tool 0.1.0</p>
+          <p className="mt-1 text-sm text-muted">Lexicon 0.1.0</p>
         </div>
         <p className="text-sm text-muted">{saveState === "saving" ? "Saving..." : "Autosaved"}</p>
       </Card>

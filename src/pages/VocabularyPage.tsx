@@ -99,9 +99,8 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
       {/* Content */}
       <div className="min-h-0 overflow-y-auto rounded-lg border border-border/60">
         {/* Table header */}
-        <div className="sticky top-0 z-10 grid grid-cols-[1fr_auto_auto_auto] items-center gap-2 border-b border-border/60 bg-panel/95 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-muted backdrop-blur">
+        <div className="sticky top-0 z-10 grid grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-border/60 bg-panel/95 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-muted backdrop-blur">
           <span>Expression</span>
-          <span className="w-20 text-center">Type</span>
           <span className="w-20 text-center">Status</span>
           <span className="w-8" />
         </div>
@@ -120,20 +119,21 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
                 )}
               >
                 {/* Collapsed row */}
-                <button
-                  className="grid w-full grid-cols-[1fr_auto_auto_auto] items-center gap-2 px-3 py-2 text-left"
-                  onClick={() => toggleExpand(word.id)}
-                  type="button"
+                <div
+                  className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-2 px-3 py-2 text-left"
                 >
-                  <span className="flex min-w-0 items-center gap-2 truncate">
+                  <button
+                    className="flex min-w-0 items-center gap-2 truncate"
+                    onClick={() => toggleExpand(word.id)}
+                    type="button"
+                  >
                     {isExpanded ? <ChevronDown size={14} className="shrink-0 text-muted" /> : <ChevronRight size={14} className="shrink-0 text-muted" />}
                     <span className="truncate font-medium text-strong">{word.word}</span>
                     <span className="truncate text-sm text-content/70">{word.translation}</span>
-                  </span>
-                  <span className="w-20 text-center text-xs text-muted">{entryTypeLabel(word.entry_type)}</span>
+                  </button>
                   <span className="w-20 flex justify-center"><StatusBadge status={word.status} /></span>
-                  <span className="w-8" />
-                </button>
+                  <Button aria-label="Delete" onClick={() => removeWord(word.id)} variant="ghost" icon={<Trash2 size={14} />} className="h-6 min-h-6 w-6 px-0 text-muted/50 hover:text-red-500" />
+                </div>
 
                 {/* Expanded detail */}
                 {isExpanded ? (

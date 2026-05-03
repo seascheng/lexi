@@ -52,7 +52,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("failed to build Englist Tool")
+        .expect("failed to build Lexicon")
         .run(|app, event| {
             if let tauri::RunEvent::Reopen { .. } = event {
                 show_main_window(app);
@@ -108,16 +108,17 @@ fn migrations() -> Vec<Migration> {
 }
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open Englist Tool", true, None::<&str>)?;
-    let mode = MenuItem::with_id(app, "mode", "Switch Display Mode", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open Lexicon", true, None::<&str>)?;
+    let mode = MenuItem::with_id(app, "mode", "Switch Mode", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Lexicon", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &mode, &quit])?;
 
     TrayIconBuilder::new()
-        .icon(tray_icon_image())
+        .icon(tauri::image::Image::from_path(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("icons/tray_icon_template.png"),
+        ).expect("failed to load tray icon"))
         .icon_as_template(true)
-        .title("Englist")
-        .tooltip("Englist Tool")
+        .tooltip("Lexicon")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -131,34 +132,6 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
-}
-
-fn tray_icon_image() -> tauri::image::Image<'static> {
-    let size = 18u32;
-    let mut rgba = vec![0u8; (size * size * 4) as usize];
-
-    for y in 3..15 {
-        set_icon_pixel(&mut rgba, size, 4, y);
-        set_icon_pixel(&mut rgba, size, 5, y);
-    }
-    for x in 4..14 {
-        set_icon_pixel(&mut rgba, size, x, 3);
-        set_icon_pixel(&mut rgba, size, x, 4);
-        set_icon_pixel(&mut rgba, size, x, 8);
-        set_icon_pixel(&mut rgba, size, x, 9);
-        set_icon_pixel(&mut rgba, size, x, 14);
-        set_icon_pixel(&mut rgba, size, x, 15);
-    }
-
-    tauri::image::Image::new_owned(rgba, size, size)
-}
-
-fn set_icon_pixel(rgba: &mut [u8], size: u32, x: u32, y: u32) {
-    let index = ((y * size + x) * 4) as usize;
-    rgba[index] = 0;
-    rgba[index + 1] = 0;
-    rgba[index + 2] = 0;
-    rgba[index + 3] = 255;
 }
 
 fn show_main_window(app: &tauri::AppHandle) {

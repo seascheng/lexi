@@ -779,7 +779,7 @@ function RunTabs({
             title={`${run.title}: ${run.inputText}`}
             type="button"
           >
-            {run.status === "loading" ? <Loader2 className="shrink-0 animate-spin" size={13} /> : <FeatureIcon icon={run.icon ?? "wand"} size={13} />}
+            <span className={run.status === "loading" ? "opacity-50" : ""}><FeatureIcon icon={run.icon ?? "wand"} size={13} /></span>
             <span className="truncate">{run.title}</span>
             <span
               aria-label="Close result"
@@ -883,7 +883,7 @@ function AiForm({
                 aria-label={`${item.feature.name} input text`}
                 className="h-8 min-h-8 w-8 shrink-0 rounded-none border-r border-strong/10 p-0"
                 disabled={isLoading || !inputText.trim()}
-                icon={isLoading ? <Loader2 className="animate-spin" size={15} /> : <FeatureIcon icon={item.feature.icon} size={15} />}
+                icon={<FeatureIcon icon={item.feature.icon} size={15} />}
                 key={item.feature.id}
                 onClick={() => onRunFeatureInput(item.feature)}
                 title={`${item.feature.name} input text`}

@@ -32,6 +32,9 @@ const WINDOW_MOVE_THRESHOLD: f64 = 4.0;
 const SELECTION_COPY_ATTEMPTS: usize = 2;
 const AX_ERROR_SUCCESS: i32 = 0;
 
+/// Mutex to serialize clipboard probe operations and prevent concurrent interference.
+static CLIPBOARD_PROBE_LOCK: Mutex<()> = Mutex::new(());
+
 type AXUIElementRef = *const std::ffi::c_void;
 
 static TOOLBAR_PORT: OnceLock<Mutex<Option<u16>>> = OnceLock::new();
@@ -437,7 +440,7 @@ fn spawn_selection_monitor(app: tauri::AppHandle, toolbar_port: u16) {
 
         if result.is_err() {
             log_native("event tap install failed");
-            eprintln!("Could not install Englist system event tap. Grant Input Monitoring to Englist Tool.app and restart.");
+            eprintln!("Could not install Lexicon system event tap. Grant Input Monitoring to Lexicon.app and restart.");
             open_privacy_settings("Privacy_ListenEvent");
         } else {
             log_native("event tap stopped");
@@ -473,7 +476,7 @@ fn handle_system_event(
             }
 
             let position = appkit_position_from_event(event);
-            thread::spawn(move || match read_selected_text_from_clipboard_probe() {
+            thread::spawn(move || match read_selected_text() {
                 Ok(Some(text)) => {
                     log_native(&format!("selected text captured length={}", text.len()));
                     show_toolbar(toolbar_port, text, position, false);
@@ -491,7 +494,7 @@ fn handle_system_event(
             let app = app.clone();
             thread::spawn(move || {
                 thread::sleep(Duration::from_millis(35));
-                match read_selected_text_from_clipboard_probe() {
+                match read_selected_text() {
                     Ok(Some(text)) => {
                         let _ = open_popup_with_feature(&app, text, "translation");
                     }
@@ -702,8 +705,64 @@ fn is_translate_shortcut(event: &CGEvent) -> bool {
         && flags.contains(CGEventFlags::CGEventFlagShift)
 }
 
+/// Read selected text via Accessibility API (no clipboard pollution).
+fn read_selected_text_via_ax() -> Option<String> {
+    unsafe {
+        let system = AXUIElementCreateSystemWide();
+        if system.is_null() {
+            return None;
+        }
+
+        // Get the focused UI element
+        let mut focused: AXUIElementRef = ptr::null();
+        let attr = CFString::from_static_string("AXFocusedUIElement");
+        let result = AXUIElementCopyAttributeValue(
+            system,
+            attr.as_concrete_TypeRef(),
+            &mut focused,
+        );
+        CFRelease(system as CFTypeRef);
+
+        if result != AX_ERROR_SUCCESS || focused.is_null() {
+            return None;
+        }
+
+        let text = accessibility_string_attribute(focused, "AXSelectedText");
+        CFRelease(focused as CFTypeRef);
+        text
+    }
+}
+
+/// Read selected text: tries AX API first, falls back to clipboard probe.
+fn read_selected_text() -> Result<Option<String>, String> {
+    if let Some(text) = read_selected_text_via_ax() {
+        let trimmed = text.trim().to_string();
+        if !trimmed.is_empty() {
+            log_native(&format!("selected text via AX length={}", trimmed.len()));
+            return Ok(Some(trimmed));
+        }
+    }
+
+    read_selected_text_from_clipboard_probe()
+}
+
 fn read_selected_text_from_clipboard_probe() -> Result<Option<String>, String> {
-    let original_clipboard = command_output("pbpaste", &[]).unwrap_or_default();
+    // Serialize clipboard access to prevent concurrent probes from interfering
+    let _lock = CLIPBOARD_PROBE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    // Save original clipboard as raw bytes (avoids from_utf8_lossy corruption)
+    let original_bytes = command_output_raw("pbpaste", &[]).unwrap_or_default();
+
+    // Guard ensures clipboard is restored even if probe errors mid-way
+    struct ClipGuard { bytes: Vec<u8>, restored: bool }
+    impl Drop for ClipGuard {
+        fn drop(&mut self) {
+            if !self.restored {
+                let _ = write_clipboard_bytes(&self.bytes);
+            }
+        }
+    }
+    let mut guard = ClipGuard { bytes: original_bytes, restored: false };
 
     for attempt in 0..SELECTION_COPY_ATTEMPTS {
         let marker = clipboard_marker();
@@ -712,19 +771,23 @@ fn read_selected_text_from_clipboard_probe() -> Result<Option<String>, String> {
         send_copy_shortcut()?;
         thread::sleep(Duration::from_millis(55 + (attempt as u64 * 65)));
 
-        let selected_text = command_output("pbpaste", &[])?;
-        if selected_text == marker {
+        let selected_bytes = command_output_raw("pbpaste", &[])?;
+        if selected_bytes == marker.as_bytes() {
             continue;
         }
 
+        let selected_text = String::from_utf8_lossy(&selected_bytes);
         let trimmed = selected_text.trim().to_string();
         if !trimmed.is_empty() {
-            let _ = write_clipboard(&original_clipboard);
+            // Restore original clipboard bytes
+            let _ = write_clipboard_bytes(&guard.bytes);
+            guard.restored = true;
             return Ok(Some(trimmed));
         }
     }
 
-    let _ = write_clipboard(&original_clipboard);
+    let _ = write_clipboard_bytes(&guard.bytes);
+    guard.restored = true;
     Ok(None)
 }
 
@@ -745,6 +808,10 @@ fn send_copy_shortcut() -> Result<(), String> {
 }
 
 fn write_clipboard(text: &str) -> Result<(), String> {
+    write_clipboard_bytes(text.as_bytes())
+}
+
+fn write_clipboard_bytes(data: &[u8]) -> Result<(), String> {
     let mut child = Command::new("pbcopy")
         .stdin(Stdio::piped())
         .spawn()
@@ -752,7 +819,7 @@ fn write_clipboard(text: &str) -> Result<(), String> {
 
     if let Some(stdin) = child.stdin.as_mut() {
         stdin
-            .write_all(text.as_bytes())
+            .write_all(data)
             .map_err(|error| format!("Failed to write clipboard: {error}"))?;
     }
 
@@ -827,17 +894,7 @@ fn post_to_helper(port: u16, path: &str, body: &str) -> std::io::Result<()> {
 }
 
 fn copy_to_clipboard(text: String) -> Result<(), String> {
-    let escaped = format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""));
-    let output = std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(format!("set the clipboard to {escaped}"))
-        .output()
-        .map_err(|e| format!("clipboard write failed: {e}"))?;
-
-    if !output.status.success() {
-        return Err("clipboard write failed".into());
-    }
-    Ok(())
+    write_clipboard(&text)
 }
 
 fn open_search(text: String) -> Result<(), String> {
@@ -984,10 +1041,9 @@ fn write_response(stream: &mut TcpStream, status: u16, body: &str) -> std::io::R
     )
 }
 
-fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
+fn command_output_raw(program: &str, args: &[&str]) -> Result<Vec<u8>, String> {
     let mut cmd = Command::new(program);
     cmd.args(args);
-    // Ensure UTF-8 output from CLI tools like pbpaste
     cmd.env("LANG", "en_US.UTF-8");
     let output = cmd
         .output()
@@ -997,7 +1053,7 @@ fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    Ok(output.stdout)
 }
 
 fn launch_helper(app: &tauri::App, action_port: u16, toolbar_port: u16) -> anyhow::Result<()> {
@@ -1025,13 +1081,13 @@ fn launch_helper(app: &tauri::App, action_port: u16, toolbar_port: u16) -> anyho
 
 fn helper_app_path(app: &tauri::App) -> anyhow::Result<PathBuf> {
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let bundled = resource_dir.join("native/EnglistSelectionHelper.app");
+        let bundled = resource_dir.join("native/LexiconSelectionHelper.app");
         if bundled.exists() {
             return Ok(bundled);
         }
     }
 
-    Ok(env::current_dir()?.join("native/EnglistSelectionHelper.app"))
+    Ok(env::current_dir()?.join("native/LexiconSelectionHelper.app"))
 }
 
 fn request_system_permissions() {

@@ -1,5 +1,5 @@
 import { emit } from "@tauri-apps/api/event";
-import { Eye, EyeOff, Plus, Save, Trash2 } from "lucide-react";
+import { Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AiFeature,
@@ -1078,13 +1078,6 @@ function FeatureConfigPanel({
           </p>
         </div>
         <div className="flex gap-2">
-          <Button
-            onClick={() => onUpdate({ enabled: !draft.enabled })}
-            icon={draft.enabled ? <EyeOff size={16} /> : <Eye size={16} />}
-            variant={draft.enabled ? "secondary" : "primary"}
-          >
-            {draft.enabled ? "Disable" : "Enable"}
-          </Button>
           {draft.kind === "custom" ? (
             <Button
               onClick={onRemove}

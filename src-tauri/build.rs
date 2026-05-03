@@ -11,9 +11,9 @@ fn build_native_selection_toolbar() {
     use std::process::Command;
 
     // Must match bundle.macOS.signingIdentity in tauri.conf.json for stable TCC permissions.
-    const SIGNING_IDENTITY: &str = "Englist Tool Stable Signing";
+    const SIGNING_IDENTITY: &str = "Lexicon Stable Signing";
 
-    let app_dir = "native/EnglistSelectionHelper.app";
+    let app_dir = "native/LexiconSelectionHelper.app";
     let contents_dir = format!("{app_dir}/Contents");
     let macos_dir = format!("{contents_dir}/MacOS");
     fs::create_dir_all(&macos_dir).expect("failed to create native helper app bundle");
@@ -24,11 +24,11 @@ fn build_native_selection_toolbar() {
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>EnglistSelectionHelper</string>
+  <string>LexiconSelectionHelper</string>
   <key>CFBundleIdentifier</key>
-  <string>com.englist.tool.selection-helper</string>
+  <string>com.lexicon.selection-helper</string>
   <key>CFBundleName</key>
-  <string>Englist Selection Helper</string>
+  <string>Lexicon Selection Helper</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>
@@ -48,7 +48,7 @@ fn build_native_selection_toolbar() {
             "swiftc",
             "native/SelectionToolbarHelper.swift",
             "-o",
-            "native/EnglistSelectionHelper.app/Contents/MacOS/EnglistSelectionHelper",
+            "native/LexiconSelectionHelper.app/Contents/MacOS/LexiconSelectionHelper",
             "-framework",
             "AppKit",
             "-framework",
