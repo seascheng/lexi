@@ -1171,21 +1171,21 @@ function PanelsConfigPanel({ panels, onSave }: { panels: Panel[]; onSave: (panel
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-sm font-medium text-white">Popup Panels</h3>
-        <p className="text-xs text-white/40">Configure which panels appear in the popup window</p>
+        <h3 className="text-sm font-medium text-strong">Popup Panels</h3>
+        <p className="text-xs text-muted">Configure which panels appear in the popup window</p>
       </div>
       <div className="space-y-2">
         {panels.map((panel) => (
-          <div key={panel.id} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2">
+          <div key={panel.id} className="flex items-center justify-between rounded-lg bg-surface px-3 py-2">
             <div className="flex items-center gap-2">
               <FeatureIcon icon={panel.icon} size={16} />
-              <span className="text-sm text-white">{panel.name}</span>
+              <span className="text-sm text-strong">{panel.name}</span>
             </div>
             <button
               onClick={() => onSave({ ...panel, enabled: !panel.enabled })}
-              className={`h-5 w-9 rounded-full transition-colors ${panel.enabled ? "bg-indigo-600" : "bg-white/10"}`}
+              className={`h-5 w-9 rounded-full transition-colors ${panel.enabled ? "bg-accent" : "bg-surface-hover"}`}
             >
-              <div className={`h-4 w-4 rounded-full bg-white shadow transition-transform ${panel.enabled ? "translate-x-4" : "translate-x-0.5"}`} />
+              <div className={`h-4 w-4 rounded-full bg-accent-foreground shadow transition-transform ${panel.enabled ? "translate-x-4" : "translate-x-0.5"}`} />
             </button>
           </div>
         ))}

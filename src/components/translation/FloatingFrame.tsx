@@ -123,15 +123,15 @@ export function FloatingFrame({
       ) : null}
       {/* Panel Tabs */}
       {panels && panels.filter(p => p.enabled).length > 1 && (
-        <div className="absolute left-1/2 top-2 -translate-x-1/2 z-20 flex items-center gap-0.5 rounded-md bg-white/[0.06] p-0.5">
+        <div className="absolute left-1/2 top-2 -translate-x-1/2 z-20 flex items-center gap-0.5 rounded-md bg-surface p-0.5">
           {panels.filter(p => p.enabled).map((panel) => (
             <button
               key={panel.id}
               onClick={() => onPanelChange?.(panel.id)}
               className={`rounded px-3 py-0.5 text-xs font-medium transition-colors ${
                 activePanelId === panel.id
-                  ? "bg-white/[0.12] text-white"
-                  : "text-white/40 hover:text-white/60"
+                  ? "bg-surface-hover text-strong"
+                  : "text-muted hover:text-strong"
               }`}
             >
               {panel.name}
