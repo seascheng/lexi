@@ -46,12 +46,6 @@ struct AiRequestPayload {
 }
 
 #[derive(Clone, Serialize)]
-struct ExtractRequestPayload {
-    text: String,
-    mode: &'static str,
-}
-
-#[derive(Clone, Serialize)]
 struct PopupShownPayload {
     mode: &'static str,
 }
@@ -208,11 +202,6 @@ fn default_toolbar_actions() -> Vec<ToolbarActionItem> {
             id: "read".into(),
             title: "Read".into(),
             icon: "volume".into(),
-        },
-        ToolbarActionItem {
-            id: "extract".into(),
-            title: "Extract".into(),
-            icon: "highlighter".into(),
         },
     ]
 }
@@ -709,7 +698,6 @@ fn dispatch_toolbar_action(
         "search" => open_search(text),
         "read" | "speak" => speak_text(text),
         "translate" | "translation" => open_popup_with_feature(app, text, "translation"),
-        "extract" => open_popup_with_extract(app, text),
         feature_id => open_popup_with_feature(app, text, feature_id),
     }
 }
@@ -729,18 +717,6 @@ fn open_popup_with_feature(
         },
     )
     .map_err(|error| format!("Could not emit AI request: {error}"))
-}
-
-fn open_popup_with_extract(app: &tauri::AppHandle, text: String) -> Result<(), String> {
-    show_popup(app)?;
-    app.emit(
-        "englist://extract-request",
-        ExtractRequestPayload {
-            text,
-            mode: "popup_card",
-        },
-    )
-    .map_err(|error| format!("Could not emit extract request: {error}"))
 }
 
 fn show_popup(app: &tauri::AppHandle) -> Result<(), String> {

@@ -18,7 +18,6 @@ private func defaultToolbarActions() -> [ToolbarAction] {
     [
         ToolbarAction(id: "translation", title: "Translate", icon: "languages"),
         ToolbarAction(id: "rewrite", title: "Rewrite", icon: "pen"),
-        ToolbarAction(id: "extract", title: "Extract", icon: "highlighter"),
         ToolbarAction(id: "speak", title: "Speak", icon: "volume"),
     ]
 }

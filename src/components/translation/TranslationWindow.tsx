@@ -2,10 +2,10 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AlertCircle, BookPlus, Clipboard, Highlighter, Loader2, Save, Volume2, X } from "lucide-react";
+import { AlertCircle, Clipboard, Loader2, Save, Volume2, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, DisplayMode, LearningEntryInput, LearningEntryType } from "../../types";
-import { analyzeLearningPoint, copyText, runAiFeature, speakText } from "../../lib/ai";
+import { copyText, runAiFeature, speakText } from "../../lib/ai";
 import { applyAppearanceSettings } from "../../lib/appearance";
 import { addWord, listAiFeatures, loadSettings, loadToolbarTools, savePopupPosition, savePopupSize } from "../../lib/database";
 import { errorMessage } from "../../lib/errors";
@@ -17,7 +17,7 @@ import { MarkdownRenderer } from "../ui/MarkdownRenderer";
 const DEFAULT_POPUP_SIZE = 360;
 
 type WorkspaceRunStatus = "loading" | "ready" | "error";
-type WorkspaceRunKind = "feature" | "extract";
+type WorkspaceRunKind = "feature";
 
 interface WorkspaceRun {
   id: string;
@@ -39,11 +39,6 @@ interface RequestPayload {
   text: string;
   mode: DisplayMode;
   featureId?: string;
-}
-
-interface ExtractRequestPayload {
-  text: string;
-  mode: DisplayMode;
 }
 
 interface ErrorPayload {
@@ -114,9 +109,6 @@ export function TranslationWindow() {
     const cleanups = [
       listen<RequestPayload>("englist://ai-request", (event) => {
         void runActiveFeature(event.payload.text, event.payload.mode, event.payload.featureId);
-      }),
-      listen<ExtractRequestPayload>("englist://extract-request", (event) => {
-        void extractLearningPointFromText(event.payload.text.trim(), event.payload.mode);
       }),
       listen<RequestPayload>("englist://ai-loading", (event) => {
         const feature = currentActionFeature(event.payload.featureId);
@@ -356,8 +348,6 @@ export function TranslationWindow() {
       icon: item.icon,
     }));
 
-    actions.push({ id: "extract", title: "Extract", icon: "highlighter" });
-
     await invoke("set_native_toolbar_actions", { actions }).catch((error) => {
       console.warn("Failed to sync native toolbar actions", error);
     });
@@ -546,96 +536,6 @@ export function TranslationWindow() {
     await runFeature(text, currentMode(), feature);
   }
 
-  async function extractSelectedLearningPoint() {
-    const text = await selectedTextOnly();
-    if (!text) {
-      addWorkspaceRun({
-        kind: "extract",
-        title: "Extract",
-        inputText: "",
-        mode: currentMode(),
-        status: "error",
-        message: "Select text first.",
-      });
-      return;
-    }
-
-    await extractLearningPointFromText(text, currentMode());
-  }
-
-  async function extractInputLearningPoint() {
-    const text = inputTextRef.current.trim();
-    if (!text) {
-      addWorkspaceRun({
-        kind: "extract",
-        title: "Extract",
-        inputText: "",
-        mode: currentMode(),
-        status: "error",
-        message: "Enter text first.",
-      });
-      return;
-    }
-
-    await extractLearningPointFromText(text, currentMode());
-  }
-
-  async function extractLearningPointFromText(text: string, mode: DisplayMode) {
-    if (!text) {
-      addWorkspaceRun({
-        kind: "extract",
-        title: "Extract",
-        inputText: "",
-        mode,
-        status: "error",
-        message: "Enter text first.",
-      });
-      return;
-    }
-
-    const sourceFeature = currentActionFeature();
-    if (!sourceFeature) {
-      addWorkspaceRun({
-        kind: "extract",
-        title: "Extract",
-        inputText: text,
-        mode,
-        status: "error",
-        message: "No enabled AI actions are available.",
-      });
-      return;
-    }
-
-    setInputText(text);
-    await runExtractAction(sourceFeature, text, workspaceContextText(text, runsRef.current), mode);
-  }
-
-  async function runExtractAction(sourceFeature: AiFeature, selectedText: string, contextText: string, mode: DisplayMode) {
-    const runId = addWorkspaceRun({
-      kind: "extract",
-      title: "Extract",
-      featureId: sourceFeature.id,
-      inputText: selectedText,
-      mode,
-      status: "loading",
-    });
-
-    try {
-      const settings = await loadSettings();
-      const result = await analyzeLearningPoint(selectedText, contextText, sourceFeature, settings);
-      updateWorkspaceRun(runId, {
-        status: "ready",
-        result,
-        learningEntry: learningEntryDraft(selectedText, contextText, result.outputText),
-      });
-    } catch (error) {
-      updateWorkspaceRun(runId, {
-        status: "error",
-        message: errorMessage(error, "Extract failed."),
-      });
-    }
-  }
-
   async function selectedTextOnly() {
     return popupSelectedText();
   }
@@ -692,8 +592,6 @@ export function TranslationWindow() {
           runs={runs}
           onDismissRun={dismissWorkspaceRun}
           onEntryTypeChange={updateRunEntryType}
-          onExtractInput={extractInputLearningPoint}
-          onExtractSelection={extractSelectedLearningPoint}
           onClearRuns={clearWorkspaceRuns}
           onInputChange={setInputText}
           onRunFeatureInput={(feature) => void runFeatureFromInput(feature)}
@@ -764,8 +662,6 @@ interface WorkspacePageProps {
   onClearRuns: () => void;
   onDismissRun: (runId: string) => void;
   onEntryTypeChange: (runId: string, entryType: LearningEntryType) => void;
-  onExtractInput: () => void | Promise<void>;
-  onExtractSelection: () => void | Promise<void>;
   onInputChange: (value: string) => void;
   onRunFeatureInput: (feature: AiFeature) => void;
   onRunFeatureSelection: (feature: AiFeature) => void;
@@ -786,8 +682,6 @@ function WorkspacePage({
   onClearRuns,
   onDismissRun,
   onEntryTypeChange,
-  onExtractInput,
-  onExtractSelection,
   onInputChange,
   onRunFeatureInput,
   onRunFeatureSelection,
@@ -806,8 +700,6 @@ function WorkspacePage({
           defaultFeature={defaultFeature}
           inputText={inputText}
           runs={runs}
-          onExtractInput={onExtractInput}
-          onExtractSelection={onExtractSelection}
           onInputChange={onInputChange}
           onRunFeatureInput={onRunFeatureInput}
           onRunFeatureSelection={onRunFeatureSelection}
@@ -869,7 +761,7 @@ function RunTabs({
             title={`${run.title}: ${run.inputText}`}
             type="button"
           >
-            {run.status === "loading" ? <Loader2 className="shrink-0 animate-spin" size={13} /> : run.kind === "extract" ? <BookPlus className="shrink-0" size={13} /> : <FeatureIcon icon={run.icon ?? "wand"} size={13} />}
+            {run.status === "loading" ? <Loader2 className="shrink-0 animate-spin" size={13} /> : <FeatureIcon icon={run.icon ?? "wand"} size={13} />}
             <span className="truncate">{run.title}</span>
             <span
               aria-label="Close result"
@@ -909,8 +801,6 @@ interface AiFormProps {
   defaultFeature?: AiFeature;
   inputText: string;
   runs: WorkspaceRun[];
-  onExtractInput: () => void | Promise<void>;
-  onExtractSelection: () => void | Promise<void>;
   onInputChange: (value: string) => void;
   onRunFeatureInput: (feature: AiFeature) => void;
   onRunFeatureSelection: (feature: AiFeature) => void;
@@ -925,8 +815,6 @@ function AiForm({
   defaultFeature,
   inputText,
   runs,
-  onExtractInput,
-  onExtractSelection,
   onInputChange,
   onRunFeatureInput,
   onRunFeatureSelection,
@@ -938,7 +826,6 @@ function AiForm({
   const isSubmittingDefault = Boolean(
     defaultFeature && runs.some((run) => run.status === "loading" && run.featureId === defaultFeature.id),
   );
-  const isExtracting = runs.some((run) => run.status === "loading" && run.kind === "extract");
 
   async function speakFromSource(action: () => Promise<void>) {
     setSpeechError("");
@@ -992,16 +879,6 @@ function AiForm({
               />
             );
           })}
-          <Button
-            aria-label="Extract input text"
-            className="h-8 min-h-8 w-8 shrink-0 rounded-none border-r border-strong/10 p-0"
-            disabled={isExtracting || !inputText.trim()}
-            icon={isExtracting ? <Loader2 className="animate-spin" size={15} /> : <Highlighter size={15} />}
-            onClick={() => void onExtractInput()}
-            title="Extract input text"
-            type="button"
-            variant="ghost"
-          />
           {canSpeak ? (
             <Button
               aria-label="Speak input text"
@@ -1156,33 +1033,6 @@ function popupSelectedText() {
   }
 
   return "";
-}
-
-function workspaceContextText(inputText: string, runs: WorkspaceRun[]) {
-  const resultContext = runs
-    .filter((run) => run.status === "ready" && run.result?.outputText)
-    .slice(0, 3)
-    .map((run) => `${run.title}:\n${run.result?.outputText}`);
-
-  return [inputText.trim(), ...resultContext].filter(Boolean).join("\n\n");
-}
-
-function learningEntryDraft(selectedText: string, contextText: string, analysis: string): LearningEntryInput {
-  const meaning = markdownLabel(analysis, "Meaning");
-  const usage = markdownLabel(analysis, "Usage");
-  const example = markdownLabel(analysis, "Example");
-  const note = markdownLabel(analysis, "Note");
-
-  return {
-    word: selectedText,
-    translation: meaning || "Learning point extracted from selected text",
-    pos: markdownLabel(analysis, "Type") || inferredEntryType(selectedText),
-    definition: [usage, note].filter(Boolean).join(" "),
-    example,
-    entry_type: parsedEntryType(markdownLabel(analysis, "Type"), selectedText),
-    source_text: contextText,
-    note: analysis,
-  };
 }
 
 function isSingleWordTranslation(inputText: string, result: AiRunResult) {

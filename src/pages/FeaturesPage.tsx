@@ -606,7 +606,7 @@ function FeatureConfigPanel({ draft, activeFeature, status, error, onUpdate, onS
       {draft.kind !== "review" ? (
         <div className="rounded-md border border-border bg-surface px-3 py-2">
           <p className="text-sm font-medium text-strong">Popup actions</p>
-          <p className="mt-1 text-xs leading-5 text-muted">This feature appears as an icon action next to the popup input. Extract is available as a learning-point action beside it.</p>
+          <p className="mt-1 text-xs leading-5 text-muted">This feature appears as an icon action next to the popup input.</p>
         </div>
       ) : null}
 
