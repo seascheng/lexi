@@ -2,6 +2,7 @@ import type { MouseEvent, ReactNode } from "react";
 import { Pin, PinOff, X } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Button } from "../ui/Button";
+import type { Panel } from "../../types";
 
 export type PopupResizeDirection =
   | "East"
@@ -23,6 +24,9 @@ interface FloatingFrameProps {
   children: ReactNode;
   className?: string;
   isPinned?: boolean;
+  panels?: Panel[];
+  activePanelId?: string;
+  onPanelChange?: (id: string) => void;
   onClose?: () => void | Promise<void>;
   onTogglePin?: () => void;
   onStartResize?: (resize: PopupResizeStart) => void | Promise<void>;
@@ -32,6 +36,9 @@ export function FloatingFrame({
   children,
   className,
   isPinned = true,
+  panels,
+  activePanelId,
+  onPanelChange,
   onClose,
   onTogglePin,
   onStartResize,
@@ -114,6 +121,24 @@ export function FloatingFrame({
           variant="ghost"
         />
       ) : null}
+      {/* Panel Tabs */}
+      {panels && panels.filter(p => p.enabled).length > 1 && (
+        <div className="absolute left-1/2 top-2 -translate-x-1/2 z-20 flex items-center gap-0.5 rounded-md bg-white/[0.06] p-0.5">
+          {panels.filter(p => p.enabled).map((panel) => (
+            <button
+              key={panel.id}
+              onClick={() => onPanelChange?.(panel.id)}
+              className={`rounded px-3 py-0.5 text-xs font-medium transition-colors ${
+                activePanelId === panel.id
+                  ? "bg-white/[0.12] text-white"
+                  : "text-white/40 hover:text-white/60"
+              }`}
+            >
+              {panel.name}
+            </button>
+          ))}
+        </div>
+      )}
       {onTogglePin ? (
         <Button
           aria-label={isPinned ? "Unpin popup" : "Pin popup"}
