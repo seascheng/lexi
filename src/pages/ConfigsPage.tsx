@@ -97,9 +97,7 @@ export function ConfigsPage() {
         sortOrder: t.sortOrder,
         kind: "tool" as const,
       })),
-      ...features
-        .filter((f) => f.kind !== "review")
-        .map((f) => ({
+      ...features.map((f) => ({
           id: f.id,
           name: f.name,
           icon: f.icon,
@@ -204,9 +202,7 @@ export function ConfigsPage() {
         sortOrder: t.panelSortOrder,
         kind: "tool" as const,
       })),
-      ...features
-        .filter((f) => f.kind !== "review")
-        .map((f) => ({
+      ...features.map((f) => ({
           id: f.id,
           name: f.name,
           icon: f.icon,
@@ -313,7 +309,6 @@ export function ConfigsPage() {
         panelSortOrder,
         autoSaveToVocabulary: false,
         targetLanguage: "",
-        reviewIntervalSeconds: 30,
         speechEnabled: false,
         icon: "wand",
       },
@@ -1071,9 +1066,7 @@ function FeatureConfigPanel({
           <p className="text-sm text-muted">
             {draft.kind === "translation"
               ? "Built-in translation feature for selected text."
-              : draft.kind === "review"
-                ? "Built-in vocabulary display for daily memory."
-                : "Plain text AI result shown in the popup workspace."}
+              : "Plain text AI result shown in the popup workspace."}
           </p>
         </div>
         <div className="flex gap-2">
@@ -1129,21 +1122,6 @@ function FeatureConfigPanel({
             />
           </Field>
         ) : null}
-        {draft.kind === "review" ? (
-          <Field
-            label="Display interval"
-            hint="Seconds between vocabulary cards in the popup."
-          >
-            <Input
-              min={5}
-              onChange={(e) =>
-                onUpdate({ reviewIntervalSeconds: Number(e.target.value) })
-              }
-              type="number"
-              value={draft.reviewIntervalSeconds}
-            />
-          </Field>
-        ) : null}
       </div>
 
       {draft.kind === "translation" ? (
@@ -1160,26 +1138,22 @@ function FeatureConfigPanel({
         </label>
       ) : null}
 
-      {draft.kind !== "review" ? (
-        <Field
-          label="Prompt"
-          hint="Use {{text}} for selected/input text. Translation also supports {{targetLanguage}}."
-        >
-          <Textarea
-            className="min-h-64 font-mono"
-            onChange={(e) => onUpdate({ promptTemplate: e.target.value })}
-            value={draft.promptTemplate}
-          />
-        </Field>
-      ) : null}
+      <Field
+        label="Prompt"
+        hint="Use {{text}} for selected/input text. Translation also supports {{targetLanguage}}."
+      >
+        <Textarea
+          className="min-h-64 font-mono"
+          onChange={(e) => onUpdate({ promptTemplate: e.target.value })}
+          value={draft.promptTemplate}
+        />
+      </Field>
 
       <div className="rounded-md border border-border bg-example px-3 py-2 text-xs leading-5 text-muted">
         Output:{" "}
-        {draft.kind === "review"
-          ? "vocabulary cards"
-          : draft.outputMode === "translation_json"
-            ? "structured translation JSON"
-            : "plain text"}
+        {draft.outputMode === "translation_json"
+          ? "structured translation JSON"
+          : "plain text"}
         .{status ? ` ${status}.` : ""}
       </div>
       {error ? (
