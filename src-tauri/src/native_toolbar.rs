@@ -24,6 +24,48 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, LogicalPosition, LogicalSize, Manager};
 
+extern "C" {
+    fn sel_registerName(str: *const i8) -> *const std::ffi::c_void;
+    fn objc_msgSend(
+        obj: *mut std::ffi::c_void,
+        sel: *const std::ffi::c_void,
+        ...
+    ) -> *mut std::ffi::c_void;
+}
+
+/// Set NSWindow.collectionBehavior so the popup appears on ALL macOS Spaces/desktops.
+/// Without this, the popup stays on the Space where it was created at app launch.
+fn configure_window_all_spaces(window: &tauri::WebviewWindow) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Ok(handle) = window.window_handle() else { return };
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else { return };
+
+    unsafe {
+        let ns_view = appkit.ns_view.as_ptr();
+
+        // [ns_view window] -> NSWindow*
+        let ns_window = objc_msgSend(
+            ns_view,
+            sel_registerName(b"window\0".as_ptr() as *const i8),
+        );
+
+        if ns_window.is_null() {
+            return;
+        }
+
+        // NSWindowCollectionBehaviorCanJoinAllSpaces  = 1 << 0 = 1
+        // NSWindowCollectionBehaviorStationary         = 1 << 7 = 128
+        // NSWindowCollectionBehaviorFullScreenAuxiliary = 1 << 8 = 256
+        let behavior: u64 = 1 | 128 | 256;
+        objc_msgSend(
+            ns_window,
+            sel_registerName(b"setCollectionBehavior:\0".as_ptr() as *const i8),
+            behavior,
+        );
+    }
+}
+
 const DEFAULT_POPUP_SIZE: f64 = 360.0;
 const IPC_HOST: &str = "127.0.0.1";
 const LOG_PATH: &str = "/tmp/englist-native-toolbar.log";
@@ -101,6 +143,11 @@ pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
     log_native("setup native toolbar");
     request_system_permissions();
     initialize_toolbar_enabled(app);
+
+    // Configure popup to appear on all Spaces (must be on main thread for NSWindow access)
+    if let Some(window) = app.get_webview_window("popup_card") {
+        configure_window_all_spaces(&window);
+    }
 
     let app_handle = app.handle().clone();
     let listener = TcpListener::bind((IPC_HOST, 0))?;
