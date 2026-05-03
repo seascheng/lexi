@@ -4,18 +4,22 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AlertCircle, Clipboard, Loader2, Save, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, DisplayMode, LearningEntryInput, LearningEntryType, ToolbarTool } from "../../types";
+import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, DisplayMode, LearningEntryInput, LearningEntryType, Panel, ToolbarTool, WordEntry } from "../../types";
 import { copyText, runAiFeature, speakText } from "../../lib/ai";
 import { applyAppearanceSettings } from "../../lib/appearance";
-import { addWord, listAiFeatures, loadSettings, loadToolbarTools, savePopupPosition, savePopupSize } from "../../lib/database";
+import { addWord, listAiFeatures, listPanels, listWords, loadSettings, loadToolbarTools, savePopupPosition, savePopupSize, saveSettings } from "../../lib/database";
 import { errorMessage } from "../../lib/errors";
 import { FeatureIcon } from "../../lib/featureIcons";
 import { syncNativeToolbar } from "../../lib/nativeToolbar";
 import { Button } from "../ui/Button";
 import { FloatingFrame, type PopupResizeStart } from "./FloatingFrame";
 import { MarkdownRenderer } from "../ui/MarkdownRenderer";
+import { registerPanel, getPanelComponent } from "../../lib/panelRegistry";
+import { ReviewPanel } from "./ReviewPanel";
 
 const DEFAULT_POPUP_SIZE = 360;
+
+registerPanel("review", ReviewPanel);
 
 type WorkspaceRunStatus = "loading" | "ready" | "error";
 type WorkspaceRunKind = "feature";
@@ -62,6 +66,9 @@ export function TranslationWindow() {
   const [runs, setRuns] = useState<WorkspaceRun[]>([]);
   const [activeRunId, setActiveRunId] = useState("");
   const [isPinned, setIsPinned] = useState(true);
+  const [panels, setPanels] = useState<Panel[]>([]);
+  const [activePanelId, setActivePanelId] = useState<string>("translate");
+  const [words, setWords] = useState<WordEntry[]>([]);
   const positionSaveTimerRef = useRef<number>();
   const sizeSaveTimerRef = useRef<number>();
   const shellRef = useRef<HTMLElement>(null);
@@ -172,6 +179,10 @@ export function TranslationWindow() {
       }),
       listen("englist://popup-shown", () => {
         resetPopupWorkspace();
+      }),
+      listen("englist://words-changed", async () => {
+        const refreshed = await listWords();
+        setWords(refreshed);
       }),
     ];
 
@@ -327,10 +338,19 @@ export function TranslationWindow() {
   }, []);
 
   async function initializePopup() {
-    const [settings, nextFeatures, nextTools] = await Promise.all([loadSettings(), listAiFeatures(), loadToolbarTools()]);
-    await applyAppearanceSettings(settings);
+    const [loadedSettings, nextFeatures, nextTools, loadedPanels, loadedWords] = await Promise.all([loadSettings(), listAiFeatures(), loadToolbarTools(), listPanels(), listWords()]);
+    await applyAppearanceSettings(loadedSettings);
     setTools(nextTools);
     applyFeatureList(nextFeatures);
+    setPanels(loadedPanels);
+    setWords(loadedWords);
+
+    if (loadedSettings.activePanelId) {
+      const enabledIds = loadedPanels.filter(p => p.enabled).map(p => p.id);
+      if (enabledIds.includes(loadedSettings.activePanelId)) {
+        setActivePanelId(loadedSettings.activePanelId);
+      }
+    }
   }
 
   async function reloadFeatures() {
@@ -485,11 +505,17 @@ export function TranslationWindow() {
 
   function resetPopupWorkspace() {
     clearWorkspaceRuns();
+    setActivePanelId("translate");
     if (isBar) return;
 
     void getCurrentWindow().setSize(new LogicalSize(DEFAULT_POPUP_SIZE, DEFAULT_POPUP_SIZE)).catch((error) => {
       console.warn("Failed to reset popup size", error);
     });
+  }
+
+  function handlePanelChange(id: string) {
+    setActivePanelId(id);
+    void loadSettings().then((s) => saveSettings({ ...s, activePanelId: id }));
   }
 
   async function hidePopup() {
@@ -567,28 +593,38 @@ export function TranslationWindow() {
     <main className="translation-window-shell h-screen bg-transparent" ref={shellRef}>
       <FloatingFrame
         isPinned={isPinned}
+        panels={panels.filter(p => p.enabled).sort((a, b) => a.sortOrder - b.sortOrder)}
+        activePanelId={activePanelId}
+        onPanelChange={handlePanelChange}
         onClose={hidePopup}
         onStartResize={startWindowResize}
         onTogglePin={() => setIsPinned((currentIsPinned) => !currentIsPinned)}
       >
-        <WorkspacePage
-          actionFeatures={actionFeatures}
-          activeRun={activeRun}
-          activeRunId={activeRunId}
-          defaultFeature={defaultFeature}
-          inputText={inputText}
-          panelItems={panelItems}
-          runs={runs}
-          onDismissRun={dismissWorkspaceRun}
-          onEntryTypeChange={updateRunEntryType}
-          onClearRuns={clearWorkspaceRuns}
-          onInputChange={setInputText}
-          onRunFeatureInput={(feature) => void runFeatureFromInput(feature)}
-          onSaveLearningEntry={saveLearningEntry}
-          onToolAction={(toolId) => void handleToolAction(toolId)}
-          onSelectRun={setActiveRunId}
-          onSubmitDefault={submitDefaultFeature}
-        />
+        {activePanelId === "translate" ? (
+          <WorkspacePage
+            actionFeatures={actionFeatures}
+            activeRun={activeRun}
+            activeRunId={activeRunId}
+            defaultFeature={defaultFeature}
+            inputText={inputText}
+            panelItems={panelItems}
+            runs={runs}
+            onDismissRun={dismissWorkspaceRun}
+            onEntryTypeChange={updateRunEntryType}
+            onClearRuns={clearWorkspaceRuns}
+            onInputChange={setInputText}
+            onRunFeatureInput={(feature) => void runFeatureFromInput(feature)}
+            onSaveLearningEntry={saveLearningEntry}
+            onToolAction={(toolId) => void handleToolAction(toolId)}
+            onSelectRun={setActiveRunId}
+            onSubmitDefault={submitDefaultFeature}
+          />
+        ) : (() => {
+          const PanelComponent = getPanelComponent(activePanelId);
+          return PanelComponent ? (
+            <PanelComponent words={words} onWordsChanged={() => listWords().then(setWords)} />
+          ) : null;
+        })()}
       </FloatingFrame>
     </main>
   );
