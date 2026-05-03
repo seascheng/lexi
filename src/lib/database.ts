@@ -1,8 +1,8 @@
 import Database from "@tauri-apps/plugin-sql";
-import { DEFAULT_CUSTOM_PROMPT_TEMPLATE, DEFAULT_PROMPT_TEMPLATE, DEFAULT_REVIEW_FEATURE, DEFAULT_SETTINGS, DEFAULT_TRANSLATION_FEATURE } from "./defaults";
+import { DEFAULT_CUSTOM_PROMPT_TEMPLATE, DEFAULT_PROMPT_TEMPLATE, DEFAULT_REVIEW_FEATURE, DEFAULT_SETTINGS, DEFAULT_TOOLS, DEFAULT_TRANSLATION_FEATURE } from "./defaults";
 import { isFeatureIcon } from "./featureIcons";
 import { currentIsoDate, isTauriRuntime } from "./platform";
-import type { AiFeature, AiFeatureIcon, AiFeatureKind, AiOutputMode, AppSettings, LearningEntryInput, LearningEntryType, ReviewUpdate, WordEntry, WordStatus } from "../types";
+import type { AiFeature, AiFeatureIcon, AiFeatureKind, AiOutputMode, AppSettings, LearningEntryInput, LearningEntryType, ReviewUpdate, ToolbarTool, WordEntry, WordStatus } from "../types";
 
 type SqlDatabase = Awaited<ReturnType<typeof Database.load>>;
 
@@ -11,6 +11,7 @@ const SETTINGS_KEY = "englist.settings";
 const AI_FEATURES_KEY = "englist.aiFeatures";
 const POPUP_POSITION_KEY = "popupCardPosition";
 const POPUP_SIZE_KEY = "popupCardSize";
+const TOOL_SETTINGS_KEY = "toolbar_tools";
 
 export interface WindowPosition {
   x: number;
@@ -101,6 +102,66 @@ export async function savePopupSize(size: WindowSize) {
     POPUP_SIZE_KEY,
     serialized,
   ]);
+}
+
+export async function loadToolbarTools(): Promise<ToolbarTool[]> {
+  if (!isTauriRuntime()) return loadBrowserToolbarTools();
+
+  const db = await getSqlDatabase();
+  const rows = await db.select<Array<{ value: string }>>(
+    "SELECT value FROM settings WHERE key = $1 LIMIT 1",
+    [TOOL_SETTINGS_KEY],
+  );
+
+  if (!rows[0]?.value) return DEFAULT_TOOLS.map((tool) => ({ ...tool }));
+
+  try {
+    const saved = JSON.parse(rows[0].value) as Array<{ id: string; enabled: boolean; sortOrder: number }>;
+    return DEFAULT_TOOLS.map((defaultTool) => {
+      const override = saved.find((item) => item.id === defaultTool.id);
+      return {
+        ...defaultTool,
+        enabled: override?.enabled ?? defaultTool.enabled,
+        sortOrder: override?.sortOrder ?? defaultTool.sortOrder,
+      };
+    });
+  } catch {
+    return DEFAULT_TOOLS.map((tool) => ({ ...tool }));
+  }
+}
+
+export async function saveToolbarTools(tools: ToolbarTool[]): Promise<void> {
+  const data = tools.map((tool) => ({ id: tool.id, enabled: tool.enabled, sortOrder: tool.sortOrder }));
+
+  if (!isTauriRuntime()) {
+    localStorage.setItem("englist.toolbarTools", JSON.stringify(data));
+    return;
+  }
+
+  const db = await getSqlDatabase();
+  await db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ($1, $2)", [
+    TOOL_SETTINGS_KEY,
+    JSON.stringify(data),
+  ]);
+}
+
+function loadBrowserToolbarTools(): ToolbarTool[] {
+  const saved = localStorage.getItem("englist.toolbarTools");
+  if (!saved) return DEFAULT_TOOLS.map((tool) => ({ ...tool }));
+
+  try {
+    const overrides = JSON.parse(saved) as Array<{ id: string; enabled: boolean; sortOrder: number }>;
+    return DEFAULT_TOOLS.map((defaultTool) => {
+      const override = overrides.find((item) => item.id === defaultTool.id);
+      return {
+        ...defaultTool,
+        enabled: override?.enabled ?? defaultTool.enabled,
+        sortOrder: override?.sortOrder ?? defaultTool.sortOrder,
+      };
+    });
+  } catch {
+    return DEFAULT_TOOLS.map((tool) => ({ ...tool }));
+  }
 }
 
 export async function listAiFeatures(): Promise<AiFeature[]> {
