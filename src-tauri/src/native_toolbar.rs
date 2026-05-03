@@ -195,19 +195,24 @@ fn default_toolbar_actions() -> Vec<ToolbarActionItem> {
             icon: "languages".into(),
         },
         ToolbarActionItem {
-            id: "rewrite".into(),
-            title: "Rewrite".into(),
-            icon: "pen".into(),
+            id: "copy".into(),
+            title: "Copy".into(),
+            icon: "clipboard".into(),
+        },
+        ToolbarActionItem {
+            id: "search".into(),
+            title: "Search".into(),
+            icon: "search".into(),
+        },
+        ToolbarActionItem {
+            id: "read".into(),
+            title: "Read".into(),
+            icon: "volume".into(),
         },
         ToolbarActionItem {
             id: "extract".into(),
             title: "Extract".into(),
             icon: "highlighter".into(),
-        },
-        ToolbarActionItem {
-            id: "speak".into(),
-            title: "Speak".into(),
-            icon: "volume".into(),
         },
     ]
 }
@@ -666,6 +671,30 @@ fn post_to_helper(port: u16, path: &str, body: &str) -> std::io::Result<()> {
     )
 }
 
+fn copy_to_clipboard(text: String) -> Result<(), String> {
+    let escaped = format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""));
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(format!("set the clipboard to {escaped}"))
+        .output()
+        .map_err(|e| format!("clipboard write failed: {e}"))?;
+
+    if !output.status.success() {
+        return Err("clipboard write failed".into());
+    }
+    Ok(())
+}
+
+fn open_search(text: String) -> Result<(), String> {
+    let query = urlencoding::encode(&text);
+    let url = format!("https://www.google.com/search?q={query}");
+    std::process::Command::new("open")
+        .arg(&url)
+        .spawn()
+        .map_err(|e| format!("failed to open URL: {e}"))?;
+    Ok(())
+}
+
 fn dispatch_toolbar_action(
     app: &tauri::AppHandle,
     action: ToolbarActionRequest,
@@ -676,9 +705,11 @@ fn dispatch_toolbar_action(
     }
 
     match action.action.as_str() {
+        "copy" => copy_to_clipboard(text),
+        "search" => open_search(text),
+        "read" | "speak" => speak_text(text),
         "translate" | "translation" => open_popup_with_feature(app, text, "translation"),
         "extract" => open_popup_with_extract(app, text),
-        "speak" => speak_text(text),
         feature_id => open_popup_with_feature(app, text, feature_id),
     }
 }
