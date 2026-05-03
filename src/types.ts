@@ -80,6 +80,7 @@ export interface ToolbarTool {
   icon: AiFeatureIcon;
   enabled: boolean;
   sortOrder: number;
+  config: Record<string, unknown>;
 }
 
 export interface AiRunResult {

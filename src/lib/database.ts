@@ -116,13 +116,14 @@ export async function loadToolbarTools(): Promise<ToolbarTool[]> {
   if (!rows[0]?.value) return DEFAULT_TOOLS.map((tool) => ({ ...tool }));
 
   try {
-    const saved = JSON.parse(rows[0].value) as Array<{ id: string; enabled: boolean; sortOrder: number }>;
+    const saved = JSON.parse(rows[0].value) as Array<{ id: string; enabled: boolean; sortOrder: number; config?: Record<string, unknown> }>;
     return DEFAULT_TOOLS.map((defaultTool) => {
       const override = saved.find((item) => item.id === defaultTool.id);
       return {
         ...defaultTool,
         enabled: override?.enabled ?? defaultTool.enabled,
         sortOrder: override?.sortOrder ?? defaultTool.sortOrder,
+        config: override?.config ?? defaultTool.config,
       };
     });
   } catch {
@@ -131,7 +132,7 @@ export async function loadToolbarTools(): Promise<ToolbarTool[]> {
 }
 
 export async function saveToolbarTools(tools: ToolbarTool[]): Promise<void> {
-  const data = tools.map((tool) => ({ id: tool.id, enabled: tool.enabled, sortOrder: tool.sortOrder }));
+  const data = tools.map((tool) => ({ id: tool.id, enabled: tool.enabled, sortOrder: tool.sortOrder, config: tool.config }));
 
   if (!isTauriRuntime()) {
     localStorage.setItem("englist.toolbarTools", JSON.stringify(data));
@@ -150,13 +151,14 @@ function loadBrowserToolbarTools(): ToolbarTool[] {
   if (!saved) return DEFAULT_TOOLS.map((tool) => ({ ...tool }));
 
   try {
-    const overrides = JSON.parse(saved) as Array<{ id: string; enabled: boolean; sortOrder: number }>;
+    const overrides = JSON.parse(saved) as Array<{ id: string; enabled: boolean; sortOrder: number; config?: Record<string, unknown> }>;
     return DEFAULT_TOOLS.map((defaultTool) => {
       const override = overrides.find((item) => item.id === defaultTool.id);
       return {
         ...defaultTool,
         enabled: override?.enabled ?? defaultTool.enabled,
         sortOrder: override?.sortOrder ?? defaultTool.sortOrder,
+        config: override?.config ?? defaultTool.config,
       };
     });
   } catch {
