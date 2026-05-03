@@ -13,14 +13,14 @@ import { TranslationWindow } from "./components/translation/TranslationWindow";
 import { VocabularyPage } from "./pages/VocabularyPage";
 import { ReviewPage } from "./pages/ReviewPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { FeaturesPage } from "./pages/FeaturesPage";
+import { ConfigsPage } from "./pages/ConfigsPage";
 
-type Page = "vocabulary" | "review" | "features" | "settings";
+type Page = "vocabulary" | "review" | "configs" | "settings";
 
 const navItems: Array<{ page: Page; label: string; icon: JSX.Element }> = [
   { page: "vocabulary", label: "Expressions", icon: <BookOpen size={17} /> },
   { page: "review", label: "Review", icon: <Languages size={17} /> },
-  { page: "features", label: "Features", icon: <Sparkles size={17} /> },
+  { page: "configs", label: "Configs", icon: <Sparkles size={17} /> },
   { page: "settings", label: "Settings", icon: <Settings size={17} /> },
 ];
 
@@ -112,8 +112,8 @@ function MainWindow() {
       <VocabularyPage words={words} onWordsChanged={refreshWords} />
     ) : page === "review" ? (
       <ReviewPage words={words} onWordsChanged={refreshWords} />
-    ) : page === "features" ? (
-      <FeaturesPage />
+    ) : page === "configs" ? (
+      <ConfigsPage />
     ) : page === "settings" && settings ? (
       <SettingsPage settings={settings} onSettingsChanged={handleSettingsChanged} />
     ) : (

@@ -1,10 +1,11 @@
 import { emit } from "@tauri-apps/api/event";
-import { Eye, EyeOff, Plus, Save, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Layers, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AiFeature,
   AiFeatureIcon,
   AppSettings,
+  Panel,
   ToolbarTool,
 } from "../types";
 import {
@@ -15,9 +16,11 @@ import {
 import {
   deleteAiFeature,
   listAiFeatures,
+  listPanels,
   loadSettings,
   loadToolbarTools,
   saveAiFeature,
+  savePanel,
   saveSettings,
   saveToolbarTools,
 } from "../lib/database";
@@ -36,12 +39,14 @@ import { Field, Input, Select, Textarea } from "../components/ui/Field";
 type DraftItem =
   | { kind: "toolbar-config" }
   | { kind: "panel-config" }
+  | { kind: "panels-config" }
   | { kind: "tool"; data: ToolbarTool }
   | { kind: "feature"; data: AiFeature };
 
-export function FeaturesPage() {
+export function ConfigsPage() {
   const [features, setFeatures] = useState<AiFeature[]>([]);
   const [tools, setTools] = useState<ToolbarTool[]>([]);
+  const [panels, setPanels] = useState<Panel[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [draft, setDraft] = useState<DraftItem | null>(null);
   const [status, setStatus] = useState("");
@@ -60,14 +65,16 @@ export function FeaturesPage() {
   }, []);
 
   async function refresh() {
-    const [nextFeatures, nextTools, nextSettings] = await Promise.all([
+    const [nextFeatures, nextTools, nextSettings, loadedPanels] = await Promise.all([
       listAiFeatures(),
       loadToolbarTools(),
       loadSettings(),
+      listPanels(),
     ]);
     setFeatures(nextFeatures);
     setTools(nextTools);
     setSettings(nextSettings);
+    setPanels(loadedPanels);
     setDraft((current) => current ?? { kind: "toolbar-config" });
   }
 
@@ -356,6 +363,13 @@ export function FeaturesPage() {
     setStatus("");
   }
 
+  // --- Panels Config ---
+
+  async function savePanelDraft(panel: Panel) {
+    await savePanel(panel);
+    setPanels(await listPanels());
+  }
+
   // --- Selected ID tracking ---
 
   const selectedId =
@@ -365,7 +379,9 @@ export function FeaturesPage() {
         ? draft.data.id
         : draft?.kind === "toolbar-config"
           ? "__toolbar__"
-          : "__panel__";
+          : draft?.kind === "panels-config"
+            ? "__panels__"
+            : "__panel__";
 
   return (
     <div className="grid h-full min-h-0 gap-3 overflow-hidden lg:grid-cols-[220px_1fr]">
@@ -384,6 +400,12 @@ export function FeaturesPage() {
           label="Panel"
           active={selectedId === "__panel__"}
           onClick={() => setDraft({ kind: "panel-config" })}
+        />
+        <NavItem
+          icon={<Layers size={15} />}
+          label="Panels"
+          active={selectedId === "__panels__"}
+          onClick={() => setDraft({ kind: "panels-config" })}
         />
 
         {/* Tools Section */}
@@ -440,6 +462,8 @@ export function FeaturesPage() {
             onToggle={togglePanelItem}
             onReorder={(from, to) => void applyPanelReorder(from, to)}
           />
+        ) : draft?.kind === "panels-config" ? (
+          <PanelsConfigPanel panels={panels} onSave={savePanelDraft} />
         ) : draft?.kind === "tool" ? (
           <ToolConfigPanel
             tool={draft.data}
@@ -1164,6 +1188,35 @@ function FeatureConfigPanel({
         </div>
       ) : null}
     </>
+  );
+}
+
+/* ========== Right Panel: Panels Config ========== */
+
+function PanelsConfigPanel({ panels, onSave }: { panels: Panel[]; onSave: (panel: Panel) => void }) {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-sm font-medium text-white">Popup Panels</h3>
+        <p className="text-xs text-white/40">Configure which panels appear in the popup window</p>
+      </div>
+      <div className="space-y-2">
+        {panels.map((panel) => (
+          <div key={panel.id} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2">
+            <div className="flex items-center gap-2">
+              <FeatureIcon icon={panel.icon} size={16} />
+              <span className="text-sm text-white">{panel.name}</span>
+            </div>
+            <button
+              onClick={() => onSave({ ...panel, enabled: !panel.enabled })}
+              className={`h-5 w-9 rounded-full transition-colors ${panel.enabled ? "bg-indigo-600" : "bg-white/10"}`}
+            >
+              <div className={`h-4 w-4 rounded-full bg-white shadow transition-transform ${panel.enabled ? "translate-x-4" : "translate-x-0.5"}`} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
