@@ -1,5 +1,5 @@
 import { emit } from "@tauri-apps/api/event";
-import { Eye, EyeOff, Layers, Plus, Save, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AiFeature,
@@ -38,8 +38,7 @@ import { Field, Input, Select, Textarea } from "../components/ui/Field";
 
 type DraftItem =
   | { kind: "toolbar-config" }
-  | { kind: "panel-config" }
-  | { kind: "panels-config" }
+  | { kind: "panel"; panelId: string }
   | { kind: "tool"; data: ToolbarTool }
   | { kind: "feature"; data: AiFeature };
 
@@ -374,9 +373,9 @@ export function ConfigsPage() {
         ? draft.data.id
         : draft?.kind === "toolbar-config"
           ? "__toolbar__"
-          : draft?.kind === "panels-config"
-            ? "__panels__"
-            : "__panel__";
+          : draft?.kind === "panel"
+            ? `__panel_${draft.panelId}__`
+            : "__none__";
 
   return (
     <div className="grid h-full min-h-0 gap-3 overflow-hidden lg:grid-cols-[220px_1fr]">
@@ -389,18 +388,6 @@ export function ConfigsPage() {
           label="Toolbar"
           active={selectedId === "__toolbar__"}
           onClick={() => setDraft({ kind: "toolbar-config" })}
-        />
-        <NavItem
-          icon={<PanelIcon />}
-          label="Panel"
-          active={selectedId === "__panel__"}
-          onClick={() => setDraft({ kind: "panel-config" })}
-        />
-        <NavItem
-          icon={<Layers size={15} />}
-          label="Panels"
-          active={selectedId === "__panels__"}
-          onClick={() => setDraft({ kind: "panels-config" })}
         />
 
         {/* Tools Section */}
@@ -437,6 +424,19 @@ export function ConfigsPage() {
             onClick={() => setDraft({ kind: "feature", data: f })}
           />
         ))}
+
+        {/* Panels Section */}
+        <SectionLabel>Panels</SectionLabel>
+        {panels.map((panel) => (
+          <NavItem
+            key={panel.id}
+            icon={<FeatureIcon icon={panel.icon} size={15} />}
+            label={panel.name}
+            badge={!panel.enabled ? "off" : undefined}
+            active={selectedId === `__panel_${panel.id}__`}
+            onClick={() => setDraft({ kind: "panel", panelId: panel.id })}
+          />
+        ))}
       </Card>
 
       {/* Right Panel */}
@@ -451,14 +451,22 @@ export function ConfigsPage() {
             onReorder={(from, to) => void applyToolbarReorder(from, to)}
             onToggle={toggleToolbarItem}
           />
-        ) : draft?.kind === "panel-config" ? (
-          <PanelConfigPanel
+        ) : draft?.kind === "panel" && draft.panelId === "translate" ? (
+          <TranslatePanelConfig
+            panel={panels.find(p => p.id === "translate")}
             items={allPanelItems}
+            onTogglePanelEnabled={(enabled: boolean) => {
+              const p = panels.find(p => p.id === "translate");
+              if (p) void savePanelDraft({ ...p, enabled });
+            }}
             onToggle={togglePanelItem}
-            onReorder={(from, to) => void applyPanelReorder(from, to)}
+            onReorder={(from: number, to: number) => void applyPanelReorder(from, to)}
           />
-        ) : draft?.kind === "panels-config" ? (
-          <PanelsConfigPanel panels={panels} onSave={savePanelDraft} />
+        ) : draft?.kind === "panel" ? (
+          <GenericPanelConfig
+            panel={panels.find(p => p.id === draft.panelId)}
+            onSave={savePanelDraft}
+          />
         ) : draft?.kind === "tool" ? (
           <ToolConfigPanel
             tool={draft.data}
@@ -1165,31 +1173,56 @@ function FeatureConfigPanel({
   );
 }
 
-/* ========== Right Panel: Panels Config ========== */
+/* ========== Right Panel: Panel Configs ========== */
 
-function PanelsConfigPanel({ panels, onSave }: { panels: Panel[]; onSave: (panel: Panel) => void }) {
+function TranslatePanelConfig({
+  panel,
+  items,
+  onTogglePanelEnabled,
+  onToggle,
+  onReorder,
+}: {
+  panel: Panel | undefined;
+  items: { id: string; name: string; icon: AiFeatureIcon; enabled: boolean; sortOrder: number; kind: "tool" | "ai" }[];
+  onTogglePanelEnabled: (enabled: boolean) => void;
+  onToggle: (item: { id: string; kind: "tool" | "ai" }) => void;
+  onReorder: (from: number, to: number) => void;
+}) {
+  if (!panel) return null;
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-sm font-medium text-strong">Popup Panels</h3>
-        <p className="text-xs text-muted">Configure which panels appear in the popup window</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-medium text-strong">Translate Panel</h3>
+          <p className="text-xs text-muted">AI translation workspace in the popup</p>
+        </div>
+        <ToggleSwitch checked={panel.enabled} onChange={onTogglePanelEnabled} />
       </div>
-      <div className="space-y-2">
-        {panels.map((panel) => (
-          <div key={panel.id} className="flex items-center justify-between rounded-lg bg-surface px-3 py-2">
-            <div className="flex items-center gap-2">
-              <FeatureIcon icon={panel.icon} size={16} />
-              <span className="text-sm text-strong">{panel.name}</span>
-            </div>
-            <button
-              onClick={() => onSave({ ...panel, enabled: !panel.enabled })}
-              className={`h-5 w-9 rounded-full transition-colors ${panel.enabled ? "bg-accent" : "bg-surface-hover"}`}
-            >
-              <div className={`h-4 w-4 rounded-full bg-accent-foreground shadow transition-transform ${panel.enabled ? "translate-x-4" : "translate-x-0.5"}`} />
-            </button>
-          </div>
-        ))}
+      <PanelConfigPanel items={items} onToggle={onToggle} onReorder={onReorder} />
+    </div>
+  );
+}
+
+function GenericPanelConfig({
+  panel,
+  onSave,
+}: {
+  panel: Panel | undefined;
+  onSave: (panel: Panel) => void;
+}) {
+  if (!panel) return null;
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-medium text-strong">{panel.name} Panel</h3>
+        </div>
+        <ToggleSwitch
+          checked={panel.enabled}
+          onChange={(enabled) => onSave({ ...panel, enabled })}
+        />
       </div>
+      <p className="text-xs text-muted">Panel-specific settings coming soon.</p>
     </div>
   );
 }
