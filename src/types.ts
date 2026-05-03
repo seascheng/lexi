@@ -6,7 +6,8 @@ export type WordStatus = "new" | "learning" | "mastered";
 export type ReviewRating = "again" | "hard" | "good" | "easy";
 export type AiFeatureKind = "translation" | "review" | "custom";
 export type AiOutputMode = "translation_json" | "plain_text";
-export type AiFeatureIcon = "languages" | "wand" | "pen" | "sparkles" | "book-plus" | "highlighter" | "file-text" | "message";
+export type AiFeatureIcon = "languages" | "wand" | "pen" | "sparkles" | "book-plus" | "highlighter" | "file-text" | "message" | "clipboard" | "search" | "volume";
+export type ToolbarToolId = "copy" | "search" | "read";
 export type LearningEntryType = "word" | "phrase" | "pattern";
 
 export interface TranslationResult {
@@ -70,6 +71,15 @@ export interface AiFeature {
   icon: AiFeatureIcon;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface ToolbarTool {
+  id: ToolbarToolId;
+  name: string;
+  description: string;
+  icon: AiFeatureIcon;
+  enabled: boolean;
+  sortOrder: number;
 }
 
 export interface AiRunResult {

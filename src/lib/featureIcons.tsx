@@ -1,4 +1,4 @@
-import { BookPlus, FileText, Highlighter, Languages, MessageSquare, PenLine, Sparkles, Wand2 } from "lucide-react";
+import { BookPlus, Clipboard, FileText, Highlighter, Languages, MessageSquare, PenLine, Search, Sparkles, Volume2, Wand2 } from "lucide-react";
 import type { AiFeatureIcon } from "../types";
 
 export const FEATURE_ICON_OPTIONS: Array<{ value: AiFeatureIcon; label: string }> = [
@@ -10,6 +10,9 @@ export const FEATURE_ICON_OPTIONS: Array<{ value: AiFeatureIcon; label: string }
   { value: "highlighter", label: "Highlighter" },
   { value: "file-text", label: "File text" },
   { value: "message", label: "Message" },
+  { value: "clipboard", label: "Clipboard" },
+  { value: "search", label: "Search" },
+  { value: "volume", label: "Volume" },
 ];
 
 export function FeatureIcon({ icon, size = 16 }: { icon: AiFeatureIcon; size?: number }) {
@@ -20,6 +23,9 @@ export function FeatureIcon({ icon, size = 16 }: { icon: AiFeatureIcon; size?: n
   if (icon === "highlighter") return <Highlighter size={size} />;
   if (icon === "file-text") return <FileText size={size} />;
   if (icon === "message") return <MessageSquare size={size} />;
+  if (icon === "clipboard") return <Clipboard size={size} />;
+  if (icon === "search") return <Search size={size} />;
+  if (icon === "volume") return <Volume2 size={size} />;
   return <Wand2 size={size} />;
 }
 

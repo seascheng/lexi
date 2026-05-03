@@ -1,4 +1,4 @@
-import type { AiFeature, AppSettings } from "../types";
+import type { AiFeature, AppSettings, ToolbarTool } from "../types";
 
 export const DEFAULT_PROMPT_TEMPLATE = `You are a concise bilingual dictionary.
 Translate the selected text to {{targetLanguage}} and return Markdown only.
@@ -58,3 +58,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   apiKey: "",
   model: "gpt-4o-mini",
 };
+
+export const TOOL_DESCRIPTIONS: Record<string, string> = {
+  copy: "Copy selected text to clipboard.",
+  search: "Search selected text in Google.",
+  read: "Read selected text aloud.",
+};
+
+export const DEFAULT_TOOLS: ToolbarTool[] = [
+  { id: "copy", name: "Copy", description: TOOL_DESCRIPTIONS.copy, icon: "clipboard", enabled: true, sortOrder: 100 },
+  { id: "search", name: "Search", description: TOOL_DESCRIPTIONS.search, icon: "search", enabled: true, sortOrder: 110 },
+  { id: "read", name: "Read", description: TOOL_DESCRIPTIONS.read, icon: "volume", enabled: true, sortOrder: 120 },
+];
