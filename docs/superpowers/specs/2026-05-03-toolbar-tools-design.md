@@ -81,12 +81,27 @@ Currently `syncNativeToolbarActions()` appends a `speak` button when any feature
 
 ## FeaturesPage UI
 
-### Left panel
+### Left panel — three sections
 
-Split into two sections:
+**1. Toolbar Order (top)**
 
-1. **AI Features** — current behavior (list of features, create button)
-2. **Tools** — shows Copy, Search, Read. No create/delete. Each row shows icon, name, enabled status.
+A unified preview list showing ALL toolbar items (tools + features) merged and sorted by `sortOrder`. This is the authoritative view of what appears on the native toolbar.
+
+- Each row: icon + name + enable/disable toggle
+- Rows tagged by type: "Tool" badge for tools, "AI" badge for features
+- Up/down arrows to adjust sort order (updates the underlying tool/feature sortOrder)
+- Clicking a row selects it and shows detail in the right panel
+- Extract is always appended at the end (not shown in this list)
+
+This lets the user see and arrange the exact toolbar layout in one place.
+
+**2. AI Features (below)**
+
+Current behavior — list of AI features with create button. Selecting a feature here also selects it in the right panel.
+
+**3. Tools (below)**
+
+Shows Copy, Search, Read. No create/delete. Selecting a tool shows its detail in the right panel.
 
 ### Right panel (tool selected)
 
@@ -103,6 +118,12 @@ No prompt editor, no output mode, no target language, no delete button.
 ### Right panel (feature selected)
 
 Unchanged from current behavior.
+
+### Sort order data flow
+
+- Tool sort order changes → saved to `toolbar_tools` setting
+- Feature sort order changes → saved to the feature's `ai_features` row
+- The Toolbar Order list merges both sources on load, sorts by `sortOrder`
 
 ## Database Layer (`database.ts`)
 
