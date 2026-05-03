@@ -82,6 +82,179 @@ type AXUIElementRef = *const std::ffi::c_void;
 static TOOLBAR_PORT: OnceLock<Mutex<Option<u16>>> = OnceLock::new();
 static TOOLBAR_ACTIONS: OnceLock<Mutex<Vec<ToolbarActionItem>>> = OnceLock::new();
 static TOOLBAR_ENABLED: OnceLock<Mutex<bool>> = OnceLock::new();
+static POPUP_SHORTCUT: OnceLock<Mutex<ShortcutConfig>> = OnceLock::new();
+
+/// Parsed keyboard shortcut for showing the popup.
+#[derive(Clone, Copy)]
+struct ShortcutConfig {
+    cmd: bool,
+    shift: bool,
+    ctrl: bool,
+    alt: bool,
+    key_code: u16,
+}
+
+impl ShortcutConfig {
+    fn default_shortcut() -> Self {
+        Self {
+            cmd: true,
+            shift: true,
+            ctrl: false,
+            alt: false,
+            key_code: KeyCode::ANSI_T as u16,
+        }
+    }
+
+    fn parse(shortcut: &str) -> Option<Self> {
+        let parts: Vec<&str> = shortcut.split('+').collect();
+        if parts.len() < 2 {
+            return None;
+        }
+
+        let mut config = Self {
+            cmd: false,
+            shift: false,
+            ctrl: false,
+            alt: false,
+            key_code: 0,
+        };
+
+        for part in &parts[..parts.len() - 1] {
+            match part.trim().to_lowercase().as_str() {
+                "cmd" | "command" => config.cmd = true,
+                "shift" => config.shift = true,
+                "ctrl" | "control" => config.ctrl = true,
+                "alt" | "option" => config.alt = true,
+                _ => return None,
+            }
+        }
+
+        // Require at least one modifier
+        if !config.cmd && !config.shift && !config.ctrl && !config.alt {
+            return None;
+        }
+
+        config.key_code = key_name_to_code(parts.last()?.trim())?;
+        Some(config)
+    }
+}
+
+fn key_name_to_code(name: &str) -> Option<u16> {
+    Some(match name.to_lowercase().as_str() {
+        "a" => KeyCode::ANSI_A,
+        "b" => KeyCode::ANSI_B,
+        "c" => KeyCode::ANSI_C,
+        "d" => KeyCode::ANSI_D,
+        "e" => KeyCode::ANSI_E,
+        "f" => KeyCode::ANSI_F,
+        "g" => KeyCode::ANSI_G,
+        "h" => KeyCode::ANSI_H,
+        "i" => KeyCode::ANSI_I,
+        "j" => KeyCode::ANSI_J,
+        "k" => KeyCode::ANSI_K,
+        "l" => KeyCode::ANSI_L,
+        "m" => KeyCode::ANSI_M,
+        "n" => KeyCode::ANSI_N,
+        "o" => KeyCode::ANSI_O,
+        "p" => KeyCode::ANSI_P,
+        "q" => KeyCode::ANSI_Q,
+        "r" => KeyCode::ANSI_R,
+        "s" => KeyCode::ANSI_S,
+        "t" => KeyCode::ANSI_T,
+        "u" => KeyCode::ANSI_U,
+        "v" => KeyCode::ANSI_V,
+        "w" => KeyCode::ANSI_W,
+        "x" => KeyCode::ANSI_X,
+        "y" => KeyCode::ANSI_Y,
+        "z" => KeyCode::ANSI_Z,
+        "0" => KeyCode::ANSI_0,
+        "1" => KeyCode::ANSI_1,
+        "2" => KeyCode::ANSI_2,
+        "3" => KeyCode::ANSI_3,
+        "4" => KeyCode::ANSI_4,
+        "5" => KeyCode::ANSI_5,
+        "6" => KeyCode::ANSI_6,
+        "7" => KeyCode::ANSI_7,
+        "8" => KeyCode::ANSI_8,
+        "9" => KeyCode::ANSI_9,
+        "space" => KeyCode::SPACE,
+        "return" | "enter" => KeyCode::RETURN,
+        "tab" => KeyCode::TAB,
+        "escape" | "esc" => KeyCode::ESCAPE,
+        "backspace" | "delete" => KeyCode::DELETE,
+        "f1" => KeyCode::F1,
+        "f2" => KeyCode::F2,
+        "f3" => KeyCode::F3,
+        "f4" => KeyCode::F4,
+        "f5" => KeyCode::F5,
+        "f6" => KeyCode::F6,
+        "f7" => KeyCode::F7,
+        "f8" => KeyCode::F8,
+        "f9" => KeyCode::F9,
+        "f10" => KeyCode::F10,
+        "f11" => KeyCode::F11,
+        "f12" => KeyCode::F12,
+        "=" | "equal" => KeyCode::ANSI_EQUAL,
+        "-" | "minus" => KeyCode::ANSI_MINUS,
+        "[" | "leftbracket" => KeyCode::ANSI_LEFT_BRACKET,
+        "]" | "rightbracket" => KeyCode::ANSI_RIGHT_BRACKET,
+        "'" | "quote" => KeyCode::ANSI_QUOTE,
+        ";" | "semicolon" => KeyCode::ANSI_SEMICOLON,
+        "\\" | "backslash" => KeyCode::ANSI_BACKSLASH,
+        "," | "comma" => KeyCode::ANSI_COMMA,
+        "/" | "slash" => KeyCode::ANSI_SLASH,
+        "." | "period" => KeyCode::ANSI_PERIOD,
+        "`" | "grave" => KeyCode::ANSI_GRAVE,
+        _ => return None,
+    } as u16)
+}
+
+fn current_popup_shortcut() -> ShortcutConfig {
+    POPUP_SHORTCUT
+        .get_or_init(|| Mutex::new(ShortcutConfig::default_shortcut()))
+        .lock()
+        .map(|config| *config)
+        .unwrap_or_else(|_| ShortcutConfig::default_shortcut())
+}
+
+fn initialize_popup_shortcut(app: &tauri::App) {
+    let path = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join("englist.db"));
+
+    let shortcut = path
+        .as_ref()
+        .and_then(|p| read_popup_shortcut_from_sqlite(p))
+        .unwrap_or_else(|| "Cmd+Shift+T".to_string());
+
+    if let Some(config) = ShortcutConfig::parse(&shortcut) {
+        if let Ok(mut current) = POPUP_SHORTCUT.get_or_init(|| Mutex::new(ShortcutConfig::default_shortcut())).lock() {
+            *current = config;
+        }
+    }
+    log_native(&format!("initial popup shortcut={shortcut}"));
+}
+
+fn read_popup_shortcut_from_sqlite(path: &Path) -> Option<String> {
+    let output = Command::new("sqlite3")
+        .arg(path)
+        .arg("SELECT value FROM settings WHERE key = 'popupShortcut' LIMIT 1;")
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        return None;
+    }
+
+    Some(value)
+}
 
 #[derive(Clone, Serialize)]
 struct AiRequestPayload {
@@ -143,6 +316,7 @@ pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
     log_native("setup native toolbar");
     request_system_permissions();
     initialize_toolbar_enabled(app);
+    initialize_popup_shortcut(app);
 
     // Configure popup to appear on all Spaces (must be on main thread for NSWindow access)
     if let Some(window) = app.get_webview_window("popup_card") {
@@ -263,6 +437,19 @@ pub fn set_native_toolbar_enabled(enabled: bool) -> Result<(), String> {
         let _ = hide_native_toolbar();
     }
 
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_popup_shortcut(shortcut: String) -> Result<(), String> {
+    let config = ShortcutConfig::parse(&shortcut)
+        .ok_or_else(|| format!("Invalid shortcut format: {shortcut}"))?;
+    let mut current = POPUP_SHORTCUT
+        .get_or_init(|| Mutex::new(ShortcutConfig::default_shortcut()))
+        .lock()
+        .map_err(|_| "popup shortcut state is unavailable".to_string())?;
+    *current = config;
+    log_native(&format!("set popup shortcut={shortcut}"));
     Ok(())
 }
 
@@ -538,15 +725,31 @@ fn handle_system_event(
             });
         }
         CGEventType::KeyDown if is_translate_shortcut(event) => {
+            log_native("shortcut key detected");
             let app = app.clone();
             thread::spawn(move || {
+                // Show popup immediately — no delay
+                let _ = show_popup(&app);
+                // Then read selected text and send to popup
                 thread::sleep(Duration::from_millis(35));
                 match read_selected_text() {
                     Ok(Some(text)) => {
-                        let _ = open_popup_with_feature(&app, text, "translation");
+                        log_native(&format!("shortcut text length={}", text.len()));
+                        let _ = app.emit(
+                            "englist://ai-request",
+                            AiRequestPayload {
+                                text,
+                                mode: "popup_card",
+                                feature_id: "translation".to_string(),
+                            },
+                        );
                     }
-                    Ok(None) => {}
-                    Err(error) => eprintln!("Could not read selected text for shortcut: {error}"),
+                    Ok(None) => {
+                        log_native("shortcut no selected text");
+                    }
+                    Err(error) => {
+                        log_native(&format!("shortcut read text error: {error}"));
+                    }
                 }
             });
         }
@@ -745,11 +948,14 @@ fn is_window_chrome_role(role: Option<&str>, subrole: Option<&str>) -> bool {
 }
 
 fn is_translate_shortcut(event: &CGEvent) -> bool {
+    let config = current_popup_shortcut();
     let key_code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
     let flags = event.get_flags();
-    key_code == KeyCode::ANSI_T
-        && flags.contains(CGEventFlags::CGEventFlagCommand)
-        && flags.contains(CGEventFlags::CGEventFlagShift)
+    key_code == config.key_code
+        && (!config.cmd || flags.contains(CGEventFlags::CGEventFlagCommand))
+        && (!config.shift || flags.contains(CGEventFlags::CGEventFlagShift))
+        && (!config.ctrl || flags.contains(CGEventFlags::CGEventFlagControl))
+        && (!config.alt || flags.contains(CGEventFlags::CGEventFlagAlternate))
 }
 
 /// Read selected text via Accessibility API (no clipboard pollution).

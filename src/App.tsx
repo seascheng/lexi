@@ -52,6 +52,9 @@ function MainWindow() {
       void invoke("set_native_toolbar_theme", { theme: settings.theme }).catch((error) => {
         console.warn("Failed to sync native toolbar theme", error);
       });
+      void invoke("set_popup_shortcut", { shortcut: settings.popupShortcut }).catch((error) => {
+        console.warn("Failed to sync popup shortcut", error);
+      });
       void syncNativeToolbarFromSettings(settings);
     }
   }, [settings]);

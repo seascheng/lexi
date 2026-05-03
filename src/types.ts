@@ -46,6 +46,7 @@ export interface AppSettings {
   apiBaseUrl: string;
   apiKey: string;
   model: string;
+  popupShortcut: string;
 }
 
 export interface ReviewUpdate {

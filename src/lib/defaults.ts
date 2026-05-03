@@ -49,6 +49,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   apiBaseUrl: "https://api.openai.com/v1",
   apiKey: "",
   model: "gpt-4o-mini",
+  popupShortcut: "Cmd+Shift+T",
 };
 
 export const TOOL_DESCRIPTIONS: Record<string, string> = {

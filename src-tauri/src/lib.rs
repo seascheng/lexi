@@ -8,7 +8,7 @@ use commands::window::{set_popup_height, start_popup_resize};
 use cursor::cursor_position;
 use native_toolbar::{
     configure_native_toolbar, hide_native_toolbar, set_native_toolbar_actions,
-    set_native_toolbar_enabled, set_native_toolbar_theme,
+    set_native_toolbar_enabled, set_native_toolbar_theme, set_popup_shortcut,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -34,6 +34,7 @@ pub fn run() {
             set_native_toolbar_actions,
             set_native_toolbar_enabled,
             set_native_toolbar_theme,
+            set_popup_shortcut,
             speak_text,
             set_popup_height,
             start_popup_resize

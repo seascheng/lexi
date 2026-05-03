@@ -107,6 +107,12 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
               <option value="menu_bar_only">Menu bar only</option>
             </Select>
           </Field>
+          <Field label="Popup shortcut" hint="Global shortcut to show the popup from any Space.">
+            <ShortcutRecorder
+              value={draft.popupShortcut}
+              onChange={(shortcut) => setDraft({ ...draft, popupShortcut: shortcut })}
+            />
+          </Field>
         </div>
       </div>
       <hr className="border-border/30" />
@@ -172,6 +178,75 @@ function ThemeButton({ active, icon, label, onClick }: ThemeButtonProps) {
     >
       {icon}
       {label}
+    </button>
+  );
+}
+
+interface ShortcutRecorderProps {
+  value: string;
+  onChange: (value: string) => void;
+}
+
+function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
+  const [recording, setRecording] = useState(false);
+
+  useEffect(() => {
+    if (!recording) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      // Ignore bare modifier presses
+      if (["Meta", "Control", "Shift", "Alt"].includes(event.key)) return;
+
+      // Require at least one modifier
+      if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+        if (event.key === "Escape") setRecording(false);
+        return;
+      }
+
+      const parts: string[] = [];
+      if (event.metaKey) parts.push("Cmd");
+      if (event.ctrlKey) parts.push("Ctrl");
+      if (event.shiftKey) parts.push("Shift");
+      if (event.altKey) parts.push("Alt");
+
+      const key = event.code.startsWith("Key")
+        ? event.code.slice(3)
+        : event.code.startsWith("Digit")
+          ? event.code.slice(5)
+          : event.code === "Space"
+            ? "Space"
+            : event.code === "Enter"
+              ? "Enter"
+              : event.key.length === 1
+                ? event.key.toUpperCase()
+                : null;
+
+      if (key) {
+        parts.push(key);
+        onChange(parts.join("+"));
+        setRecording(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [recording, onChange]);
+
+  return (
+    <button
+      className={`h-8 rounded-md border px-2.5 text-left text-sm transition outline-none ${
+        recording
+          ? "border-accent bg-accent/10 text-accent"
+          : "border-border bg-input text-strong focus:border-accent"
+      }`}
+      onClick={() => setRecording(true)}
+      onBlur={() => setRecording(false)}
+      type="button"
+    >
+      {recording ? "Press shortcut..." : value || "Not set"}
     </button>
   );
 }
