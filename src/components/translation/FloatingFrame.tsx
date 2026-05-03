@@ -106,7 +106,7 @@ export function FloatingFrame({
       {onClose ? (
         <Button
           aria-label="Hide popup"
-          className="absolute left-2.5 top-2.5 z-20 h-7 min-h-7 w-7 rounded-full bg-transparent px-0 text-muted hover:bg-surface hover:text-strong"
+          className="absolute left-2.5 top-2.5 z-20 h-7 min-h-7 w-7 rounded-full bg-transparent px-0 text-muted/60 hover:bg-strong/12 hover:text-strong"
           icon={<X size={15} />}
           onClick={() => void onClose()}
           title="Hide popup"
@@ -117,7 +117,7 @@ export function FloatingFrame({
       {onTogglePin ? (
         <Button
           aria-label={isPinned ? "Unpin popup" : "Pin popup"}
-          className="absolute right-2.5 top-2.5 z-20 h-7 min-h-7 w-7 rounded-full bg-transparent px-0 text-muted hover:bg-surface hover:text-strong"
+          className="absolute right-2.5 top-2.5 z-20 h-7 min-h-7 w-7 rounded-full bg-transparent px-0 text-muted/60 hover:bg-strong/12 hover:text-strong"
           icon={isPinned ? <Pin size={15} /> : <PinOff size={15} />}
           onClick={onTogglePin}
           title={isPinned ? "Unpin popup" : "Pin popup"}

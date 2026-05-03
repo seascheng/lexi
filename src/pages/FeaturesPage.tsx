@@ -1,11 +1,32 @@
 import { emit } from "@tauri-apps/api/event";
 import { Eye, EyeOff, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AiFeature, AiFeatureIcon, AppSettings, ToolbarTool } from "../types";
-import { DEFAULT_CUSTOM_PROMPT_TEMPLATE, DEFAULT_SETTINGS, TOOL_DESCRIPTIONS } from "../lib/defaults";
-import { deleteAiFeature, listAiFeatures, loadSettings, loadToolbarTools, saveAiFeature, saveSettings, saveToolbarTools } from "../lib/database";
+import type {
+  AiFeature,
+  AiFeatureIcon,
+  AppSettings,
+  ToolbarTool,
+} from "../types";
+import {
+  DEFAULT_CUSTOM_PROMPT_TEMPLATE,
+  DEFAULT_SETTINGS,
+  TOOL_DESCRIPTIONS,
+} from "../lib/defaults";
+import {
+  deleteAiFeature,
+  listAiFeatures,
+  loadSettings,
+  loadToolbarTools,
+  saveAiFeature,
+  saveSettings,
+  saveToolbarTools,
+} from "../lib/database";
 import { errorMessage } from "../lib/errors";
-import { FEATURE_ICON_OPTIONS, FeatureIcon, isFeatureIcon } from "../lib/featureIcons";
+import {
+  FEATURE_ICON_OPTIONS,
+  FeatureIcon,
+  isFeatureIcon,
+} from "../lib/featureIcons";
 import { syncNativeToolbar } from "../lib/nativeToolbar";
 import { isTauriRuntime } from "../lib/platform";
 import { Button } from "../components/ui/Button";
@@ -27,7 +48,10 @@ export function FeaturesPage() {
   const [error, setError] = useState("");
 
   const activeFeature = useMemo(
-    () => (draft?.kind === "feature" ? features.find((f) => f.id === draft.data.id) : undefined),
+    () =>
+      draft?.kind === "feature"
+        ? features.find((f) => f.id === draft.data.id)
+        : undefined,
     [draft, features],
   );
 
@@ -36,7 +60,11 @@ export function FeaturesPage() {
   }, []);
 
   async function refresh() {
-    const [nextFeatures, nextTools, nextSettings] = await Promise.all([listAiFeatures(), loadToolbarTools(), loadSettings()]);
+    const [nextFeatures, nextTools, nextSettings] = await Promise.all([
+      listAiFeatures(),
+      loadToolbarTools(),
+      loadSettings(),
+    ]);
     setFeatures(nextFeatures);
     setTools(nextTools);
     setSettings(nextSettings);
@@ -46,9 +74,32 @@ export function FeaturesPage() {
   // --- Toolbar Config ---
 
   const allToolbarItems = useMemo(() => {
-    const items: Array<{ id: string; name: string; icon: AiFeatureIcon; enabled: boolean; sortOrder: number; kind: "tool" | "ai" }> = [
-      ...tools.map((t) => ({ id: t.id, name: t.name, icon: t.icon, enabled: t.enabled, sortOrder: t.sortOrder, kind: "tool" as const })),
-      ...features.filter((f) => f.kind !== "review").map((f) => ({ id: f.id, name: f.name, icon: f.icon, enabled: f.enabled, sortOrder: f.sortOrder, kind: "ai" as const })),
+    const items: Array<{
+      id: string;
+      name: string;
+      icon: AiFeatureIcon;
+      enabled: boolean;
+      sortOrder: number;
+      kind: "tool" | "ai";
+    }> = [
+      ...tools.map((t) => ({
+        id: t.id,
+        name: t.name,
+        icon: t.icon,
+        enabled: t.enabled,
+        sortOrder: t.sortOrder,
+        kind: "tool" as const,
+      })),
+      ...features
+        .filter((f) => f.kind !== "review")
+        .map((f) => ({
+          id: f.id,
+          name: f.name,
+          icon: f.icon,
+          enabled: f.enabled,
+          sortOrder: f.sortOrder,
+          kind: "ai" as const,
+        })),
     ];
     return items.sort((a, b) => a.sortOrder - b.sortOrder);
   }, [tools, features]);
@@ -60,7 +111,9 @@ export function FeaturesPage() {
     let nextTools = tools;
 
     if (item.kind === "tool") {
-      nextTools = tools.map((t) => t.id === item.id ? { ...t, enabled: !t.enabled } : t);
+      nextTools = tools.map((t) =>
+        t.id === item.id ? { ...t, enabled: !t.enabled } : t,
+      );
       setTools(nextTools);
       await saveToolbarTools(nextTools);
     } else {
@@ -102,12 +155,14 @@ export function FeaturesPage() {
       }
     });
 
-    const nextTools = toolUpdates.length > 0
-      ? tools.map((t) => toolUpdates.find((u) => u.id === t.id) ?? t)
-      : tools;
-    const nextFeatures = featureUpdates.length > 0
-      ? features.map((f) => featureUpdates.find((u) => u.id === f.id) ?? f)
-      : features;
+    const nextTools =
+      toolUpdates.length > 0
+        ? tools.map((t) => toolUpdates.find((u) => u.id === t.id) ?? t)
+        : tools;
+    const nextFeatures =
+      featureUpdates.length > 0
+        ? features.map((f) => featureUpdates.find((u) => u.id === f.id) ?? f)
+        : features;
 
     if (toolUpdates.length > 0) {
       setTools(nextTools);
@@ -126,16 +181,41 @@ export function FeaturesPage() {
   // --- Panel Config ---
 
   const allPanelItems = useMemo(() => {
-    const items: Array<{ id: string; name: string; icon: AiFeatureIcon; enabled: boolean; sortOrder: number; kind: "tool" | "ai" }> = [
-      ...tools.map((t) => ({ id: t.id, name: t.name, icon: t.icon, enabled: t.panelEnabled, sortOrder: t.panelSortOrder, kind: "tool" as const })),
-      ...features.filter((f) => f.kind !== "review").map((f) => ({ id: f.id, name: f.name, icon: f.icon, enabled: f.panelEnabled, sortOrder: f.panelSortOrder, kind: "ai" as const })),
+    const items: Array<{
+      id: string;
+      name: string;
+      icon: AiFeatureIcon;
+      enabled: boolean;
+      sortOrder: number;
+      kind: "tool" | "ai";
+    }> = [
+      ...tools.map((t) => ({
+        id: t.id,
+        name: t.name,
+        icon: t.icon,
+        enabled: t.panelEnabled,
+        sortOrder: t.panelSortOrder,
+        kind: "tool" as const,
+      })),
+      ...features
+        .filter((f) => f.kind !== "review")
+        .map((f) => ({
+          id: f.id,
+          name: f.name,
+          icon: f.icon,
+          enabled: f.panelEnabled,
+          sortOrder: f.panelSortOrder,
+          kind: "ai" as const,
+        })),
     ];
     return items.sort((a, b) => a.sortOrder - b.sortOrder);
   }, [tools, features]);
 
   async function togglePanelItem(item: { id: string; kind: "tool" | "ai" }) {
     if (item.kind === "tool") {
-      const next = tools.map((t) => t.id === item.id ? { ...t, panelEnabled: !t.panelEnabled } : t);
+      const next = tools.map((t) =>
+        t.id === item.id ? { ...t, panelEnabled: !t.panelEnabled } : t,
+      );
       setTools(next);
       await saveToolbarTools(next);
     } else {
@@ -143,7 +223,9 @@ export function FeaturesPage() {
       if (!feature) return;
       const updated = { ...feature, panelEnabled: !feature.panelEnabled };
       await saveAiFeature(updated);
-      setFeatures((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
+      setFeatures((prev) =>
+        prev.map((f) => (f.id === updated.id ? updated : f)),
+      );
     }
     await notifyChanged();
   }
@@ -163,12 +245,15 @@ export function FeaturesPage() {
         if (tool) toolUpdates.push({ ...tool, panelSortOrder: newOrder });
       } else {
         const feature = features.find((f) => f.id === item.id);
-        if (feature) featureUpdates.push({ ...feature, panelSortOrder: newOrder });
+        if (feature)
+          featureUpdates.push({ ...feature, panelSortOrder: newOrder });
       }
     });
 
     if (toolUpdates.length > 0) {
-      const nextTools = tools.map((t) => toolUpdates.find((u) => u.id === t.id) ?? t);
+      const nextTools = tools.map(
+        (t) => toolUpdates.find((u) => u.id === t.id) ?? t,
+      );
       setTools(nextTools);
       await saveToolbarTools(nextTools);
     }
@@ -176,15 +261,20 @@ export function FeaturesPage() {
       await saveAiFeature(f);
     }
     if (featureUpdates.length > 0) {
-      setFeatures((prev) => prev.map((f) => featureUpdates.find((u) => u.id === f.id) ?? f));
+      setFeatures((prev) =>
+        prev.map((f) => featureUpdates.find((u) => u.id === f.id) ?? f),
+      );
     }
     await notifyChanged();
   }
 
   // --- Tool Config ---
 
-  async function updateToolConfig(toolId: string, config: Record<string, unknown>) {
-    const next = tools.map((t) => t.id === toolId ? { ...t, config } : t);
+  async function updateToolConfig(
+    toolId: string,
+    config: Record<string, unknown>,
+  ) {
+    const next = tools.map((t) => (t.id === toolId ? { ...t, config } : t));
     setTools(next);
     await saveToolbarTools(next);
     setDraft((current) => {
@@ -198,8 +288,10 @@ export function FeaturesPage() {
   // --- Feature CRUD ---
 
   function createFeature() {
-    const sortOrder = features.reduce((max, f) => Math.max(max, f.sortOrder), 0) + 10;
-    const panelSortOrder = features.reduce((max, f) => Math.max(max, f.panelSortOrder), 0) + 10;
+    const sortOrder =
+      features.reduce((max, f) => Math.max(max, f.sortOrder), 0) + 10;
+    const panelSortOrder =
+      features.reduce((max, f) => Math.max(max, f.panelSortOrder), 0) + 10;
     setDraft({
       kind: "feature",
       data: {
@@ -244,7 +336,11 @@ export function FeaturesPage() {
       await deleteAiFeature(feature.id);
       const next = features.filter((f) => f.id !== feature.id);
       setFeatures(next);
-      setDraft(next.length > 0 ? { kind: "feature", data: next[0] } : { kind: "toolbar-config" });
+      setDraft(
+        next.length > 0
+          ? { kind: "feature", data: next[0] }
+          : { kind: "toolbar-config" },
+      );
       await notifyChanged();
       setStatus("Deleted");
     } catch (e) {
@@ -254,16 +350,22 @@ export function FeaturesPage() {
   }
 
   function updateFeatureDraft(update: Partial<AiFeature>) {
-    setDraft((c) => c?.kind === "feature" ? { ...c, data: { ...c.data, ...update } } : c);
+    setDraft((c) =>
+      c?.kind === "feature" ? { ...c, data: { ...c.data, ...update } } : c,
+    );
     setStatus("");
   }
 
   // --- Selected ID tracking ---
 
-  const selectedId = draft?.kind === "feature" ? draft.data.id
-    : draft?.kind === "tool" ? draft.data.id
-    : draft?.kind === "toolbar-config" ? "__toolbar__"
-    : "__panel__";
+  const selectedId =
+    draft?.kind === "feature"
+      ? draft.data.id
+      : draft?.kind === "tool"
+        ? draft.data.id
+        : draft?.kind === "toolbar-config"
+          ? "__toolbar__"
+          : "__panel__";
 
   return (
     <div className="grid h-full min-h-0 gap-3 overflow-hidden lg:grid-cols-[220px_1fr]">
@@ -286,21 +388,27 @@ export function FeaturesPage() {
 
         {/* Tools Section */}
         <SectionLabel>Tools</SectionLabel>
-        {[...tools].sort((a, b) => a.sortOrder - b.sortOrder).map((tool) => (
-          <NavItem
-            key={tool.id}
-            icon={<FeatureIcon icon={tool.icon} size={15} />}
-            label={tool.name}
-            badge={!tool.enabled ? "off" : undefined}
-            active={selectedId === tool.id}
-            onClick={() => setDraft({ kind: "tool", data: tool })}
-          />
-        ))}
+        {[...tools]
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+          .map((tool) => (
+            <NavItem
+              key={tool.id}
+              icon={<FeatureIcon icon={tool.icon} size={15} />}
+              label={tool.name}
+              badge={!tool.enabled ? "off" : undefined}
+              active={selectedId === tool.id}
+              onClick={() => setDraft({ kind: "tool", data: tool })}
+            />
+          ))}
 
         {/* Features Section */}
         <div className="flex items-center justify-between">
           <SectionLabel>Features</SectionLabel>
-          <Button aria-label="New feature" onClick={createFeature} icon={<Plus size={14} />} />
+          <Button
+            aria-label="New feature"
+            onClick={createFeature}
+            icon={<Plus size={14} />}
+          />
         </div>
         {features.map((f) => (
           <NavItem
@@ -333,7 +441,10 @@ export function FeaturesPage() {
             onReorder={(from, to) => void applyPanelReorder(from, to)}
           />
         ) : draft?.kind === "tool" ? (
-          <ToolConfigPanel tool={draft.data} onUpdateConfig={(c) => void updateToolConfig(draft.data.id, c)} />
+          <ToolConfigPanel
+            tool={draft.data}
+            onUpdateConfig={(c) => void updateToolConfig(draft.data.id, c)}
+          />
         ) : draft?.kind === "feature" ? (
           <FeatureConfigPanel
             draft={draft.data}
@@ -353,10 +464,20 @@ export function FeaturesPage() {
 /* ========== Left Panel Primitives ========== */
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">{children}</h3>;
+  return (
+    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">
+      {children}
+    </h3>
+  );
 }
 
-function NavItem({ icon, label, badge, active, onClick }: {
+function NavItem({
+  icon,
+  label,
+  badge,
+  active,
+  onClick,
+}: {
   icon: React.ReactNode;
   label: string;
   badge?: string;
@@ -366,7 +487,9 @@ function NavItem({ icon, label, badge, active, onClick }: {
   return (
     <button
       className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${
-        active ? "bg-accent/10 text-accent" : "text-strong hover:bg-surfaceHover"
+        active
+          ? "bg-accent/10 text-accent"
+          : "text-strong hover:bg-surfaceHover"
       }`}
       onClick={onClick}
       type="button"
@@ -380,7 +503,16 @@ function NavItem({ icon, label, badge, active, onClick }: {
 
 function ToolbarIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 15 15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <rect x="1" y="4" width="13" height="7" rx="2" />
       <circle cx="4.5" cy="7.5" r="1" fill="currentColor" stroke="none" />
       <circle cx="7.5" cy="7.5" r="1" fill="currentColor" stroke="none" />
@@ -391,7 +523,16 @@ function ToolbarIcon() {
 
 function PanelIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 15 15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <rect x="1" y="1" width="13" height="13" rx="2" />
       <line x1="1" y1="5" x2="14" y2="5" />
     </svg>
@@ -400,9 +541,29 @@ function PanelIcon() {
 
 /* ========== Right Panel: Toolbar Config ========== */
 
-function ToolbarConfigPanel({ items, enabledItems, toolbarEnabled, toolbarTheme, onToggleToolbarEnabled, onReorder, onToggle }: {
-  items: Array<{ id: string; name: string; icon: AiFeatureIcon; enabled: boolean; sortOrder: number; kind: "tool" | "ai" }>;
-  enabledItems: Array<{ id: string; name: string; icon: AiFeatureIcon; enabled: boolean }>;
+function ToolbarConfigPanel({
+  items,
+  enabledItems,
+  toolbarEnabled,
+  toolbarTheme,
+  onToggleToolbarEnabled,
+  onReorder,
+  onToggle,
+}: {
+  items: Array<{
+    id: string;
+    name: string;
+    icon: AiFeatureIcon;
+    enabled: boolean;
+    sortOrder: number;
+    kind: "tool" | "ai";
+  }>;
+  enabledItems: Array<{
+    id: string;
+    name: string;
+    icon: AiFeatureIcon;
+    enabled: boolean;
+  }>;
   toolbarEnabled: boolean;
   toolbarTheme: AppSettings["theme"];
   onToggleToolbarEnabled: (enabled: boolean) => void;
@@ -439,7 +600,12 @@ function ToolbarConfigPanel({ items, enabledItems, toolbarEnabled, toolbarTheme,
   }
 
   function handlePointerUp() {
-    if (dragging.current && dragIdx !== null && dropIdx !== null && dragIdx !== dropIdx) {
+    if (
+      dragging.current &&
+      dragIdx !== null &&
+      dropIdx !== null &&
+      dragIdx !== dropIdx
+    ) {
       onReorder(dragIdx, dropIdx);
     }
     dragging.current = false;
@@ -452,9 +618,14 @@ function ToolbarConfigPanel({ items, enabledItems, toolbarEnabled, toolbarTheme,
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold">Toolbar Config</h2>
-          <p className="text-sm text-muted">Drag to reorder. Toggle to show/hide.</p>
+          <p className="text-sm text-muted">
+            Drag to reorder. Toggle to show/hide.
+          </p>
         </div>
-        <ToggleSwitch checked={toolbarEnabled} onChange={onToggleToolbarEnabled} />
+        <ToggleSwitch
+          checked={toolbarEnabled}
+          onChange={onToggleToolbarEnabled}
+        />
       </div>
 
       {/* Preview — mimics native macOS toolbar */}
@@ -484,17 +655,28 @@ function ToolbarConfigPanel({ items, enabledItems, toolbarEnabled, toolbarTheme,
             </div>
           ))}
           {enabledItems.length === 0 && (
-            <p className="px-3 py-1 text-xs" style={{ color: previewStyle.muted }}>No items</p>
+            <p
+              className="px-3 py-1 text-xs"
+              style={{ color: previewStyle.muted }}
+            >
+              No items
+            </p>
           )}
         </div>
       </div>
 
       {/* Draggable item list */}
-      <div className="grid gap-1" onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}>
+      <div
+        className="grid gap-1"
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      >
         {items.map((item, idx) => (
           <div
             key={item.id}
-            ref={(el) => { rowRefs.current[idx] = el; }}
+            ref={(el) => {
+              rowRefs.current[idx] = el;
+            }}
             className={`flex items-center gap-2 rounded-md border px-2.5 py-2 transition select-none ${
               dragIdx === idx
                 ? "border-accent bg-accent/10 opacity-50"
@@ -507,16 +689,31 @@ function ToolbarConfigPanel({ items, enabledItems, toolbarEnabled, toolbarTheme,
               className="cursor-grab text-muted active:cursor-grabbing"
               onPointerDown={(e) => handlePointerDown(idx, e)}
             >
-              <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
-                <circle cx="3" cy="2" r="1.5" /><circle cx="7" cy="2" r="1.5" />
-                <circle cx="3" cy="8" r="1.5" /><circle cx="7" cy="8" r="1.5" />
-                <circle cx="3" cy="14" r="1.5" /><circle cx="7" cy="14" r="1.5" />
+              <svg
+                width="10"
+                height="16"
+                viewBox="0 0 10 16"
+                fill="currentColor"
+              >
+                <circle cx="3" cy="2" r="1.5" />
+                <circle cx="7" cy="2" r="1.5" />
+                <circle cx="3" cy="8" r="1.5" />
+                <circle cx="7" cy="8" r="1.5" />
+                <circle cx="3" cy="14" r="1.5" />
+                <circle cx="7" cy="14" r="1.5" />
               </svg>
             </div>
             <FeatureIcon icon={item.icon} size={15} />
-            <span className="min-w-0 flex-1 truncate text-sm text-strong">{item.name}</span>
-            <span className="text-[10px] text-muted">{item.kind === "tool" ? "Tool" : "AI"}</span>
-            <ToggleSwitch checked={item.enabled} onChange={() => onToggle(item)} />
+            <span className="min-w-0 flex-1 truncate text-sm text-strong">
+              {item.name}
+            </span>
+            <span className="text-[10px] text-muted">
+              {item.kind === "tool" ? "Tool" : "AI"}
+            </span>
+            <ToggleSwitch
+              checked={item.enabled}
+              onChange={() => onToggle(item)}
+            />
           </div>
         ))}
       </div>
@@ -544,17 +741,50 @@ function toolbarPreviewStyle(theme: AppSettings["theme"]) {
 
 function ToolbarDragHandleIcon() {
   return (
-    <svg width="10" height="16" viewBox="0 0 10 16" fill="none" aria-hidden="true">
-      <line x1="3.5" y1="3" x2="3.5" y2="13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <line x1="6.5" y1="3" x2="6.5" y2="13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    <svg
+      width="10"
+      height="16"
+      viewBox="0 0 10 16"
+      fill="none"
+      aria-hidden="true"
+    >
+      <line
+        x1="3.5"
+        y1="3"
+        x2="3.5"
+        y2="13"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <line
+        x1="6.5"
+        y1="3"
+        x2="6.5"
+        y2="13"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
 
 /* ========== Right Panel: Panel Config ========== */
 
-function PanelConfigPanel({ items, onToggle, onReorder }: {
-  items: Array<{ id: string; name: string; icon: AiFeatureIcon; enabled: boolean; sortOrder: number; kind: "tool" | "ai" }>;
+function PanelConfigPanel({
+  items,
+  onToggle,
+  onReorder,
+}: {
+  items: Array<{
+    id: string;
+    name: string;
+    icon: AiFeatureIcon;
+    enabled: boolean;
+    sortOrder: number;
+    kind: "tool" | "ai";
+  }>;
   onToggle: (item: { id: string; kind: "tool" | "ai" }) => void;
   onReorder: (from: number, to: number) => void;
 }) {
@@ -588,7 +818,12 @@ function PanelConfigPanel({ items, onToggle, onReorder }: {
   }
 
   function handlePointerUp() {
-    if (dragging.current && dragIdx !== null && dropIdx !== null && dragIdx !== dropIdx) {
+    if (
+      dragging.current &&
+      dragIdx !== null &&
+      dropIdx !== null &&
+      dragIdx !== dropIdx
+    ) {
       onReorder(dragIdx, dropIdx);
     }
     dragging.current = false;
@@ -600,7 +835,9 @@ function PanelConfigPanel({ items, onToggle, onReorder }: {
     <>
       <div>
         <h2 className="text-lg font-semibold">Panel Config</h2>
-        <p className="text-sm text-muted">Configure action buttons in the popup input area.</p>
+        <p className="text-sm text-muted">
+          Configure action buttons in the popup input area.
+        </p>
       </div>
 
       {/* Preview — popup action bar */}
@@ -622,11 +859,17 @@ function PanelConfigPanel({ items, onToggle, onReorder }: {
       </div>
 
       {/* Item list with drag-and-drop */}
-      <div className="grid gap-1" onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}>
+      <div
+        className="grid gap-1"
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      >
         {items.map((item, idx) => (
           <div
             key={item.id}
-            ref={(el) => { rowRefs.current[idx] = el; }}
+            ref={(el) => {
+              rowRefs.current[idx] = el;
+            }}
             className={`flex items-center gap-2 rounded-md border px-2.5 py-2 transition select-none ${
               dragIdx === idx
                 ? "border-accent bg-accent/10 opacity-50"
@@ -639,16 +882,31 @@ function PanelConfigPanel({ items, onToggle, onReorder }: {
               className="cursor-grab text-muted active:cursor-grabbing"
               onPointerDown={(e) => handlePointerDown(idx, e)}
             >
-              <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
-                <circle cx="3" cy="2" r="1.5" /><circle cx="7" cy="2" r="1.5" />
-                <circle cx="3" cy="8" r="1.5" /><circle cx="7" cy="8" r="1.5" />
-                <circle cx="3" cy="14" r="1.5" /><circle cx="7" cy="14" r="1.5" />
+              <svg
+                width="10"
+                height="16"
+                viewBox="0 0 10 16"
+                fill="currentColor"
+              >
+                <circle cx="3" cy="2" r="1.5" />
+                <circle cx="7" cy="2" r="1.5" />
+                <circle cx="3" cy="8" r="1.5" />
+                <circle cx="7" cy="8" r="1.5" />
+                <circle cx="3" cy="14" r="1.5" />
+                <circle cx="7" cy="14" r="1.5" />
               </svg>
             </div>
             <FeatureIcon icon={item.icon} size={15} />
-            <span className="min-w-0 flex-1 truncate text-sm text-strong">{item.name}</span>
-            <span className="text-[10px] text-muted">{item.kind === "tool" ? "Tool" : "AI"}</span>
-            <ToggleSwitch checked={item.enabled} onChange={() => onToggle(item)} />
+            <span className="min-w-0 flex-1 truncate text-sm text-strong">
+              {item.name}
+            </span>
+            <span className="text-[10px] text-muted">
+              {item.kind === "tool" ? "Tool" : "AI"}
+            </span>
+            <ToggleSwitch
+              checked={item.enabled}
+              onChange={() => onToggle(item)}
+            />
           </div>
         ))}
       </div>
@@ -658,7 +916,13 @@ function PanelConfigPanel({ items, onToggle, onReorder }: {
 
 /* ========== Right Panel: Tool Config ========== */
 
-function ToolConfigPanel({ tool, onUpdateConfig }: { tool: ToolbarTool; onUpdateConfig: (config: Record<string, unknown>) => void }) {
+function ToolConfigPanel({
+  tool,
+  onUpdateConfig,
+}: {
+  tool: ToolbarTool;
+  onUpdateConfig: (config: Record<string, unknown>) => void;
+}) {
   const config = tool.config;
 
   return (
@@ -672,7 +936,9 @@ function ToolConfigPanel({ tool, onUpdateConfig }: { tool: ToolbarTool; onUpdate
 
       {tool.id === "copy" && (
         <div className="rounded-md border border-border bg-surface px-3 py-2">
-          <p className="text-sm text-muted">Copies selected text to clipboard. No additional configuration.</p>
+          <p className="text-sm text-muted">
+            Copies selected text to clipboard. No additional configuration.
+          </p>
         </div>
       )}
 
@@ -681,7 +947,9 @@ function ToolConfigPanel({ tool, onUpdateConfig }: { tool: ToolbarTool; onUpdate
           <Field label="Search engine">
             <Select
               value={(config.engine as string) ?? "google"}
-              onChange={(e) => onUpdateConfig({ ...config, engine: e.target.value })}
+              onChange={(e) =>
+                onUpdateConfig({ ...config, engine: e.target.value })
+              }
             >
               <option value="google">Google</option>
               <option value="bing">Bing</option>
@@ -690,10 +958,15 @@ function ToolConfigPanel({ tool, onUpdateConfig }: { tool: ToolbarTool; onUpdate
             </Select>
           </Field>
           {config.engine === "custom" && (
-            <Field label="Custom search URL" hint="Use {query} as placeholder for the search text.">
+            <Field
+              label="Custom search URL"
+              hint="Use {query} as placeholder for the search text."
+            >
               <Input
                 value={(config.customUrl as string) ?? ""}
-                onChange={(e) => onUpdateConfig({ ...config, customUrl: e.target.value })}
+                onChange={(e) =>
+                  onUpdateConfig({ ...config, customUrl: e.target.value })
+                }
                 placeholder="https://example.com/search?q={query}"
               />
             </Field>
@@ -706,7 +979,9 @@ function ToolConfigPanel({ tool, onUpdateConfig }: { tool: ToolbarTool; onUpdate
           <Field label="TTS Engine">
             <Select
               value={(config.engine as string) ?? "system"}
-              onChange={(e) => onUpdateConfig({ ...config, engine: e.target.value })}
+              onChange={(e) =>
+                onUpdateConfig({ ...config, engine: e.target.value })
+              }
             >
               <option value="system">System built-in (macOS say)</option>
               <option value="api">API service</option>
@@ -714,17 +989,24 @@ function ToolConfigPanel({ tool, onUpdateConfig }: { tool: ToolbarTool; onUpdate
           </Field>
           {config.engine === "api" && (
             <>
-              <Field label="API URL" hint="TTS service endpoint that accepts POST with text.">
+              <Field
+                label="API URL"
+                hint="TTS service endpoint that accepts POST with text."
+              >
                 <Input
                   value={(config.apiUrl as string) ?? ""}
-                  onChange={(e) => onUpdateConfig({ ...config, apiUrl: e.target.value })}
+                  onChange={(e) =>
+                    onUpdateConfig({ ...config, apiUrl: e.target.value })
+                  }
                   placeholder="https://api.example.com/tts"
                 />
               </Field>
               <Field label="Voice" hint="Voice name or ID for the API service.">
                 <Input
                   value={(config.voice as string) ?? ""}
-                  onChange={(e) => onUpdateConfig({ ...config, voice: e.target.value })}
+                  onChange={(e) =>
+                    onUpdateConfig({ ...config, voice: e.target.value })
+                  }
                   placeholder="alloy"
                 />
               </Field>
@@ -738,7 +1020,15 @@ function ToolConfigPanel({ tool, onUpdateConfig }: { tool: ToolbarTool; onUpdate
 
 /* ========== Right Panel: Feature Config ========== */
 
-function FeatureConfigPanel({ draft, activeFeature, status, error, onUpdate, onSave, onRemove }: {
+function FeatureConfigPanel({
+  draft,
+  activeFeature,
+  status,
+  error,
+  onUpdate,
+  onSave,
+  onRemove,
+}: {
   draft: AiFeature;
   activeFeature: AiFeature | undefined;
   status: string;
@@ -751,7 +1041,9 @@ function FeatureConfigPanel({ draft, activeFeature, status, error, onUpdate, onS
     <>
       <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold">{activeFeature ? "Edit feature" : "New feature"}</h2>
+          <h2 className="text-lg font-semibold">
+            {activeFeature ? "Edit feature" : "New feature"}
+          </h2>
           <p className="text-sm text-muted">
             {draft.kind === "translation"
               ? "Built-in translation feature for selected text."
@@ -769,78 +1061,130 @@ function FeatureConfigPanel({ draft, activeFeature, status, error, onUpdate, onS
             {draft.enabled ? "Disable" : "Enable"}
           </Button>
           {draft.kind === "custom" ? (
-            <Button onClick={onRemove} variant="danger" icon={<Trash2 size={16} />}>Delete</Button>
+            <Button
+              onClick={onRemove}
+              variant="danger"
+              icon={<Trash2 size={16} />}
+            >
+              Delete
+            </Button>
           ) : null}
-          <Button onClick={onSave} variant="primary" icon={<Save size={16} />}>Save</Button>
+          <Button onClick={onSave} variant="primary" icon={<Save size={16} />}>
+            Save
+          </Button>
         </div>
       </div>
 
       <div className="grid gap-2.5 md:grid-cols-2">
         <Field label="Name">
-          <Input disabled={draft.kind !== "custom"} onChange={(e) => onUpdate({ name: e.target.value })} value={draft.name} />
+          <Input
+            disabled={draft.kind !== "custom"}
+            onChange={(e) => onUpdate({ name: e.target.value })}
+            value={draft.name}
+          />
         </Field>
-        <Field label="Sort order">
-          <Input onChange={(e) => onUpdate({ sortOrder: Number(e.target.value) })} type="number" value={draft.sortOrder} />
-        </Field>
-        <Field label="Icon" hint="Shown on the popup action button.">
-          <Select onChange={(e) => onUpdate({ icon: selectedFeatureIcon(e.target.value) })} value={draft.icon}>
-            {FEATURE_ICON_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        <Field label="Icon">
+          <Select
+            onChange={(e) =>
+              onUpdate({ icon: selectedFeatureIcon(e.target.value) })
+            }
+            value={draft.icon}
+          >
+            {FEATURE_ICON_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </Select>
         </Field>
         {draft.kind === "translation" ? (
           <Field label="Target language">
-            <Input onChange={(e) => onUpdate({ targetLanguage: e.target.value })} value={draft.targetLanguage} />
+            <Input
+              onChange={(e) => onUpdate({ targetLanguage: e.target.value })}
+              value={draft.targetLanguage}
+            />
           </Field>
         ) : null}
         {draft.kind === "review" ? (
-          <Field label="Display interval" hint="Seconds between vocabulary cards in the popup.">
-            <Input min={5} onChange={(e) => onUpdate({ reviewIntervalSeconds: Number(e.target.value) })} type="number" value={draft.reviewIntervalSeconds} />
+          <Field
+            label="Display interval"
+            hint="Seconds between vocabulary cards in the popup."
+          >
+            <Input
+              min={5}
+              onChange={(e) =>
+                onUpdate({ reviewIntervalSeconds: Number(e.target.value) })
+              }
+              type="number"
+              value={draft.reviewIntervalSeconds}
+            />
           </Field>
         ) : null}
       </div>
 
-      <label className="flex items-center gap-3 text-sm text-strong">
-        <input checked={draft.speechEnabled} className="h-4 w-4 accent-[rgb(var(--color-accent))]" onChange={(e) => onUpdate({ speechEnabled: e.target.checked })} type="checkbox" />
-        Show speech button in the popup
-      </label>
-
       {draft.kind === "translation" ? (
         <label className="flex items-center gap-3 text-sm text-strong">
-          <input checked={draft.autoSaveToVocabulary} className="h-4 w-4 accent-[rgb(var(--color-accent))]" onChange={(e) => onUpdate({ autoSaveToVocabulary: e.target.checked })} type="checkbox" />
+          <input
+            checked={draft.autoSaveToVocabulary}
+            className="h-4 w-4 accent-[rgb(var(--color-accent))]"
+            onChange={(e) =>
+              onUpdate({ autoSaveToVocabulary: e.target.checked })
+            }
+            type="checkbox"
+          />
           Auto-save translations to vocabulary
         </label>
       ) : null}
 
       {draft.kind !== "review" ? (
-        <div className="rounded-md border border-border bg-surface px-3 py-2">
-          <p className="text-sm font-medium text-strong">Popup actions</p>
-          <p className="mt-1 text-xs leading-5 text-muted">This feature appears as an icon action next to the popup input.</p>
-        </div>
-      ) : null}
-
-      {draft.kind !== "review" ? (
-        <Field label="Prompt" hint="Use {{text}} for selected/input text. Translation also supports {{targetLanguage}}.">
-          <Textarea className="min-h-64 font-mono" onChange={(e) => onUpdate({ promptTemplate: e.target.value })} value={draft.promptTemplate} />
+        <Field
+          label="Prompt"
+          hint="Use {{text}} for selected/input text. Translation also supports {{targetLanguage}}."
+        >
+          <Textarea
+            className="min-h-64 font-mono"
+            onChange={(e) => onUpdate({ promptTemplate: e.target.value })}
+            value={draft.promptTemplate}
+          />
         </Field>
       ) : null}
 
       <div className="rounded-md border border-border bg-example px-3 py-2 text-xs leading-5 text-muted">
-        Output: {draft.kind === "review" ? "vocabulary cards" : draft.outputMode === "translation_json" ? "structured translation JSON" : "plain text"}.{status ? ` ${status}.` : ""}
+        Output:{" "}
+        {draft.kind === "review"
+          ? "vocabulary cards"
+          : draft.outputMode === "translation_json"
+            ? "structured translation JSON"
+            : "plain text"}
+        .{status ? ` ${status}.` : ""}
       </div>
-      {error ? <div className="rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div> : null}
+      {error ? (
+        <div className="rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+          {error}
+        </div>
+      ) : null}
     </>
   );
 }
 
 /* ========== Shared ========== */
 
-function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+function ToggleSwitch({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
   return (
     <button
       className={`relative inline-flex shrink-0 items-center rounded-full transition-colors ${
         checked ? "bg-accent" : "bg-border"
       }`}
-      onClick={(e) => { e.stopPropagation(); onChange(!checked); }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onChange(!checked);
+      }}
       style={{ width: 28, height: 16 }}
       type="button"
     >

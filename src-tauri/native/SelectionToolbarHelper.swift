@@ -457,15 +457,65 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
 
     private func receive(_ connection: NWConnection) {
         connection.start(queue: connectionQueue)
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 32768) { [weak self] data, _, _, _ in
-            guard let self, let data else {
-                connection.cancel()
-                return
-            }
+        var buffer = Data()
+        var expectedLength: Int?
 
-            self.handleRequestData(data)
-            self.writeResponse(connection)
+        func readNext() {
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, _ in
+                guard let self, let data else {
+                    connection.cancel()
+                    return
+                }
+
+                buffer.append(data)
+
+                // Parse Content-Length from headers once
+                if expectedLength == nil {
+                    if let headerEnd = buffer.range(of: Data("\r\n\r\n".utf8)) {
+                        let headerData = buffer[buffer.startIndex..<headerEnd.lowerBound]
+                        if let headerStr = String(data: headerData, encoding: .utf8) {
+                            for line in headerStr.components(separatedBy: "\r\n") {
+                                if line.lowercased().hasPrefix("content-length:") {
+                                    expectedLength = Int(line.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces))
+                                    break
+                                }
+                            }
+                        }
+                        // If no Content-Length header, just process what we have
+                        if expectedLength == nil {
+                            self.handleRequestData(buffer)
+                            self.writeResponse(connection)
+                            return
+                        }
+                    } else {
+                        // Headers not complete yet, keep reading
+                        readNext()
+                        return
+                    }
+                }
+
+                // Check if we have the full body
+                if let headerEnd = buffer.range(of: Data("\r\n\r\n".utf8)) {
+                    let bodyStart = headerEnd.upperBound
+                    let bodyLength = buffer.endIndex - bodyStart
+                    if bodyLength >= expectedLength! {
+                        self.handleRequestData(buffer)
+                        self.writeResponse(connection)
+                        return
+                    }
+                }
+
+                // Not complete yet, keep reading unless connection closed
+                if isComplete {
+                    self.handleRequestData(buffer)
+                    self.writeResponse(connection)
+                } else {
+                    readNext()
+                }
+            }
         }
+
+        readNext()
     }
 
     private func handleRequestData(_ data: Data) {

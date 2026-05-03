@@ -985,8 +985,11 @@ fn write_response(stream: &mut TcpStream, status: u16, body: &str) -> std::io::R
 }
 
 fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new(program)
-        .args(args)
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    // Ensure UTF-8 output from CLI tools like pbpaste
+    cmd.env("LANG", "en_US.UTF-8");
+    let output = cmd
         .output()
         .map_err(|error| format!("Failed to run {program}: {error}"))?;
 

@@ -764,7 +764,7 @@ function RunTabs({
       </div>
       <Button
         aria-label="Close all results"
-        className="h-8 min-h-8 shrink-0 rounded-t-md rounded-b-none px-2 text-xs"
+        className="h-8 min-h-8 shrink-0 rounded-t-md rounded-b-none px-2 text-xs hover:bg-strong/12"
         icon={<X size={13} />}
         onClick={onClearRuns}
         title="Close all results"
