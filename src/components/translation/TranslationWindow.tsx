@@ -7,7 +7,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, DisplayMode, LearningEntryInput, LearningEntryType } from "../../types";
 import { analyzeLearningPoint, copyText, runAiFeature, speakText } from "../../lib/ai";
 import { applyAppearanceSettings } from "../../lib/appearance";
-import { addWord, listAiFeatures, loadSettings, savePopupPosition, savePopupSize } from "../../lib/database";
+import { addWord, listAiFeatures, loadSettings, loadToolbarTools, savePopupPosition, savePopupSize } from "../../lib/database";
 import { errorMessage } from "../../lib/errors";
 import { FeatureIcon } from "../../lib/featureIcons";
 import { Button } from "../ui/Button";
@@ -340,17 +340,23 @@ export function TranslationWindow() {
 
   async function syncNativeToolbarActions(nextFeatures: AiFeature[]) {
     const enabledFeatures = nextFeatures.filter((feature) => feature.enabled && feature.kind !== "review");
-    const actions: NativeToolbarAction[] = enabledFeatures.map((feature) => ({
-      id: feature.id,
-      title: feature.name,
-      icon: feature.icon,
+    const nextTools = await loadToolbarTools();
+    const enabledTools = nextTools.filter((tool) => tool.enabled);
+
+    const items: Array<{ id: string; name: string; icon: AiFeatureIcon; sortOrder: number }> = [
+      ...enabledTools.map((tool) => ({ id: tool.id, name: tool.name, icon: tool.icon, sortOrder: tool.sortOrder })),
+      ...enabledFeatures.map((feature) => ({ id: feature.id, name: feature.name, icon: feature.icon, sortOrder: feature.sortOrder })),
+    ];
+
+    items.sort((a, b) => a.sortOrder - b.sortOrder);
+
+    const actions: NativeToolbarAction[] = items.map((item) => ({
+      id: item.id,
+      title: item.name,
+      icon: item.icon,
     }));
 
     actions.push({ id: "extract", title: "Extract", icon: "highlighter" });
-
-    if (enabledFeatures.some((feature) => feature.speechEnabled)) {
-      actions.push({ id: "speak", title: "Speak", icon: "volume" });
-    }
 
     await invoke("set_native_toolbar_actions", { actions }).catch((error) => {
       console.warn("Failed to sync native toolbar actions", error);
