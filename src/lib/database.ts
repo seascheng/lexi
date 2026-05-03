@@ -1,8 +1,8 @@
 import Database from "@tauri-apps/plugin-sql";
-import { DEFAULT_CUSTOM_PROMPT_TEMPLATE, DEFAULT_PROMPT_TEMPLATE, DEFAULT_REVIEW_FEATURE, DEFAULT_SETTINGS, DEFAULT_TOOLS, DEFAULT_TRANSLATION_FEATURE } from "./defaults";
+import { DEFAULT_CUSTOM_PROMPT_TEMPLATE, DEFAULT_PANELS, DEFAULT_PROMPT_TEMPLATE, DEFAULT_SETTINGS, DEFAULT_TOOLS, DEFAULT_TRANSLATION_FEATURE } from "./defaults";
 import { isFeatureIcon } from "./featureIcons";
 import { currentIsoDate, isTauriRuntime } from "./platform";
-import type { AiFeature, AiFeatureIcon, AiFeatureKind, AiOutputMode, AppSettings, LearningEntryInput, LearningEntryType, ReviewUpdate, ToolbarTool, WordEntry, WordStatus } from "../types";
+import type { AiFeature, AiFeatureIcon, AiFeatureKind, AiOutputMode, AppSettings, LearningEntryInput, LearningEntryType, Panel, ReviewUpdate, ToolbarTool, WordEntry, WordStatus } from "../types";
 
 type SqlDatabase = Awaited<ReturnType<typeof Database.load>>;
 
@@ -148,6 +148,37 @@ export async function saveToolbarTools(tools: ToolbarTool[]): Promise<void> {
   ]);
 }
 
+// ── Panels ──────────────────────────────────────────────
+
+export async function listPanels(): Promise<Panel[]> {
+  if (!isTauriRuntime()) {
+    const raw = localStorage.getItem("englist.panels");
+    const rows: Panel[] = raw ? JSON.parse(raw) : [];
+    return withBuiltInPanels(rows);
+  }
+  const db = await getSqlDatabase();
+  const rows = await db.select<PanelRow[]>("SELECT * FROM panels ORDER BY sort_order");
+  return withBuiltInPanels(rows.map(panelFromRow));
+}
+
+export async function savePanel(panel: Panel): Promise<void> {
+  if (!isTauriRuntime()) {
+    const panels = await listPanels();
+    const idx = panels.findIndex((p) => p.id === panel.id);
+    if (idx >= 0) panels[idx] = panel;
+    else panels.push(panel);
+    localStorage.setItem("englist.panels", JSON.stringify(panels));
+    return;
+  }
+  const db = await getSqlDatabase();
+  await db.execute(
+    `INSERT INTO panels (id, name, icon, enabled, sort_order)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT(id) DO UPDATE SET name=$2, icon=$3, enabled=$4, sort_order=$5`,
+    [panel.id, panel.name, panel.icon, panel.enabled ? 1 : 0, panel.sortOrder]
+  );
+}
+
 function loadBrowserToolbarTools(): ToolbarTool[] {
   const saved = localStorage.getItem("englist.toolbarTools");
   if (!saved) return DEFAULT_TOOLS.map((tool) => ({ ...tool }));
@@ -174,7 +205,7 @@ export async function listAiFeatures(): Promise<AiFeature[]> {
   const db = await getSqlDatabase();
   const rows = await db.select<AiFeatureRow[]>(
     `SELECT id, name, kind, prompt_template, output_mode, enabled, sort_order,
-            auto_save_to_vocabulary, target_language, review_interval_seconds, speech_enabled, icon, created_at, updated_at
+            auto_save_to_vocabulary, target_language, speech_enabled, icon, created_at, updated_at
      FROM ai_features
      ORDER BY sort_order ASC, name ASC`,
   );
@@ -203,8 +234,8 @@ export async function saveAiFeature(feature: AiFeature) {
   await db.execute(
     `INSERT INTO ai_features
       (id, name, kind, prompt_template, output_mode, enabled, sort_order,
-       auto_save_to_vocabulary, target_language, review_interval_seconds, speech_enabled, icon, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)
+       auto_save_to_vocabulary, target_language, speech_enabled, icon, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        kind = excluded.kind,
@@ -214,7 +245,6 @@ export async function saveAiFeature(feature: AiFeature) {
        sort_order = excluded.sort_order,
        auto_save_to_vocabulary = excluded.auto_save_to_vocabulary,
        target_language = excluded.target_language,
-       review_interval_seconds = excluded.review_interval_seconds,
        speech_enabled = excluded.speech_enabled,
        icon = excluded.icon,
        updated_at = excluded.updated_at`,
@@ -228,7 +258,6 @@ export async function saveAiFeature(feature: AiFeature) {
       normalized.sortOrder,
       normalized.autoSaveToVocabulary ? 1 : 0,
       normalized.targetLanguage,
-      normalized.reviewIntervalSeconds,
       normalized.speechEnabled ? 1 : 0,
       normalized.icon,
       now,
@@ -245,7 +274,7 @@ export async function deleteAiFeature(id: string) {
   }
 
   const db = await getSqlDatabase();
-  await db.execute("DELETE FROM ai_features WHERE id = $1 AND kind NOT IN ('translation', 'review')", [id]);
+  await db.execute("DELETE FROM ai_features WHERE id = $1 AND kind NOT IN ('translation')", [id]);
 }
 
 export async function listWords(): Promise<WordEntry[]> {
@@ -574,7 +603,6 @@ interface AiFeatureRow {
   sort_order: number;
   auto_save_to_vocabulary: number;
   target_language: string | null;
-  review_interval_seconds?: number | null;
   speech_enabled?: number | null;
   icon?: string | null;
   created_at: string;
@@ -592,7 +620,6 @@ function aiFeatureFromRow(row: AiFeatureRow): AiFeature {
     sortOrder: row.sort_order,
     autoSaveToVocabulary: row.auto_save_to_vocabulary === 1,
     targetLanguage: row.target_language ?? "",
-    reviewIntervalSeconds: row.review_interval_seconds ?? DEFAULT_REVIEW_FEATURE.reviewIntervalSeconds,
     speechEnabled: row.speech_enabled === 1,
     icon: parseFeatureIcon(row.icon, parseAiFeatureKind(row.kind)),
     createdAt: row.created_at,
@@ -636,22 +663,20 @@ function normalizedAiFeature(feature: Partial<AiFeature>): AiFeature {
   const rawPromptTemplate = stringValue(feature.promptTemplate);
   const rawTargetLanguage = stringValue(feature.targetLanguage);
   const isTranslation = feature.kind === "translation" || rawId === DEFAULT_TRANSLATION_FEATURE.id;
-  const isReview = feature.kind === "review" || rawId === DEFAULT_REVIEW_FEATURE.id;
   return {
-    id: builtInFeatureId(isTranslation, isReview) ?? normalizedFeatureId(rawId || rawName),
-    name: rawName.trim() || defaultFeatureName(isTranslation, isReview),
-    kind: builtInFeatureKind(isTranslation, isReview) ?? parseAiFeatureKind(stringValue(feature.kind)),
-    promptTemplate: isReview ? "" : normalizedFeaturePrompt(isTranslation, rawPromptTemplate),
-    outputMode: isTranslation || isReview ? "plain_text" : parseAiOutputMode(stringValue(feature.outputMode)),
+    id: builtInFeatureId(isTranslation) ?? normalizedFeatureId(rawId || rawName),
+    name: rawName.trim() || defaultFeatureName(isTranslation),
+    kind: builtInFeatureKind(isTranslation) ?? parseAiFeatureKind(stringValue(feature.kind)),
+    promptTemplate: normalizedFeaturePrompt(isTranslation, rawPromptTemplate),
+    outputMode: isTranslation ? "plain_text" : parseAiOutputMode(stringValue(feature.outputMode)),
     enabled: feature.enabled !== false,
-    sortOrder: Number.isFinite(feature.sortOrder) ? Math.round(Number(feature.sortOrder)) : defaultFeatureSortOrder(isTranslation, isReview),
-    panelEnabled: feature.panelEnabled !== false && feature.kind !== "review",
-    panelSortOrder: Number.isFinite(feature.panelSortOrder) ? Math.round(Number(feature.panelSortOrder)) : defaultPanelSortOrder(isTranslation, isReview),
+    sortOrder: Number.isFinite(feature.sortOrder) ? Math.round(Number(feature.sortOrder)) : defaultFeatureSortOrder(isTranslation),
+    panelEnabled: feature.panelEnabled !== false,
+    panelSortOrder: Number.isFinite(feature.panelSortOrder) ? Math.round(Number(feature.panelSortOrder)) : defaultPanelSortOrder(isTranslation),
     autoSaveToVocabulary: isTranslation && feature.autoSaveToVocabulary !== false,
     targetLanguage: isTranslation ? rawTargetLanguage.trim() || DEFAULT_TRANSLATION_FEATURE.targetLanguage : "",
-    reviewIntervalSeconds: normalizedReviewInterval(feature.reviewIntervalSeconds),
-    speechEnabled: normalizedSpeechEnabled(feature.speechEnabled, isTranslation, isReview),
-    icon: parseFeatureIcon(stringValue(feature.icon), builtInFeatureKind(isTranslation, isReview) ?? parseAiFeatureKind(stringValue(feature.kind))),
+    speechEnabled: normalizedSpeechEnabled(feature.speechEnabled, isTranslation),
+    icon: parseFeatureIcon(stringValue(feature.icon), builtInFeatureKind(isTranslation) ?? parseAiFeatureKind(stringValue(feature.kind))),
     createdAt: stringValue(feature.createdAt),
     updatedAt: stringValue(feature.updatedAt),
   };
@@ -672,7 +697,6 @@ function normalizedFeatureId(value: string) {
 }
 
 function parseAiFeatureKind(value: string): AiFeatureKind {
-  if (value === "review") return "review";
   return value === "translation" ? "translation" : "custom";
 }
 
@@ -696,62 +720,73 @@ function withBuiltInFeatures(features: AiFeature[]) {
   if (!nextFeatures.some((feature) => feature.id === DEFAULT_TRANSLATION_FEATURE.id)) {
     nextFeatures.push(DEFAULT_TRANSLATION_FEATURE);
   }
-  if (!nextFeatures.some((feature) => feature.id === DEFAULT_REVIEW_FEATURE.id)) {
-    nextFeatures.push(DEFAULT_REVIEW_FEATURE);
-  }
   return nextFeatures;
 }
 
 function isBuiltInFeatureId(id: string) {
-  return id === DEFAULT_TRANSLATION_FEATURE.id || id === DEFAULT_REVIEW_FEATURE.id;
+  return id === DEFAULT_TRANSLATION_FEATURE.id;
 }
 
-function builtInFeatureId(isTranslation: boolean, isReview: boolean) {
+function builtInFeatureId(isTranslation: boolean) {
   if (isTranslation) return DEFAULT_TRANSLATION_FEATURE.id;
-  if (isReview) return DEFAULT_REVIEW_FEATURE.id;
   return undefined;
 }
 
-function builtInFeatureKind(isTranslation: boolean, isReview: boolean): AiFeatureKind | undefined {
+function builtInFeatureKind(isTranslation: boolean): AiFeatureKind | undefined {
   if (isTranslation) return "translation";
-  if (isReview) return "review";
   return undefined;
 }
 
-function defaultFeatureName(isTranslation: boolean, isReview: boolean) {
+function defaultFeatureName(isTranslation: boolean) {
   if (isTranslation) return DEFAULT_TRANSLATION_FEATURE.name;
-  if (isReview) return DEFAULT_REVIEW_FEATURE.name;
   return "Custom feature";
 }
 
-function defaultFeatureSortOrder(isTranslation: boolean, isReview: boolean) {
+function defaultFeatureSortOrder(isTranslation: boolean) {
   if (isTranslation) return DEFAULT_TRANSLATION_FEATURE.sortOrder;
-  if (isReview) return DEFAULT_REVIEW_FEATURE.sortOrder;
   return 0;
 }
 
-function defaultPanelSortOrder(isTranslation: boolean, isReview: boolean) {
+function defaultPanelSortOrder(isTranslation: boolean) {
   if (isTranslation) return DEFAULT_TRANSLATION_FEATURE.panelSortOrder;
-  if (isReview) return DEFAULT_REVIEW_FEATURE.panelSortOrder;
   return 0;
 }
 
-function normalizedReviewInterval(value: unknown) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return DEFAULT_REVIEW_FEATURE.reviewIntervalSeconds;
-  return Math.min(3600, Math.max(5, Math.round(parsed)));
-}
-
-function normalizedSpeechEnabled(value: unknown, isTranslation: boolean, isReview: boolean) {
+function normalizedSpeechEnabled(value: unknown, isTranslation: boolean) {
   if (typeof value === "boolean") return value;
   if (isTranslation) return DEFAULT_TRANSLATION_FEATURE.speechEnabled;
-  if (isReview) return DEFAULT_REVIEW_FEATURE.speechEnabled;
   return false;
 }
 
 function parseFeatureIcon(value: string | null | undefined, kind: AiFeatureKind): AiFeatureIcon {
   if (value && isFeatureIcon(value)) return value;
   if (kind === "translation") return DEFAULT_TRANSLATION_FEATURE.icon;
-  if (kind === "review") return DEFAULT_REVIEW_FEATURE.icon;
   return "wand";
+}
+
+interface PanelRow {
+  id: string;
+  name: string;
+  icon: string;
+  enabled: number;
+  sort_order: number;
+}
+
+function panelFromRow(row: PanelRow): Panel {
+  return {
+    id: row.id,
+    name: row.name,
+    icon: (row.icon as AiFeatureIcon) || "wand",
+    enabled: row.enabled !== 0,
+    sortOrder: row.sort_order ?? 0,
+  };
+}
+
+function withBuiltInPanels(panels: Panel[]): Panel[] {
+  for (const def of DEFAULT_PANELS) {
+    if (!panels.some((p) => p.id === def.id)) {
+      panels.push({ ...def });
+    }
+  }
+  return panels.sort((a, b) => a.sortOrder - b.sortOrder);
 }
