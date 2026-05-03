@@ -1,4 +1,4 @@
-import type { AiFeature, AppSettings, ToolbarTool } from "../types";
+import type { AiFeature, AppSettings, Panel, ToolbarTool } from "../types";
 
 export const DEFAULT_PROMPT_TEMPLATE = `You are a concise bilingual dictionary.
 Translate the selected text to {{targetLanguage}} and return Markdown only.
@@ -30,27 +30,14 @@ export const DEFAULT_TRANSLATION_FEATURE: AiFeature = {
   panelSortOrder: 0,
   autoSaveToVocabulary: true,
   targetLanguage: "Chinese",
-  reviewIntervalSeconds: 30,
   speechEnabled: true,
   icon: "languages",
 };
 
-export const DEFAULT_REVIEW_FEATURE: AiFeature = {
-  id: "review",
-  name: "Review",
-  kind: "review",
-  promptTemplate: "",
-  outputMode: "plain_text",
-  enabled: true,
-  sortOrder: 10,
-  panelEnabled: false,
-  panelSortOrder: 100,
-  autoSaveToVocabulary: false,
-  targetLanguage: "",
-  reviewIntervalSeconds: 30,
-  speechEnabled: true,
-  icon: "book-plus",
-};
+export const DEFAULT_PANELS: Panel[] = [
+  { id: "translate", name: "Translate", icon: "languages", enabled: true, sortOrder: 0 },
+  { id: "review", name: "Review", icon: "book-open", enabled: true, sortOrder: 1 },
+];
 
 export const DEFAULT_SETTINGS: AppSettings = {
   displayMode: "popup_card",
@@ -59,6 +46,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   backgroundStyle: "macos_glass_clear",
   dockMode: "dock_and_menu_bar",
   toolbarEnabled: true,
+  activePanelId: null,
   apiBaseUrl: "https://api.openai.com/v1",
   apiKey: "",
   model: "gpt-4o-mini",

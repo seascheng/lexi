@@ -4,7 +4,7 @@ export type DockMode = "dock_and_menu_bar" | "menu_bar_only";
 export type BackgroundStyle = "solid" | "transparent" | "macos_glass_clear";
 export type WordStatus = "new" | "learning" | "mastered";
 export type ReviewRating = "again" | "hard" | "good" | "easy";
-export type AiFeatureKind = "translation" | "review" | "custom";
+export type AiFeatureKind = "translation" | "custom";
 export type AiOutputMode = "translation_json" | "plain_text";
 export type AiFeatureIcon = "languages" | "wand" | "pen" | "sparkles" | "book-plus" | "highlighter" | "file-text" | "message" | "clipboard" | "search" | "volume";
 export type ToolbarToolId = "copy" | "search" | "read";
@@ -44,6 +44,7 @@ export interface AppSettings {
   backgroundStyle: BackgroundStyle;
   dockMode: DockMode;
   toolbarEnabled: boolean;
+  activePanelId: string | null;
   apiBaseUrl: string;
   apiKey: string;
   model: string;
@@ -69,7 +70,6 @@ export interface AiFeature {
   panelSortOrder: number;
   autoSaveToVocabulary: boolean;
   targetLanguage: string;
-  reviewIntervalSeconds: number;
   speechEnabled: boolean;
   icon: AiFeatureIcon;
   createdAt?: string;
@@ -86,6 +86,16 @@ export interface ToolbarTool {
   panelEnabled: boolean;
   panelSortOrder: number;
   config: Record<string, unknown>;
+}
+
+export type PanelId = string;
+
+export interface Panel {
+  id: PanelId;
+  name: string;
+  icon: AiFeatureIcon;
+  enabled: boolean;
+  sortOrder: number;
 }
 
 export interface AiRunResult {
