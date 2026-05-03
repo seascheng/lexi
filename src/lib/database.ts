@@ -116,13 +116,15 @@ export async function loadToolbarTools(): Promise<ToolbarTool[]> {
   if (!rows[0]?.value) return DEFAULT_TOOLS.map((tool) => ({ ...tool }));
 
   try {
-    const saved = JSON.parse(rows[0].value) as Array<{ id: string; enabled: boolean; sortOrder: number; config?: Record<string, unknown> }>;
+    const saved = JSON.parse(rows[0].value) as Array<{ id: string; enabled: boolean; sortOrder: number; panelEnabled?: boolean; panelSortOrder?: number; config?: Record<string, unknown> }>;
     return DEFAULT_TOOLS.map((defaultTool) => {
       const override = saved.find((item) => item.id === defaultTool.id);
       return {
         ...defaultTool,
         enabled: override?.enabled ?? defaultTool.enabled,
         sortOrder: override?.sortOrder ?? defaultTool.sortOrder,
+        panelEnabled: override?.panelEnabled ?? defaultTool.panelEnabled,
+        panelSortOrder: override?.panelSortOrder ?? defaultTool.panelSortOrder,
         config: override?.config ?? defaultTool.config,
       };
     });
@@ -132,7 +134,7 @@ export async function loadToolbarTools(): Promise<ToolbarTool[]> {
 }
 
 export async function saveToolbarTools(tools: ToolbarTool[]): Promise<void> {
-  const data = tools.map((tool) => ({ id: tool.id, enabled: tool.enabled, sortOrder: tool.sortOrder, config: tool.config }));
+  const data = tools.map((tool) => ({ id: tool.id, enabled: tool.enabled, sortOrder: tool.sortOrder, panelEnabled: tool.panelEnabled, panelSortOrder: tool.panelSortOrder, config: tool.config }));
 
   if (!isTauriRuntime()) {
     localStorage.setItem("englist.toolbarTools", JSON.stringify(data));
@@ -468,6 +470,7 @@ function seedWords(): WordEntry[] {
 }
 
 function parseSettingValue(key: string, value: string) {
+  if (key === "toolbarEnabled") return value === "true";
   if (key === "windowOpacity") return parseWindowOpacity(value);
   return value;
 }
@@ -642,6 +645,8 @@ function normalizedAiFeature(feature: Partial<AiFeature>): AiFeature {
     outputMode: isTranslation || isReview ? "plain_text" : parseAiOutputMode(stringValue(feature.outputMode)),
     enabled: feature.enabled !== false,
     sortOrder: Number.isFinite(feature.sortOrder) ? Math.round(Number(feature.sortOrder)) : defaultFeatureSortOrder(isTranslation, isReview),
+    panelEnabled: feature.panelEnabled !== false && feature.kind !== "review",
+    panelSortOrder: Number.isFinite(feature.panelSortOrder) ? Math.round(Number(feature.panelSortOrder)) : defaultPanelSortOrder(isTranslation, isReview),
     autoSaveToVocabulary: isTranslation && feature.autoSaveToVocabulary !== false,
     targetLanguage: isTranslation ? rawTargetLanguage.trim() || DEFAULT_TRANSLATION_FEATURE.targetLanguage : "",
     reviewIntervalSeconds: normalizedReviewInterval(feature.reviewIntervalSeconds),
@@ -722,6 +727,12 @@ function defaultFeatureName(isTranslation: boolean, isReview: boolean) {
 function defaultFeatureSortOrder(isTranslation: boolean, isReview: boolean) {
   if (isTranslation) return DEFAULT_TRANSLATION_FEATURE.sortOrder;
   if (isReview) return DEFAULT_REVIEW_FEATURE.sortOrder;
+  return 0;
+}
+
+function defaultPanelSortOrder(isTranslation: boolean, isReview: boolean) {
+  if (isTranslation) return DEFAULT_TRANSLATION_FEATURE.panelSortOrder;
+  if (isReview) return DEFAULT_REVIEW_FEATURE.panelSortOrder;
   return 0;
 }
 

@@ -1,11 +1,12 @@
 import { emit } from "@tauri-apps/api/event";
 import { Eye, EyeOff, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AiFeature, AiFeatureIcon, ToolbarTool } from "../types";
-import { DEFAULT_CUSTOM_PROMPT_TEMPLATE, TOOL_DESCRIPTIONS } from "../lib/defaults";
-import { deleteAiFeature, listAiFeatures, loadToolbarTools, saveAiFeature, saveToolbarTools } from "../lib/database";
+import type { AiFeature, AiFeatureIcon, AppSettings, ToolbarTool } from "../types";
+import { DEFAULT_CUSTOM_PROMPT_TEMPLATE, DEFAULT_SETTINGS, TOOL_DESCRIPTIONS } from "../lib/defaults";
+import { deleteAiFeature, listAiFeatures, loadSettings, loadToolbarTools, saveAiFeature, saveSettings, saveToolbarTools } from "../lib/database";
 import { errorMessage } from "../lib/errors";
 import { FEATURE_ICON_OPTIONS, FeatureIcon, isFeatureIcon } from "../lib/featureIcons";
+import { syncNativeToolbar } from "../lib/nativeToolbar";
 import { isTauriRuntime } from "../lib/platform";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -20,6 +21,7 @@ type DraftItem =
 export function FeaturesPage() {
   const [features, setFeatures] = useState<AiFeature[]>([]);
   const [tools, setTools] = useState<ToolbarTool[]>([]);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [draft, setDraft] = useState<DraftItem | null>(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -34,9 +36,10 @@ export function FeaturesPage() {
   }, []);
 
   async function refresh() {
-    const [nextFeatures, nextTools] = await Promise.all([listAiFeatures(), loadToolbarTools()]);
+    const [nextFeatures, nextTools, nextSettings] = await Promise.all([listAiFeatures(), loadToolbarTools(), loadSettings()]);
     setFeatures(nextFeatures);
     setTools(nextTools);
+    setSettings(nextSettings);
     setDraft((current) => current ?? { kind: "toolbar-config" });
   }
 
@@ -53,23 +56,34 @@ export function FeaturesPage() {
   const enabledToolbarItems = allToolbarItems.filter((i) => i.enabled);
 
   async function toggleToolbarItem(item: { id: string; kind: "tool" | "ai" }) {
+    let nextFeatures = features;
+    let nextTools = tools;
+
     if (item.kind === "tool") {
-      const next = tools.map((t) => t.id === item.id ? { ...t, enabled: !t.enabled } : t);
-      setTools(next);
-      await saveToolbarTools(next);
+      nextTools = tools.map((t) => t.id === item.id ? { ...t, enabled: !t.enabled } : t);
+      setTools(nextTools);
+      await saveToolbarTools(nextTools);
     } else {
       const feature = features.find((f) => f.id === item.id);
       if (!feature) return;
       const updated = { ...feature, enabled: !feature.enabled };
       await saveAiFeature(updated);
-      setFeatures((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
+      nextFeatures = features.map((f) => (f.id === updated.id ? updated : f));
+      setFeatures(nextFeatures);
     }
+    await syncNativeToolbar(settings, nextFeatures, nextTools);
     await notifyChanged();
   }
 
-  // Drag state is managed inside ToolbarConfigPanel via pointer events
+  async function toggleToolbarEnabled(enabled: boolean) {
+    const next = { ...settings, toolbarEnabled: enabled };
+    setSettings(next);
+    await saveSettings(next);
+    await syncNativeToolbar(next, features, tools);
+    await notifyChanged();
+  }
 
-  async function applyReorder(from: number, to: number) {
+  async function applyToolbarReorder(from: number, to: number) {
     const sorted = [...allToolbarItems];
     const [moved] = sorted.splice(from, 1);
     sorted.splice(to, 0, moved);
@@ -85,6 +99,71 @@ export function FeaturesPage() {
       } else {
         const feature = features.find((f) => f.id === item.id);
         if (feature) featureUpdates.push({ ...feature, sortOrder: newOrder });
+      }
+    });
+
+    const nextTools = toolUpdates.length > 0
+      ? tools.map((t) => toolUpdates.find((u) => u.id === t.id) ?? t)
+      : tools;
+    const nextFeatures = featureUpdates.length > 0
+      ? features.map((f) => featureUpdates.find((u) => u.id === f.id) ?? f)
+      : features;
+
+    if (toolUpdates.length > 0) {
+      setTools(nextTools);
+      await saveToolbarTools(nextTools);
+    }
+    for (const f of featureUpdates) {
+      await saveAiFeature(f);
+    }
+    if (featureUpdates.length > 0) {
+      setFeatures(nextFeatures);
+    }
+    await syncNativeToolbar(settings, nextFeatures, nextTools);
+    await notifyChanged();
+  }
+
+  // --- Panel Config ---
+
+  const allPanelItems = useMemo(() => {
+    const items: Array<{ id: string; name: string; icon: AiFeatureIcon; enabled: boolean; sortOrder: number; kind: "tool" | "ai" }> = [
+      ...tools.map((t) => ({ id: t.id, name: t.name, icon: t.icon, enabled: t.panelEnabled, sortOrder: t.panelSortOrder, kind: "tool" as const })),
+      ...features.filter((f) => f.kind !== "review").map((f) => ({ id: f.id, name: f.name, icon: f.icon, enabled: f.panelEnabled, sortOrder: f.panelSortOrder, kind: "ai" as const })),
+    ];
+    return items.sort((a, b) => a.sortOrder - b.sortOrder);
+  }, [tools, features]);
+
+  async function togglePanelItem(item: { id: string; kind: "tool" | "ai" }) {
+    if (item.kind === "tool") {
+      const next = tools.map((t) => t.id === item.id ? { ...t, panelEnabled: !t.panelEnabled } : t);
+      setTools(next);
+      await saveToolbarTools(next);
+    } else {
+      const feature = features.find((f) => f.id === item.id);
+      if (!feature) return;
+      const updated = { ...feature, panelEnabled: !feature.panelEnabled };
+      await saveAiFeature(updated);
+      setFeatures((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
+    }
+    await notifyChanged();
+  }
+
+  async function applyPanelReorder(from: number, to: number) {
+    const sorted = [...allPanelItems];
+    const [moved] = sorted.splice(from, 1);
+    sorted.splice(to, 0, moved);
+
+    const toolUpdates: ToolbarTool[] = [];
+    const featureUpdates: AiFeature[] = [];
+
+    sorted.forEach((item, idx) => {
+      const newOrder = (idx + 1) * 10;
+      if (item.kind === "tool") {
+        const tool = tools.find((t) => t.id === item.id);
+        if (tool) toolUpdates.push({ ...tool, panelSortOrder: newOrder });
+      } else {
+        const feature = features.find((f) => f.id === item.id);
+        if (feature) featureUpdates.push({ ...feature, panelSortOrder: newOrder });
       }
     });
 
@@ -120,6 +199,7 @@ export function FeaturesPage() {
 
   function createFeature() {
     const sortOrder = features.reduce((max, f) => Math.max(max, f.sortOrder), 0) + 10;
+    const panelSortOrder = features.reduce((max, f) => Math.max(max, f.panelSortOrder), 0) + 10;
     setDraft({
       kind: "feature",
       data: {
@@ -130,6 +210,8 @@ export function FeaturesPage() {
         outputMode: "plain_text",
         enabled: true,
         sortOrder,
+        panelEnabled: true,
+        panelSortOrder,
         autoSaveToVocabulary: false,
         targetLanguage: "",
         reviewIntervalSeconds: 30,
@@ -238,11 +320,18 @@ export function FeaturesPage() {
           <ToolbarConfigPanel
             items={allToolbarItems}
             enabledItems={enabledToolbarItems}
-            onReorder={(from, to) => void applyReorder(from, to)}
+            toolbarEnabled={settings.toolbarEnabled}
+            toolbarTheme={settings.theme}
+            onToggleToolbarEnabled={toggleToolbarEnabled}
+            onReorder={(from, to) => void applyToolbarReorder(from, to)}
             onToggle={toggleToolbarItem}
           />
         ) : draft?.kind === "panel-config" ? (
-          <PanelConfigPanel />
+          <PanelConfigPanel
+            items={allPanelItems}
+            onToggle={togglePanelItem}
+            onReorder={(from, to) => void applyPanelReorder(from, to)}
+          />
         ) : draft?.kind === "tool" ? (
           <ToolConfigPanel tool={draft.data} onUpdateConfig={(c) => void updateToolConfig(draft.data.id, c)} />
         ) : draft?.kind === "feature" ? (
@@ -311,12 +400,165 @@ function PanelIcon() {
 
 /* ========== Right Panel: Toolbar Config ========== */
 
-function ToolbarConfigPanel({ items, enabledItems, onReorder, onToggle }: {
+function ToolbarConfigPanel({ items, enabledItems, toolbarEnabled, toolbarTheme, onToggleToolbarEnabled, onReorder, onToggle }: {
   items: Array<{ id: string; name: string; icon: AiFeatureIcon; enabled: boolean; sortOrder: number; kind: "tool" | "ai" }>;
   enabledItems: Array<{ id: string; name: string; icon: AiFeatureIcon; enabled: boolean }>;
+  toolbarEnabled: boolean;
+  toolbarTheme: AppSettings["theme"];
+  onToggleToolbarEnabled: (enabled: boolean) => void;
   onReorder: (from: number, to: number) => void;
   onToggle: (item: { id: string; kind: "tool" | "ai" }) => void;
 }) {
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dropIdx, setDropIdx] = useState<number | null>(null);
+  const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const dragging = useRef(false);
+  const previewStyle = toolbarPreviewStyle(toolbarTheme);
+
+  function handlePointerDown(idx: number, e: React.PointerEvent) {
+    dragging.current = true;
+    setDragIdx(idx);
+    setDropIdx(null);
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function handlePointerMove(e: React.PointerEvent) {
+    if (!dragging.current || dragIdx === null) return;
+    const y = e.clientY;
+    let found: number | null = null;
+    for (let i = 0; i < items.length; i++) {
+      const el = rowRefs.current[i];
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      if (y >= rect.top && y <= rect.bottom && i !== dragIdx) {
+        found = i;
+        break;
+      }
+    }
+    if (found !== dropIdx) setDropIdx(found);
+  }
+
+  function handlePointerUp() {
+    if (dragging.current && dragIdx !== null && dropIdx !== null && dragIdx !== dropIdx) {
+      onReorder(dragIdx, dropIdx);
+    }
+    dragging.current = false;
+    setDragIdx(null);
+    setDropIdx(null);
+  }
+
+  return (
+    <>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">Toolbar Config</h2>
+          <p className="text-sm text-muted">Drag to reorder. Toggle to show/hide.</p>
+        </div>
+        <ToggleSwitch checked={toolbarEnabled} onChange={onToggleToolbarEnabled} />
+      </div>
+
+      {/* Preview — mimics native macOS toolbar */}
+      <div className="flex justify-center py-2">
+        <div
+          className="inline-flex h-[30px] items-center overflow-hidden rounded-[8px] shadow-lg"
+          style={{
+            background: previewStyle.background,
+            opacity: toolbarEnabled ? 1 : 0.55,
+          }}
+        >
+          <div
+            className="flex h-[30px] w-[18px] cursor-grab items-center justify-center active:cursor-grabbing"
+            style={{ color: previewStyle.handle }}
+            title="Move toolbar"
+          >
+            <ToolbarDragHandleIcon />
+          </div>
+          {enabledItems.map((item) => (
+            <div
+              className="flex cursor-pointer items-center justify-center rounded-md"
+              key={item.id}
+              style={{ width: 34, height: 30, color: previewStyle.icon }}
+              title={item.name}
+            >
+              <FeatureIcon icon={item.icon} size={16} />
+            </div>
+          ))}
+          {enabledItems.length === 0 && (
+            <p className="px-3 py-1 text-xs" style={{ color: previewStyle.muted }}>No items</p>
+          )}
+        </div>
+      </div>
+
+      {/* Draggable item list */}
+      <div className="grid gap-1" onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}>
+        {items.map((item, idx) => (
+          <div
+            key={item.id}
+            ref={(el) => { rowRefs.current[idx] = el; }}
+            className={`flex items-center gap-2 rounded-md border px-2.5 py-2 transition select-none ${
+              dragIdx === idx
+                ? "border-accent bg-accent/10 opacity-50"
+                : dropIdx === idx
+                  ? "border-accent bg-accent/5"
+                  : "border-border bg-surface hover:bg-surfaceHover"
+            }`}
+          >
+            <div
+              className="cursor-grab text-muted active:cursor-grabbing"
+              onPointerDown={(e) => handlePointerDown(idx, e)}
+            >
+              <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
+                <circle cx="3" cy="2" r="1.5" /><circle cx="7" cy="2" r="1.5" />
+                <circle cx="3" cy="8" r="1.5" /><circle cx="7" cy="8" r="1.5" />
+                <circle cx="3" cy="14" r="1.5" /><circle cx="7" cy="14" r="1.5" />
+              </svg>
+            </div>
+            <FeatureIcon icon={item.icon} size={15} />
+            <span className="min-w-0 flex-1 truncate text-sm text-strong">{item.name}</span>
+            <span className="text-[10px] text-muted">{item.kind === "tool" ? "Tool" : "AI"}</span>
+            <ToggleSwitch checked={item.enabled} onChange={() => onToggle(item)} />
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function toolbarPreviewStyle(theme: AppSettings["theme"]) {
+  if (theme === "light") {
+    return {
+      background: "rgba(250,250,250,0.94)",
+      icon: "rgba(20,20,20,1)",
+      handle: "rgba(20,20,20,0.42)",
+      muted: "rgba(20,20,20,0.38)",
+    };
+  }
+
+  return {
+    background: "rgba(18,18,18,0.94)",
+    icon: "rgba(255,255,255,1)",
+    handle: "rgba(255,255,255,0.55)",
+    muted: "rgba(255,255,255,0.30)",
+  };
+}
+
+function ToolbarDragHandleIcon() {
+  return (
+    <svg width="10" height="16" viewBox="0 0 10 16" fill="none" aria-hidden="true">
+      <line x1="3.5" y1="3" x2="3.5" y2="13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <line x1="6.5" y1="3" x2="6.5" y2="13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/* ========== Right Panel: Panel Config ========== */
+
+function PanelConfigPanel({ items, onToggle, onReorder }: {
+  items: Array<{ id: string; name: string; icon: AiFeatureIcon; enabled: boolean; sortOrder: number; kind: "tool" | "ai" }>;
+  onToggle: (item: { id: string; kind: "tool" | "ai" }) => void;
+  onReorder: (from: number, to: number) => void;
+}) {
+  const enabledItems = items.filter((i) => i.enabled);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -357,33 +599,29 @@ function ToolbarConfigPanel({ items, enabledItems, onReorder, onToggle }: {
   return (
     <>
       <div>
-        <h2 className="text-lg font-semibold">Toolbar Config</h2>
-        <p className="text-sm text-muted">Drag to reorder. Toggle to show/hide.</p>
+        <h2 className="text-lg font-semibold">Panel Config</h2>
+        <p className="text-sm text-muted">Configure action buttons in the popup input area.</p>
       </div>
 
-      {/* Preview — mimics native macOS toolbar */}
+      {/* Preview — popup action bar */}
       <div className="flex justify-center py-2">
-        <div
-          className="inline-flex items-center gap-px rounded-[8px] px-1 py-1 shadow-lg"
-          style={{ background: "rgba(18,18,18,0.94)" }}
-        >
+        <div className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-surface px-2 py-1.5">
           {enabledItems.map((item) => (
             <div
-              className="flex items-center justify-center rounded-md text-white/80"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-strong"
               key={item.id}
-              style={{ width: 34, height: 30 }}
               title={item.name}
             >
-              <FeatureIcon icon={item.icon} size={16} />
+              <FeatureIcon icon={item.icon} size={15} />
             </div>
           ))}
           {enabledItems.length === 0 && (
-            <p className="px-3 py-1 text-xs text-white/30">No items</p>
+            <p className="px-2 text-xs text-muted">No actions enabled</p>
           )}
         </div>
       </div>
 
-      {/* Draggable item list */}
+      {/* Item list with drag-and-drop */}
       <div className="grid gap-1" onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}>
         {items.map((item, idx) => (
           <div
@@ -410,39 +648,9 @@ function ToolbarConfigPanel({ items, enabledItems, onReorder, onToggle }: {
             <FeatureIcon icon={item.icon} size={15} />
             <span className="min-w-0 flex-1 truncate text-sm text-strong">{item.name}</span>
             <span className="text-[10px] text-muted">{item.kind === "tool" ? "Tool" : "AI"}</span>
-            <button
-              className={`relative inline-flex shrink-0 items-center rounded-full transition-colors ${
-                item.enabled ? "bg-accent" : "bg-border"
-              }`}
-              onClick={(e) => { e.stopPropagation(); onToggle(item); }}
-              style={{ width: 28, height: 16 }}
-              type="button"
-            >
-              <span
-                className={`absolute rounded-full bg-white shadow-sm transition-all ${
-                  item.enabled ? "right-0.5" : "left-0.5"
-                }`}
-                style={{ width: 12, height: 12, top: 2 }}
-              />
-            </button>
+            <ToggleSwitch checked={item.enabled} onChange={() => onToggle(item)} />
           </div>
         ))}
-      </div>
-    </>
-  );
-}
-
-/* ========== Right Panel: Panel Config ========== */
-
-function PanelConfigPanel() {
-  return (
-    <>
-      <div>
-        <h2 className="text-lg font-semibold">Panel Config</h2>
-        <p className="text-sm text-muted">Configure the popup panel behavior and appearance.</p>
-      </div>
-      <div className="rounded-md border border-border bg-surface px-3 py-2">
-        <p className="text-sm text-muted">Panel configuration options coming soon.</p>
       </div>
     </>
   );
@@ -625,6 +833,26 @@ function FeatureConfigPanel({ draft, activeFeature, status, error, onUpdate, onS
 }
 
 /* ========== Shared ========== */
+
+function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <button
+      className={`relative inline-flex shrink-0 items-center rounded-full transition-colors ${
+        checked ? "bg-accent" : "bg-border"
+      }`}
+      onClick={(e) => { e.stopPropagation(); onChange(!checked); }}
+      style={{ width: 28, height: 16 }}
+      type="button"
+    >
+      <span
+        className={`absolute rounded-full bg-white shadow-sm transition-all ${
+          checked ? "right-0.5" : "left-0.5"
+        }`}
+        style={{ width: 12, height: 12, top: 2 }}
+      />
+    </button>
+  );
+}
 
 async function notifyChanged() {
   if (isTauriRuntime()) {

@@ -16,7 +16,7 @@ use std::env;
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::ptr;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -36,6 +36,7 @@ type AXUIElementRef = *const std::ffi::c_void;
 
 static TOOLBAR_PORT: OnceLock<Mutex<Option<u16>>> = OnceLock::new();
 static TOOLBAR_ACTIONS: OnceLock<Mutex<Vec<ToolbarActionItem>>> = OnceLock::new();
+static TOOLBAR_ENABLED: OnceLock<Mutex<bool>> = OnceLock::new();
 
 #[derive(Clone, Serialize)]
 struct AiRequestPayload {
@@ -96,6 +97,7 @@ struct WindowSnapshot {
 pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
     log_native("setup native toolbar");
     request_system_permissions();
+    initialize_toolbar_enabled(app);
 
     let app_handle = app.handle().clone();
     let listener = TcpListener::bind((IPC_HOST, 0))?;
@@ -111,6 +113,50 @@ pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
     launch_helper(app, action_port, toolbar_port)?;
     spawn_selection_monitor(app_handle, toolbar_port);
     Ok(())
+}
+
+fn initialize_toolbar_enabled(app: &tauri::App) {
+    let enabled = saved_toolbar_enabled(app).unwrap_or(true);
+    if let Ok(mut current) = TOOLBAR_ENABLED.get_or_init(|| Mutex::new(true)).lock() {
+        *current = enabled;
+    }
+    log_native(&format!("initial toolbar enabled={enabled}"));
+}
+
+fn saved_toolbar_enabled(app: &tauri::App) -> Option<bool> {
+    let path = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join("englist.db"))?;
+    read_toolbar_enabled_from_sqlite(&path)
+}
+
+fn saved_toolbar_enabled_for_app(app: &tauri::AppHandle) -> Option<bool> {
+    let path = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join("englist.db"))?;
+    read_toolbar_enabled_from_sqlite(&path)
+}
+
+fn read_toolbar_enabled_from_sqlite(path: &Path) -> Option<bool> {
+    let output = Command::new("sqlite3")
+        .arg(path)
+        .arg("SELECT value FROM settings WHERE key = 'toolbarEnabled' LIMIT 1;")
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    match String::from_utf8_lossy(&output.stdout).trim() {
+        "true" | "1" => Some(true),
+        "false" | "0" => Some(false),
+        _ => None,
+    }
 }
 
 #[tauri::command]
@@ -138,7 +184,87 @@ pub fn set_native_toolbar_actions(actions: Vec<ToolbarActionItem>) -> Result<(),
         .lock()
         .map_err(|_| "native toolbar actions are unavailable".to_string())?;
     *current = normalized_toolbar_actions(actions);
+    let should_hide = current.is_empty();
+    log_native(&format!(
+        "set toolbar actions count={} enabled={}",
+        current.len(),
+        native_toolbar_enabled()
+    ));
+    drop(current);
+
+    if should_hide {
+        let _ = hide_native_toolbar();
+    }
+
     Ok(())
+}
+
+#[tauri::command]
+pub fn set_native_toolbar_enabled(enabled: bool) -> Result<(), String> {
+    let mut current = TOOLBAR_ENABLED
+        .get_or_init(|| Mutex::new(true))
+        .lock()
+        .map_err(|_| "native toolbar enabled state is unavailable".to_string())?;
+    *current = enabled;
+    drop(current);
+    log_native(&format!("set toolbar enabled={enabled}"));
+
+    if !enabled {
+        let _ = hide_native_toolbar();
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn configure_native_toolbar(
+    enabled: bool,
+    actions: Vec<ToolbarActionItem>,
+) -> Result<(), String> {
+    let normalized_actions = if enabled {
+        normalized_toolbar_actions(actions)
+    } else {
+        Vec::new()
+    };
+    let action_count = normalized_actions.len();
+
+    {
+        let mut current_actions = TOOLBAR_ACTIONS
+            .get_or_init(|| Mutex::new(default_toolbar_actions()))
+            .lock()
+            .map_err(|_| "native toolbar actions are unavailable".to_string())?;
+        *current_actions = normalized_actions;
+    }
+
+    {
+        let mut current_enabled = TOOLBAR_ENABLED
+            .get_or_init(|| Mutex::new(true))
+            .lock()
+            .map_err(|_| "native toolbar enabled state is unavailable".to_string())?;
+        *current_enabled = enabled;
+    }
+
+    log_native(&format!(
+        "configure toolbar enabled={enabled} actions={action_count}"
+    ));
+
+    if !enabled || action_count == 0 {
+        let _ = hide_native_toolbar();
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn hide_native_toolbar() -> Result<(), String> {
+    let port = TOOLBAR_PORT
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .map_err(|_| "toolbar port unavailable".to_string())?
+        .ok_or_else(|| "toolbar port not set".to_string())?;
+
+    post_to_helper(port, "/hide", "")
+        .map_err(|error| format!("Could not hide toolbar: {error}"))
 }
 
 fn remember_toolbar_port(port: u16) {
@@ -153,6 +279,35 @@ fn current_toolbar_actions() -> Vec<ToolbarActionItem> {
         .lock()
         .map(|actions| actions.clone())
         .unwrap_or_else(|_| default_toolbar_actions())
+}
+
+fn native_toolbar_enabled() -> bool {
+    TOOLBAR_ENABLED
+        .get_or_init(|| Mutex::new(true))
+        .lock()
+        .map(|enabled| *enabled)
+        .unwrap_or(true)
+}
+
+fn active_toolbar_actions() -> Option<Vec<ToolbarActionItem>> {
+    if !native_toolbar_enabled() {
+        return None;
+    }
+
+    let actions = current_toolbar_actions();
+    (!actions.is_empty()).then_some(actions)
+}
+
+fn toolbar_enabled_for_app(app: &tauri::AppHandle) -> bool {
+    let Some(enabled) = saved_toolbar_enabled_for_app(app) else {
+        return native_toolbar_enabled();
+    };
+
+    if let Ok(mut current) = TOOLBAR_ENABLED.get_or_init(|| Mutex::new(true)).lock() {
+        *current = enabled;
+    }
+
+    enabled
 }
 
 fn normalized_toolbar_actions(actions: Vec<ToolbarActionItem>) -> Vec<ToolbarActionItem> {
@@ -174,11 +329,7 @@ fn normalized_toolbar_actions(actions: Vec<ToolbarActionItem>) -> Vec<ToolbarAct
         })
         .collect::<Vec<_>>();
 
-    if normalized.is_empty() {
-        default_toolbar_actions()
-    } else {
-        normalized
-    }
+    normalized
 }
 
 fn default_toolbar_actions() -> Vec<ToolbarActionItem> {
@@ -308,6 +459,16 @@ fn handle_system_event(
         CGEventType::LeftMouseDragged => mark_mouse_dragged(mouse_down, event),
         CGEventType::LeftMouseUp => {
             if !looks_like_selection(mouse_down, event) {
+                return;
+            }
+
+            if !toolbar_enabled_for_app(app) {
+                log_native("selection ignored toolbar disabled setting");
+                return;
+            }
+
+            if active_toolbar_actions().is_none() {
+                log_native("selection ignored toolbar disabled or empty");
                 return;
             }
 
@@ -627,12 +788,17 @@ fn appkit_position_from_event(event: &CGEvent) -> CursorPosition {
 }
 
 fn show_toolbar(toolbar_port: u16, text: String, position: CursorPosition, pending: bool) {
+    let Some(actions) = active_toolbar_actions() else {
+        log_native("toolbar show ignored disabled or empty actions");
+        return;
+    };
+
     let payload = ToolbarShowPayload {
         text,
         x: position.x,
         y: position.y,
         pending,
-        actions: current_toolbar_actions(),
+        actions,
     };
     let Ok(body) = serde_json::to_string(&payload) else {
         return;

@@ -6,7 +6,10 @@ use commands::ai::run_ai_prompt;
 use commands::speech::speak_text;
 use commands::window::{set_popup_height, start_popup_resize};
 use cursor::cursor_position;
-use native_toolbar::{set_native_toolbar_actions, set_native_toolbar_theme};
+use native_toolbar::{
+    configure_native_toolbar, hide_native_toolbar, set_native_toolbar_actions,
+    set_native_toolbar_enabled, set_native_toolbar_theme,
+};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, WindowEvent};
@@ -25,8 +28,11 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             cursor_position,
+            configure_native_toolbar,
+            hide_native_toolbar,
             run_ai_prompt,
             set_native_toolbar_actions,
+            set_native_toolbar_enabled,
             set_native_toolbar_theme,
             speak_text,
             set_popup_height,

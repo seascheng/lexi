@@ -26,6 +26,8 @@ export const DEFAULT_TRANSLATION_FEATURE: AiFeature = {
   outputMode: "plain_text",
   enabled: true,
   sortOrder: 0,
+  panelEnabled: true,
+  panelSortOrder: 0,
   autoSaveToVocabulary: true,
   targetLanguage: "Chinese",
   reviewIntervalSeconds: 30,
@@ -41,6 +43,8 @@ export const DEFAULT_REVIEW_FEATURE: AiFeature = {
   outputMode: "plain_text",
   enabled: true,
   sortOrder: 10,
+  panelEnabled: false,
+  panelSortOrder: 100,
   autoSaveToVocabulary: false,
   targetLanguage: "",
   reviewIntervalSeconds: 30,
@@ -54,6 +58,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   windowOpacity: 100,
   backgroundStyle: "macos_glass_clear",
   dockMode: "dock_and_menu_bar",
+  toolbarEnabled: true,
   apiBaseUrl: "https://api.openai.com/v1",
   apiKey: "",
   model: "gpt-4o-mini",
@@ -66,7 +71,7 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
 };
 
 export const DEFAULT_TOOLS: ToolbarTool[] = [
-  { id: "copy", name: "Copy", description: TOOL_DESCRIPTIONS.copy, icon: "clipboard", enabled: true, sortOrder: 100, config: {} },
-  { id: "search", name: "Search", description: TOOL_DESCRIPTIONS.search, icon: "search", enabled: true, sortOrder: 110, config: { engine: "google" } },
-  { id: "read", name: "Read", description: TOOL_DESCRIPTIONS.read, icon: "volume", enabled: true, sortOrder: 120, config: { engine: "system" } },
+  { id: "copy", name: "Copy", description: TOOL_DESCRIPTIONS.copy, icon: "clipboard", enabled: true, sortOrder: 100, panelEnabled: true, panelSortOrder: 100, config: {} },
+  { id: "search", name: "Search", description: TOOL_DESCRIPTIONS.search, icon: "search", enabled: true, sortOrder: 110, panelEnabled: true, panelSortOrder: 110, config: { engine: "google" } },
+  { id: "read", name: "Read", description: TOOL_DESCRIPTIONS.read, icon: "volume", enabled: true, sortOrder: 120, panelEnabled: true, panelSortOrder: 120, config: { engine: "system" } },
 ];

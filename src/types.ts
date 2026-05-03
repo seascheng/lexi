@@ -43,6 +43,7 @@ export interface AppSettings {
   windowOpacity: number;
   backgroundStyle: BackgroundStyle;
   dockMode: DockMode;
+  toolbarEnabled: boolean;
   apiBaseUrl: string;
   apiKey: string;
   model: string;
@@ -64,6 +65,8 @@ export interface AiFeature {
   outputMode: AiOutputMode;
   enabled: boolean;
   sortOrder: number;
+  panelEnabled: boolean;
+  panelSortOrder: number;
   autoSaveToVocabulary: boolean;
   targetLanguage: string;
   reviewIntervalSeconds: number;
@@ -80,6 +83,8 @@ export interface ToolbarTool {
   icon: AiFeatureIcon;
   enabled: boolean;
   sortOrder: number;
+  panelEnabled: boolean;
+  panelSortOrder: number;
   config: Record<string, unknown>;
 }
 

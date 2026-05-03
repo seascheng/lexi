@@ -3,6 +3,7 @@ import Foundation
 import Network
 
 private let logURL = URL(fileURLWithPath: "/tmp/englist-selection-helper.log")
+private let toolbarHandleWidth: CGFloat = 18
 private let toolbarSegmentWidth: CGFloat = 34
 private let toolbarHeight: CGFloat = 30
 private let toolbarIconSize: CGFloat = 16
@@ -194,11 +195,17 @@ private final class ToolbarButton: NSButton {
 
     override func mouseEntered(with event: NSEvent) {
         isHovering = true
+        NSCursor.pointingHand.set()
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovering = false
         isPressed = false
+        NSCursor.arrow.set()
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -212,9 +219,70 @@ private final class ToolbarButton: NSButton {
     }
 }
 
+private final class ToolbarDragHandle: NSView {
+    var theme: ToolbarTheme = .dark {
+        didSet {
+            needsDisplay = true
+        }
+    }
+    var onMouseDown: ((NSEvent) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        toolTip = "Move toolbar"
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+        toolTip = "Move toolbar"
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let color = theme.iconColor.withAlphaComponent(theme == .dark ? 0.55 : 0.42)
+        color.setStroke()
+
+        let path = NSBezierPath()
+        path.lineWidth = 1.5
+        path.lineCapStyle = .round
+        let top = bounds.midY + 5
+        let bottom = bounds.midY - 5
+        for x in [bounds.midX - 2.5, bounds.midX + 2.5] {
+            path.move(to: NSPoint(x: x, y: bottom))
+            path.line(to: NSPoint(x: x, y: top))
+        }
+        path.stroke()
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .openHand)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        NSCursor.openHand.set()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        NSCursor.closedHand.set()
+        onMouseDown?(event)
+        NSCursor.openHand.set()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        NSCursor.openHand.set()
+    }
+}
+
 final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     private var panel: NSPanel!
     private var container: NSView!
+    private var dragHandle: ToolbarDragHandle!
     private var buttons: [ToolbarButton] = []
     private var actions = defaultToolbarActions()
     private var theme: ToolbarTheme = .dark
@@ -293,6 +361,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         container.layer?.masksToBounds = true
 
         panel.contentView = container
+        dragHandle = ToolbarDragHandle(frame: NSRect(x: 0, y: 0, width: toolbarHandleWidth, height: toolbarHeight))
+        dragHandle.autoresizingMask = [.height]
+        dragHandle.theme = theme
+        dragHandle.onMouseDown = { [weak self] event in
+            self?.panel.performDrag(with: event)
+        }
+        container.addSubview(dragHandle)
         applyActions(actions)
     }
 
@@ -312,13 +387,19 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
 
     private func applyActions(_ nextActions: [ToolbarAction]) {
         let normalized = nextActions.filter { !$0.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        actions = normalized.isEmpty ? defaultToolbarActions() : normalized
+        actions = normalized
         buttons.forEach { $0.removeFromSuperview() }
         buttons.removeAll()
+
+        if actions.isEmpty {
+            hidePanel(force: true)
+            return
+        }
 
         let width = toolbarWidth(for: actions.count)
         container.frame = NSRect(x: 0, y: 0, width: width, height: toolbarHeight)
         panel.setContentSize(NSSize(width: width, height: toolbarHeight))
+        dragHandle.frame = NSRect(x: 0, y: 0, width: toolbarHandleWidth, height: toolbarHeight)
 
         for (index, action) in actions.enumerated() {
             addToolbarButton(action: action, index: index)
@@ -328,7 +409,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     private func addToolbarButton(action: ToolbarAction, index: Int) {
         let button = ToolbarButton(
             frame: NSRect(
-                x: CGFloat(index) * toolbarSegmentWidth,
+                x: toolbarHandleWidth + CGFloat(index) * toolbarSegmentWidth,
                 y: 0,
                 width: toolbarSegmentWidth,
                 height: toolbarHeight
@@ -348,7 +429,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     }
 
     private func toolbarWidth(for actionCount: Int) -> CGFloat {
-        CGFloat(max(actionCount, 1)) * toolbarSegmentWidth
+        toolbarHandleWidth + CGFloat(max(actionCount, 1)) * toolbarSegmentWidth
     }
 
     private func startDisplayServer() {
@@ -437,12 +518,17 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
             return
         }
 
+        applyActions(payload.actions ?? actions)
+        if actions.isEmpty {
+            hidePanel(force: true)
+            return
+        }
+
         if panel.isVisible && payload.pending != true {
             selectedText = text
             return
         }
 
-        applyActions(payload.actions ?? actions)
         let width = toolbarWidth(for: actions.count)
         let origin = clampedPanelOrigin(near: currentMouseLocation(fallback: payload), width: width)
         let frame = NSRect(x: origin.x, y: origin.y, width: width, height: toolbarHeight)
@@ -456,6 +542,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     private func applyTheme(_ themeName: String) {
         theme = ToolbarTheme(rawValue: themeName) ?? .dark
         container.layer?.backgroundColor = theme.backgroundColor.cgColor
+        dragHandle.theme = theme
         buttons.forEach { $0.theme = theme }
         log("theme applied \(theme.rawValue)")
     }

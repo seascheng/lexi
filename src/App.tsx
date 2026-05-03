@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppSettings, WordEntry } from "./types";
 import { applyAppearanceSettings } from "./lib/appearance";
 import { DEFAULT_SETTINGS } from "./lib/defaults";
-import { listWords, loadSettings, saveSettings } from "./lib/database";
+import { listAiFeatures, listWords, loadSettings, loadToolbarTools, saveSettings } from "./lib/database";
+import { syncNativeToolbar } from "./lib/nativeToolbar";
 import { isTauriRuntime } from "./lib/platform";
 import { Button } from "./components/ui/Button";
 import { TranslationWindow } from "./components/translation/TranslationWindow";
@@ -50,6 +51,7 @@ function MainWindow() {
       void invoke("set_native_toolbar_theme", { theme: settings.theme }).catch((error) => {
         console.warn("Failed to sync native toolbar theme", error);
       });
+      void syncNativeToolbarFromSettings(settings);
     }
   }, [settings]);
 
@@ -90,6 +92,11 @@ function MainWindow() {
 
   async function refreshWords() {
     setWords(await listWords());
+  }
+
+  async function syncNativeToolbarFromSettings(nextSettings: AppSettings) {
+    const [features, tools] = await Promise.all([listAiFeatures(), loadToolbarTools()]);
+    await syncNativeToolbar(nextSettings, features, tools);
   }
 
   const handleSettingsChanged = useCallback(async (nextSettings: AppSettings) => {

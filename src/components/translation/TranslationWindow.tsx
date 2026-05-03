@@ -2,14 +2,15 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AlertCircle, Clipboard, Loader2, Save, Volume2, X } from "lucide-react";
+import { AlertCircle, Clipboard, Loader2, Save, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, DisplayMode, LearningEntryInput, LearningEntryType } from "../../types";
+import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, DisplayMode, LearningEntryInput, LearningEntryType, ToolbarTool } from "../../types";
 import { copyText, runAiFeature, speakText } from "../../lib/ai";
 import { applyAppearanceSettings } from "../../lib/appearance";
 import { addWord, listAiFeatures, loadSettings, loadToolbarTools, savePopupPosition, savePopupSize } from "../../lib/database";
 import { errorMessage } from "../../lib/errors";
 import { FeatureIcon } from "../../lib/featureIcons";
+import { syncNativeToolbar } from "../../lib/nativeToolbar";
 import { Button } from "../ui/Button";
 import { FloatingFrame, type PopupResizeStart } from "./FloatingFrame";
 import { MarkdownRenderer } from "../ui/MarkdownRenderer";
@@ -54,14 +55,9 @@ interface ReadyPayload {
   mode: DisplayMode;
 }
 
-interface NativeToolbarAction {
-  id: string;
-  title: string;
-  icon: string;
-}
-
 export function TranslationWindow() {
   const [features, setFeatures] = useState<AiFeature[]>([]);
+  const [tools, setTools] = useState<ToolbarTool[]>([]);
   const [inputText, setInputText] = useState("");
   const [runs, setRuns] = useState<WorkspaceRun[]>([]);
   const [activeRunId, setActiveRunId] = useState("");
@@ -77,9 +73,24 @@ export function TranslationWindow() {
   const windowName = params.get("window");
   const isBar = windowName === "float_bar";
   const actionFeatures = useMemo(
-    () => features.filter((feature) => feature.enabled && feature.kind !== "review"),
+    () => features.filter((feature) => feature.panelEnabled && feature.kind !== "review").sort((a, b) => a.panelSortOrder - b.panelSortOrder),
     [features],
   );
+
+  type PanelItem = { kind: "tool"; tool: ToolbarTool } | { kind: "feature"; feature: AiFeature };
+
+  const panelItems = useMemo<PanelItem[]>(() => {
+    const items: PanelItem[] = [
+      ...tools.filter((t) => t.panelEnabled).map((t) => ({ kind: "tool" as const, tool: t })),
+      ...features.filter((f) => f.panelEnabled && f.kind !== "review").map((f) => ({ kind: "feature" as const, feature: f })),
+    ];
+    return items.sort((a, b) => {
+      const orderA = a.kind === "tool" ? a.tool.panelSortOrder : a.feature.panelSortOrder;
+      const orderB = b.kind === "tool" ? b.tool.panelSortOrder : b.feature.panelSortOrder;
+      return orderA - orderB;
+    });
+  }, [tools, features]);
+
   const defaultFeature = actionFeatures[0];
   const latestRun = runs[0];
   const activeRun = runs.find((run) => run.id === activeRunId) ?? runs[0];
@@ -154,6 +165,7 @@ export function TranslationWindow() {
       }),
       listen<AppSettings>("englist://settings-changed", (event) => {
         void applyAppearanceSettings(event.payload);
+        void syncNativeToolbarActions(featuresRef.current);
       }),
       listen("englist://features-changed", () => {
         void reloadFeatures();
@@ -315,8 +327,9 @@ export function TranslationWindow() {
   }, []);
 
   async function initializePopup() {
-    const [settings, nextFeatures] = await Promise.all([loadSettings(), listAiFeatures()]);
+    const [settings, nextFeatures, nextTools] = await Promise.all([loadSettings(), listAiFeatures(), loadToolbarTools()]);
     await applyAppearanceSettings(settings);
+    setTools(nextTools);
     applyFeatureList(nextFeatures);
   }
 
@@ -331,26 +344,11 @@ export function TranslationWindow() {
   }
 
   async function syncNativeToolbarActions(nextFeatures: AiFeature[]) {
-    const enabledFeatures = nextFeatures.filter((feature) => feature.enabled && feature.kind !== "review");
     const nextTools = await loadToolbarTools();
-    const enabledTools = nextTools.filter((tool) => tool.enabled);
+    setTools(nextTools);
 
-    const items: Array<{ id: string; name: string; icon: AiFeatureIcon; sortOrder: number }> = [
-      ...enabledTools.map((tool) => ({ id: tool.id, name: tool.name, icon: tool.icon, sortOrder: tool.sortOrder })),
-      ...enabledFeatures.map((feature) => ({ id: feature.id, name: feature.name, icon: feature.icon, sortOrder: feature.sortOrder })),
-    ];
-
-    items.sort((a, b) => a.sortOrder - b.sortOrder);
-
-    const actions: NativeToolbarAction[] = items.map((item) => ({
-      id: item.id,
-      title: item.name,
-      icon: item.icon,
-    }));
-
-    await invoke("set_native_toolbar_actions", { actions }).catch((error) => {
-      console.warn("Failed to sync native toolbar actions", error);
-    });
+    const settings = await loadSettings();
+    await syncNativeToolbar(settings, nextFeatures, nextTools);
   }
 
   function submitDefaultFeature(event: FormEvent) {
@@ -498,25 +496,6 @@ export function TranslationWindow() {
     await getCurrentWindow().hide();
   }
 
-  async function runFeatureFromSelectedText(feature: AiFeature) {
-    const text = await selectedTextOnly();
-    if (!text) {
-      addWorkspaceRun({
-        kind: "feature",
-        title: feature.name,
-        featureId: feature.id,
-        icon: feature.icon,
-        inputText: "",
-        mode: currentMode(),
-        status: "error",
-        message: "Select text first.",
-      });
-      return;
-    }
-
-    await runFeature(text, currentMode(), feature);
-  }
-
   async function runFeatureFromInput(feature: AiFeature) {
     const text = inputTextRef.current.trim();
     if (!text) {
@@ -536,20 +515,29 @@ export function TranslationWindow() {
     await runFeature(text, currentMode(), feature);
   }
 
-  async function selectedTextOnly() {
-    return popupSelectedText();
-  }
-
-  async function speakSelectedText() {
-    const text = await selectedTextOnly();
-    if (!text) throw new Error("Select text first.");
-    await speakText(text);
-  }
-
-  async function speakInputText() {
+  async function handleToolAction(toolId: string) {
     const text = inputTextRef.current.trim();
-    if (!text) throw new Error("Enter text first.");
-    await speakText(text);
+    if (!text) return;
+    const tool = tools.find((t) => t.id === toolId);
+    switch (toolId) {
+      case "copy":
+        await copyText(text);
+        break;
+      case "search": {
+        const encoded = encodeURIComponent(text);
+        let url: string;
+        const engine = (tool?.config?.engine as string) ?? "google";
+        if (engine === "bing") url = `https://www.bing.com/search?q=${encoded}`;
+        else if (engine === "duckduckgo") url = `https://duckduckgo.com/?q=${encoded}`;
+        else if (engine === "custom") url = ((tool?.config?.customUrl as string) || "").replace("{query}", encoded);
+        else url = `https://www.google.com/search?q=${encoded}`;
+        window.open(url, "_blank");
+        break;
+      }
+      case "read":
+        await speakText(text);
+        break;
+    }
   }
 
   async function saveLearningEntry(runId: string) {
@@ -589,17 +577,16 @@ export function TranslationWindow() {
           activeRunId={activeRunId}
           defaultFeature={defaultFeature}
           inputText={inputText}
+          panelItems={panelItems}
           runs={runs}
           onDismissRun={dismissWorkspaceRun}
           onEntryTypeChange={updateRunEntryType}
           onClearRuns={clearWorkspaceRuns}
           onInputChange={setInputText}
           onRunFeatureInput={(feature) => void runFeatureFromInput(feature)}
-          onRunFeatureSelection={(feature) => void runFeatureFromSelectedText(feature)}
           onSaveLearningEntry={saveLearningEntry}
+          onToolAction={(toolId) => void handleToolAction(toolId)}
           onSelectRun={setActiveRunId}
-          onSpeakInput={speakInputText}
-          onSpeakSelection={speakSelectedText}
           onSubmitDefault={submitDefaultFeature}
         />
       </FloatingFrame>
@@ -658,17 +645,16 @@ interface WorkspacePageProps {
   activeRunId: string;
   defaultFeature?: AiFeature;
   inputText: string;
+  panelItems: Array<{ kind: "tool"; tool: ToolbarTool } | { kind: "feature"; feature: AiFeature }>;
   runs: WorkspaceRun[];
   onClearRuns: () => void;
   onDismissRun: (runId: string) => void;
   onEntryTypeChange: (runId: string, entryType: LearningEntryType) => void;
   onInputChange: (value: string) => void;
   onRunFeatureInput: (feature: AiFeature) => void;
-  onRunFeatureSelection: (feature: AiFeature) => void;
   onSaveLearningEntry: (runId: string) => void | Promise<void>;
+  onToolAction: (toolId: string) => void;
   onSelectRun: (runId: string) => void;
-  onSpeakInput: () => Promise<void>;
-  onSpeakSelection: () => Promise<void>;
   onSubmitDefault: (event: FormEvent) => void;
 }
 
@@ -678,33 +664,29 @@ function WorkspacePage({
   activeRunId,
   defaultFeature,
   inputText,
+  panelItems,
   runs,
   onClearRuns,
   onDismissRun,
   onEntryTypeChange,
   onInputChange,
   onRunFeatureInput,
-  onRunFeatureSelection,
   onSaveLearningEntry,
+  onToolAction,
   onSelectRun,
-  onSpeakInput,
-  onSpeakSelection,
   onSubmitDefault,
 }: WorkspacePageProps) {
   return (
     <div className="translation-tab-page flex min-h-0 flex-col gap-2 pt-2">
       <section className="translation-action-area shrink-0">
         <AiForm
-          actionFeatures={actionFeatures}
-          canSpeak={actionFeatures.some((feature) => feature.speechEnabled)}
           defaultFeature={defaultFeature}
           inputText={inputText}
+          panelItems={panelItems}
           runs={runs}
           onInputChange={onInputChange}
           onRunFeatureInput={onRunFeatureInput}
-          onRunFeatureSelection={onRunFeatureSelection}
-          onSpeakInput={onSpeakInput}
-          onSpeakSelection={onSpeakSelection}
+          onToolAction={onToolAction}
           onSubmit={onSubmitDefault}
         />
       </section>
@@ -796,46 +778,26 @@ function RunTabs({
 }
 
 interface AiFormProps {
-  actionFeatures: AiFeature[];
-  canSpeak: boolean;
   defaultFeature?: AiFeature;
   inputText: string;
+  panelItems: Array<{ kind: "tool"; tool: ToolbarTool } | { kind: "feature"; feature: AiFeature }>;
   runs: WorkspaceRun[];
   onInputChange: (value: string) => void;
   onRunFeatureInput: (feature: AiFeature) => void;
-  onRunFeatureSelection: (feature: AiFeature) => void;
-  onSpeakInput: () => Promise<void>;
-  onSpeakSelection: () => Promise<void>;
+  onToolAction: (toolId: string) => void;
   onSubmit: (event: FormEvent) => void;
 }
 
 function AiForm({
-  actionFeatures,
-  canSpeak,
   defaultFeature,
   inputText,
+  panelItems,
   runs,
   onInputChange,
   onRunFeatureInput,
-  onRunFeatureSelection,
-  onSpeakInput,
-  onSpeakSelection,
+  onToolAction,
   onSubmit,
 }: AiFormProps) {
-  const [speechError, setSpeechError] = useState("");
-  const isSubmittingDefault = Boolean(
-    defaultFeature && runs.some((run) => run.status === "loading" && run.featureId === defaultFeature.id),
-  );
-
-  async function speakFromSource(action: () => Promise<void>) {
-    setSpeechError("");
-    try {
-      await action();
-    } catch (error) {
-      setSpeechError(errorMessage(error, "Speech failed."));
-    }
-  }
-
   function resizeTextarea(element: HTMLTextAreaElement) {
     element.style.height = "auto";
     element.style.height = `${Math.min(140, element.scrollHeight)}px`;
@@ -863,37 +825,39 @@ function AiForm({
           value={inputText}
         />
         <div className="ml-1 flex max-w-[52%] shrink-0 items-end overflow-x-auto rounded-md border border-strong/10 bg-surface/45">
-          {actionFeatures.map((feature) => {
-            const isLoading = runs.some((run) => run.status === "loading" && run.featureId === feature.id && run.kind === "feature");
+          {panelItems.map((item) => {
+            if (item.kind === "tool") {
+              return (
+                <Button
+                  aria-label={`${item.tool.name} input text`}
+                  className="h-8 min-h-8 w-8 shrink-0 rounded-none border-r border-strong/10 p-0"
+                  disabled={!inputText.trim()}
+                  icon={<FeatureIcon icon={item.tool.icon} size={15} />}
+                  key={item.tool.id}
+                  onClick={() => onToolAction(item.tool.id)}
+                  title={`${item.tool.name} input text`}
+                  type="button"
+                  variant="ghost"
+                />
+              );
+            }
+            const isLoading = runs.some((run) => run.status === "loading" && run.featureId === item.feature.id && run.kind === "feature");
             return (
               <Button
-                aria-label={`${feature.name} input text`}
+                aria-label={`${item.feature.name} input text`}
                 className="h-8 min-h-8 w-8 shrink-0 rounded-none border-r border-strong/10 p-0"
                 disabled={isLoading || !inputText.trim()}
-                icon={isLoading ? <Loader2 className="animate-spin" size={15} /> : <FeatureIcon icon={feature.icon} size={15} />}
-                key={feature.id}
-                onClick={() => onRunFeatureInput(feature)}
-                title={`${feature.name} input text`}
+                icon={isLoading ? <Loader2 className="animate-spin" size={15} /> : <FeatureIcon icon={item.feature.icon} size={15} />}
+                key={item.feature.id}
+                onClick={() => onRunFeatureInput(item.feature)}
+                title={`${item.feature.name} input text`}
                 type="button"
                 variant="ghost"
               />
             );
           })}
-          {canSpeak ? (
-            <Button
-              aria-label="Speak input text"
-              className="h-8 min-h-8 w-8 shrink-0 rounded-none p-0"
-              disabled={!inputText.trim()}
-              icon={<Volume2 size={15} />}
-              onClick={() => void speakFromSource(onSpeakInput)}
-              title="Speak input text"
-              type="button"
-              variant="ghost"
-            />
-          ) : null}
         </div>
       </div>
-      {speechError ? <p className="text-xs text-danger">{speechError}</p> : null}
     </form>
   );
 }
@@ -1019,20 +983,6 @@ function EntryTypeTags({
 
 function newRunId() {
   return `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function popupSelectedText() {
-  const selectedPageText = window.getSelection()?.toString().trim() ?? "";
-  if (selectedPageText) return selectedPageText;
-
-  const activeElement = document.activeElement;
-  if (activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement) {
-    const start = activeElement.selectionStart ?? 0;
-    const end = activeElement.selectionEnd ?? 0;
-    return activeElement.value.slice(start, end).trim();
-  }
-
-  return "";
 }
 
 function isSingleWordTranslation(inputText: string, result: AiRunResult) {
