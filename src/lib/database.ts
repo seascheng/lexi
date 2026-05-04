@@ -79,18 +79,6 @@ export async function savePopupPosition(position: WindowPosition) {
   ]);
 }
 
-export async function loadPopupSize(): Promise<WindowSize | null> {
-  if (!isTauriRuntime()) return loadBrowserPopupSize();
-
-  const db = await getSqlDatabase();
-  const rows = await db.select<Array<{ value: string }>>(
-    "SELECT value FROM settings WHERE key = $1 LIMIT 1",
-    [POPUP_SIZE_KEY],
-  );
-
-  return parseWindowSize(rows[0]?.value);
-}
-
 export async function savePopupSize(size: WindowSize) {
   const serialized = JSON.stringify(normalizedWindowSize(size));
 
@@ -288,27 +276,6 @@ export async function listWords(): Promise<WordEntry[]> {
   );
 }
 
-export async function countWords(): Promise<number> {
-  if (!isTauriRuntime()) return loadBrowserWords().length;
-
-  const db = await getSqlDatabase();
-  const rows = await db.select<{ count: number }[]>("SELECT COUNT(*) as count FROM words");
-  return rows[0]?.count ?? 0;
-}
-
-export async function listWordsPage(limit: number, offset: number): Promise<WordEntry[]> {
-  if (!isTauriRuntime()) {
-    const all = loadBrowserWords();
-    return all.slice(offset, offset + limit);
-  }
-
-  const db = await getSqlDatabase();
-  return db.select<WordEntry[]>(
-    "SELECT * FROM words ORDER BY datetime(created_at) DESC, id DESC LIMIT $1 OFFSET $2",
-    [limit, offset],
-  );
-}
-
 export async function addWord(result: LearningEntryInput): Promise<WordEntry> {
   if (!isTauriRuntime()) return addBrowserWord(result);
 
@@ -442,10 +409,6 @@ function loadBrowserPopupPosition() {
   return parseWindowPosition(localStorage.getItem(POPUP_POSITION_KEY));
 }
 
-function loadBrowserPopupSize() {
-  return parseWindowSize(localStorage.getItem(POPUP_SIZE_KEY));
-}
-
 function loadBrowserWords(): WordEntry[] {
   const saved = localStorage.getItem(WORDS_KEY);
   if (!saved) return seedWords();
@@ -550,18 +513,6 @@ function parseWindowPosition(value: string | null | undefined): WindowPosition |
     const parsed = JSON.parse(value);
     if (!isWindowPosition(parsed)) return null;
     return normalizedWindowPosition(parsed);
-  } catch {
-    return null;
-  }
-}
-
-function parseWindowSize(value: string | null | undefined): WindowSize | null {
-  if (!value) return null;
-
-  try {
-    const parsed = JSON.parse(value);
-    if (!isWindowSize(parsed)) return null;
-    return normalizedWindowSize(parsed);
   } catch {
     return null;
   }

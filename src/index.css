@@ -18,11 +18,9 @@
   --color-input: 14 14 14;
   --color-example: 12 12 12;
   --color-floating: 16 16 16;
-  --color-floating-border: 56 56 56;
   --color-accent: 245 245 245;
   --color-accent-hover: 218 218 218;
   --color-accent-foreground: 12 12 12;
-  --color-warning: 188 188 188;
   --color-danger: 220 112 112;
   background: transparent;
   color: rgb(var(--color-strong));
@@ -41,11 +39,9 @@
   --color-input: 255 255 255;
   --color-example: 248 248 248;
   --color-floating: 255 255 255;
-  --color-floating-border: 198 198 198;
   --color-accent: 18 18 18;
   --color-accent-hover: 46 46 46;
   --color-accent-foreground: 255 255 255;
-  --color-warning: 92 92 92;
   --color-danger: 210 63 63;
 }
 
