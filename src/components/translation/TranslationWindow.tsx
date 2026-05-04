@@ -848,17 +848,6 @@ function RunTabs({
   );
 }
 
-interface AiFormProps {
-  defaultFeature?: AiFeature;
-  inputText: string;
-  panelItems: Array<{ kind: "tool"; tool: ToolbarTool } | { kind: "feature"; feature: AiFeature }>;
-  runs: WorkspaceRun[];
-  onInputChange: (value: string) => void;
-  onRunFeatureInput: (feature: AiFeature) => void;
-  onToolAction: (toolId: string) => void;
-  onSubmit: (event: FormEvent) => void;
-}
-
 function AiForm({
   defaultFeature,
   inputText,
@@ -868,68 +857,100 @@ function AiForm({
   onRunFeatureInput,
   onToolAction,
   onSubmit,
-}: AiFormProps) {
+}: {
+  defaultFeature?: AiFeature;
+  inputText: string;
+  panelItems: Array<{ kind: "feature"; feature: AiFeature } | { kind: "tool"; tool: ToolbarTool }>;
+  runs: WorkspaceRun[];
+  onInputChange: (value: string) => void;
+  onRunFeatureInput: (feature: AiFeature) => void;
+  onToolAction: (toolId: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const [isMultiline, setIsMultiline] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
   function resizeTextarea(element: HTMLTextAreaElement) {
     element.style.height = "auto";
     element.style.height = `${Math.min(140, element.scrollHeight)}px`;
+    setIsMultiline(element.scrollHeight > 36);
   }
-
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (textareaRef.current) resizeTextarea(textareaRef.current);
   }, [inputText]);
 
   return (
-    <form className="grid gap-1.5" onSubmit={onSubmit}>
-      <div className="translation-form flex w-full items-end rounded-lg border border-strong/10 bg-input p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+    <form className="px-2 pt-1" onSubmit={onSubmit}>
+      <div className={`flex items-center gap-1 rounded-lg border border-strong/5 bg-input p-1 ${isMultiline ? "flex-wrap" : ""}`}>
         <textarea
-          className="max-h-[140px] min-h-8 min-w-0 flex-1 resize-none rounded-md border-0 bg-transparent px-2 py-1.5 text-sm leading-5 text-strong outline-none placeholder:text-muted"
-          onChange={(event) => {
-            onInputChange(event.target.value);
-            resizeTextarea(event.currentTarget);
-          }}
-          onInput={(event) => resizeTextarea(event.currentTarget)}
+          className="max-h-[140px] min-h-[24px] min-w-0 flex-1 resize-none border-0 bg-transparent px-1.5 py-1 text-xs leading-[1.3] text-strong outline-none placeholder:text-muted"
+          onChange={(event) => { onInputChange(event.target.value); resizeTextarea(event.currentTarget); }}
+          onInput={(event) => resizeTextarea(event.currentTarget as HTMLTextAreaElement)}
           placeholder="Enter text"
           ref={textareaRef}
           rows={1}
           value={inputText}
         />
-        <div className="ml-1 flex max-w-[52%] shrink-0 items-end overflow-x-auto rounded-md border border-strong/10 bg-surface/45">
-          {panelItems.map((item) => {
-            if (item.kind === "tool") {
-              return (
-                <Button
-                  aria-label={`${item.tool.name} input text`}
-                  className="h-8 min-h-8 w-8 shrink-0 rounded-none border-r border-strong/10 p-0"
-                  disabled={!inputText.trim()}
-                  icon={<FeatureIcon icon={item.tool.icon} size={15} />}
-                  key={item.tool.id}
-                  onClick={() => onToolAction(item.tool.id)}
-                  title={`${item.tool.name} input text`}
-                  type="button"
-                  variant="ghost"
-                />
-              );
-            }
-            const isLoading = runs.some((run) => run.status === "loading" && run.featureId === item.feature.id && run.kind === "feature");
-            return (
-              <Button
-                aria-label={`${item.feature.name} input text`}
-                className="h-8 min-h-8 w-8 shrink-0 rounded-none border-r border-strong/10 p-0"
-                disabled={isLoading || !inputText.trim()}
-                icon={<FeatureIcon icon={item.feature.icon} size={15} />}
-                key={item.feature.id}
-                onClick={() => onRunFeatureInput(item.feature)}
-                title={`${item.feature.name} input text`}
-                type="button"
-                variant="ghost"
-              />
-            );
-          })}
-        </div>
+        {panelItems.length > 0 ? (
+          isMultiline ? (
+            <div className="flex w-full gap-0.5 border-t border-strong/5 pt-1 pl-1">
+              {panelItems.map((item) => (
+                <AiFormActionButton key={item.kind === "feature" ? item.feature.id : item.tool.id} item={item} runs={runs} inputText={inputText} onRunFeatureInput={onRunFeatureInput} onToolAction={onToolAction} />
+              ))}
+            </div>
+          ) : (
+            <div className="flex shrink-0 gap-0.5">
+              {panelItems.map((item) => (
+                <AiFormActionButton key={item.kind === "feature" ? item.feature.id : item.tool.id} item={item} runs={runs} inputText={inputText} onRunFeatureInput={onRunFeatureInput} onToolAction={onToolAction} />
+              ))}
+            </div>
+          )
+        ) : null}
       </div>
     </form>
+  );
+}
+
+function AiFormActionButton({
+  item,
+  runs,
+  inputText,
+  onRunFeatureInput,
+  onToolAction,
+}: {
+  item: { kind: "feature"; feature: AiFeature } | { kind: "tool"; tool: ToolbarTool };
+  runs: WorkspaceRun[];
+  inputText: string;
+  onRunFeatureInput: (feature: AiFeature) => void;
+  onToolAction: (toolId: string) => void;
+}) {
+  if (item.kind === "tool") {
+    return (
+      <button
+        aria-label={`${item.tool.name} input text`}
+        className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md bg-surface/40 text-muted hover:bg-surface/60 hover:text-strong disabled:opacity-40"
+        disabled={!inputText.trim()}
+        onClick={() => onToolAction(item.tool.id)}
+        title={`${item.tool.name} input text`}
+        type="button"
+      >
+        <FeatureIcon icon={item.tool.icon} size={13} />
+      </button>
+    );
+  }
+  const isLoading = runs.some((run) => run.status === "loading" && run.featureId === item.feature.id && run.kind === "feature");
+  return (
+    <button
+      aria-label={`${item.feature.name} input text`}
+      className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md bg-surface/40 text-muted hover:bg-surface/60 hover:text-strong disabled:opacity-40"
+      disabled={isLoading || !inputText.trim()}
+      onClick={() => onRunFeatureInput(item.feature)}
+      title={`${item.feature.name} input text`}
+      type="button"
+    >
+      <FeatureIcon icon={item.feature.icon} size={13} />
+    </button>
   );
 }
 
