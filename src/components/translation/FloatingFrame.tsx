@@ -106,8 +106,14 @@ export function FloatingFrame({
           />
         </>
       ) : null}
-      {/* Header row — entire row is drag region, buttons inside still work */}
-      <div className="relative z-20 flex items-center px-2 pt-2 pb-1" data-tauri-drag-region>
+      {/* Drag region: invisible overlay covering header area */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-x-0 top-0 z-20 h-10 cursor-grab active:cursor-grabbing"
+        data-tauri-drag-region
+      />
+      {/* Header row */}
+      <div className="relative z-20 flex items-center px-2 pt-2 pb-1">
         {onClose ? (
           <Button
             aria-label="Hide popup"

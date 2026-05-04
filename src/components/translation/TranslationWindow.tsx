@@ -802,7 +802,7 @@ function RunTabs({
       <div className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto">
         {runs.map((run) => (
           <button
-            className={`group flex shrink-0 items-center gap-1 px-2 py-[3px] text-[9px] transition ${
+            className={`group flex shrink-0 items-center gap-1 px-2 py-[3px] text-[10px] transition ${
               run.id === activeRunId
                 ? "text-strong border-b-[1.5px] border-strong/25"
                 : "text-muted/50 hover:text-strong"
@@ -831,7 +831,7 @@ function RunTabs({
       </div>
       <button
         aria-label="Close all results"
-        className="shrink-0 rounded px-1.5 py-[3px] text-[9px] text-muted/40 hover:bg-surface/30 hover:text-strong transition-colors"
+        className="shrink-0 rounded px-2 py-1 text-[10px] text-muted/50 hover:bg-surface/30 hover:text-strong transition-colors"
         onClick={onClearRuns}
         title="Close all results"
         type="button"
@@ -878,6 +878,12 @@ function AiForm({
         <textarea
           className="max-h-[140px] min-h-[24px] min-w-0 flex-1 resize-none border-0 bg-transparent px-1.5 py-1 text-xs leading-[1.3] text-strong outline-none placeholder:text-muted"
           onChange={(event) => { onInputChange(event.target.value); resizeTextarea(event.currentTarget); }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              (event.target as HTMLTextAreaElement).form?.requestSubmit();
+            }
+          }}
           onInput={(event) => resizeTextarea(event.currentTarget as HTMLTextAreaElement)}
           placeholder="Enter text"
           ref={textareaRef}
@@ -979,7 +985,7 @@ function WorkspaceRunCard({
             <div className="flex gap-1">
               <button
                 aria-label="Copy result"
-                className="rounded px-1.5 py-0.5 text-[9px] text-muted hover:bg-surface/30 hover:text-strong transition-colors"
+                className="rounded px-2 py-1 text-[10px] text-muted hover:bg-surface/30 hover:text-strong transition-colors"
                 onClick={() => copyText(run.result?.outputText ?? "")}
                 title="Copy result"
                 type="button"
