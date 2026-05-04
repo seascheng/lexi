@@ -2,7 +2,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AlertCircle, Clipboard, Loader2, Save, X } from "lucide-react";
+import { AlertCircle, Loader2, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, LearningEntryInput, LearningEntryType, Panel, ToolbarTool, WordEntry } from "../../types";
 import { copyText, runAiFeature, speakText } from "../../lib/ai";
@@ -11,14 +11,13 @@ import { addWord, addNote, listAiFeatures, listPanels, listWords, loadSettings, 
 import { errorMessage } from "../../lib/errors";
 import { FeatureIcon } from "../../lib/featureIcons";
 import { syncNativeToolbar } from "../../lib/nativeToolbar";
-import { Button } from "../ui/Button";
 import { FloatingFrame, type PopupResizeStart } from "./FloatingFrame";
 import { MarkdownRenderer } from "../ui/MarkdownRenderer";
 import { registerPanel, getPanelComponent } from "../../lib/panelRegistry";
 import { ReviewPanel } from "./ReviewPanel";
 import { NotesPanel } from "./NotesPanel";
 
-const DEFAULT_POPUP_SIZE = 360;
+const DEFAULT_POPUP_SIZE = 420;
 
 registerPanel("review", ReviewPanel);
 registerPanel("notes", NotesPanel);
@@ -680,7 +679,7 @@ async function resizePopupToContent(frame: HTMLElement, page: HTMLElement, conte
   const pageTop = page.getBoundingClientRect().top - frameTop;
   const pageHeight = naturalContentHeight(page);
   const contentOverflow = Math.max(0, naturalContentHeight(content) - content.clientHeight);
-  const targetHeight = clamp(Math.ceil(pageTop + pageHeight + contentOverflow + 18), 360, 900);
+  const targetHeight = clamp(Math.ceil(pageTop + pageHeight + contentOverflow + 18), 420, 900);
   if (Math.abs(window.innerHeight - targetHeight) < 8) return;
 
   await invoke("set_popup_height", { height: targetHeight }).catch((error) => {
@@ -795,54 +794,50 @@ function RunTabs({
   activeRunId: string;
   runs: WorkspaceRun[];
   onClearRuns: () => void;
-  onDismissRun: (runId: string) => void;
-  onSelectRun: (runId: string) => void;
+  onDismissRun: (id: string) => void;
+  onSelectRun: (id: string) => void;
 }) {
   return (
-    <div className="sticky top-0 z-10 flex min-h-9 items-end gap-1 border-b border-strong/10 px-1 pt-1">
+    <div className="flex items-center gap-0.5 border-b border-strong/5 px-2 pt-1">
       <div className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto">
         {runs.map((run) => (
           <button
-            className={`group flex h-8 max-w-[150px] shrink-0 items-center gap-1.5 rounded-t-md px-2 text-left text-xs transition ${
+            className={`group flex shrink-0 items-center gap-1 px-2 py-[3px] text-[9px] transition ${
               run.id === activeRunId
-                ? "bg-panel/85 text-strong"
-                : "text-muted hover:bg-panel/45 hover:text-strong"
+                ? "text-strong border-b-[1.5px] border-strong/25"
+                : "text-muted/50 hover:text-strong"
             }`}
             key={run.id}
             onClick={() => onSelectRun(run.id)}
             title={`${run.title}: ${run.inputText}`}
             type="button"
           >
-            <span className={run.status === "loading" ? "opacity-50" : ""}><FeatureIcon icon={run.icon ?? "wand"} size={13} /></span>
-            <span className="truncate">{run.title}</span>
+            <span className={run.status === "loading" ? "opacity-50" : ""}>
+              <FeatureIcon icon={run.icon ?? "wand"} size={10} />
+            </span>
+            <span className="max-w-[80px] truncate">{run.title}</span>
             <span
               aria-label="Close result"
-              className="ml-0.5 grid h-4 w-4 shrink-0 place-items-center rounded text-muted hover:bg-surface/80 hover:text-strong"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onDismissRun(run.id);
-              }}
+              className="grid h-3 w-3 shrink-0 place-items-center rounded text-muted/40 hover:text-strong"
+              onClick={(event) => { event.preventDefault(); event.stopPropagation(); onDismissRun(run.id); }}
               role="button"
               tabIndex={0}
               title="Close result"
             >
-              <X size={11} />
+              <X size={9} />
             </span>
           </button>
         ))}
       </div>
-      <Button
+      <button
         aria-label="Close all results"
-        className="h-8 min-h-8 shrink-0 rounded-t-md rounded-b-none px-2 text-xs hover:bg-strong/12"
-        icon={<X size={13} />}
+        className="shrink-0 px-1.5 py-[3px] text-[9px] text-muted/40 hover:text-strong"
         onClick={onClearRuns}
         title="Close all results"
         type="button"
-        variant="ghost"
       >
         All
-      </Button>
+      </button>
     </div>
   );
 }
@@ -965,49 +960,41 @@ function WorkspaceRunCard({
   onSave,
 }: {
   run: WorkspaceRun;
-  onEntryTypeChange: (entryType: LearningEntryType) => void;
+  onEntryTypeChange: (type: LearningEntryType) => void;
   onSave: () => void;
 }) {
   return (
-    <article className="grid min-w-0 gap-2 p-2.5">
+    <article className="grid min-w-0 gap-1.5 px-3 py-2">
       {run.status === "loading" ? <LoadingRun title={run.title} /> : null}
       {run.status === "error" ? <ErrorRun title={run.title} message={run.message ?? "Action failed."} /> : null}
       {run.status === "ready" && run.result ? (
         <>
-          <div className="p-2">
+          <div className="text-xs leading-[1.65] tracking-[-0.01em] text-content">
             <MarkdownRenderer content={run.result.outputText} />
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center justify-between">
             {run.learningEntry ? (
-              <EntryTypeTags
-                disabled={run.saved}
-                entryType={run.learningEntry.entry_type ?? "phrase"}
-                onEntryTypeChange={onEntryTypeChange}
-              />
+              <EntryTypeTags disabled={run.saved} entryType={run.learningEntry.entry_type ?? "phrase"} onEntryTypeChange={onEntryTypeChange} />
             ) : <span />}
-            <div className="flex justify-end gap-1.5">
-              <Button
+            <div className="flex gap-1">
+              <button
                 aria-label="Copy result"
-                className="h-7 min-h-7 px-2 text-xs"
-                icon={<Clipboard size={14} />}
+                className="px-1.5 py-0.5 text-[9px] text-muted hover:text-strong"
                 onClick={() => copyText(run.result?.outputText ?? "")}
                 title="Copy result"
                 type="button"
-                variant="ghost"
               >
                 Copy
-              </Button>
+              </button>
               {run.learningEntry ? (
-              <Button
-                disabled={run.saved}
-                className="h-7 min-h-7 px-2 text-xs"
-                icon={<Save size={15} />}
-                onClick={onSave}
-                type="button"
-                variant="primary"
-              >
-                {run.saved ? "Saved" : "Save"}
-              </Button>
+                <button
+                  disabled={run.saved}
+                  className="rounded-[3px] px-2 py-0.5 text-[9px] font-medium text-accentFg bg-accent hover:bg-accentHover disabled:opacity-50"
+                  onClick={onSave}
+                  type="button"
+                >
+                  {run.saved ? "Saved" : "Save"}
+                </button>
               ) : null}
             </div>
           </div>
@@ -1047,17 +1034,17 @@ function EntryTypeTags({
 }: {
   disabled?: boolean;
   entryType: LearningEntryType;
-  onEntryTypeChange: (entryType: LearningEntryType) => void;
+  onEntryTypeChange: (type: LearningEntryType) => void;
 }) {
   return (
-    <div className="flex w-fit rounded-md border border-strong/10 bg-surface p-0.5">
+    <div className="flex gap-0.5">
       {(["word", "phrase", "pattern"] as LearningEntryType[]).map((type) => (
         <button
-          className={`rounded px-1.5 py-0.5 text-[11px] font-medium transition ${
+          className={`rounded-[3px] px-1.5 py-0.5 text-[8px] font-medium transition ${
             entryType === type
-              ? "bg-panel text-strong shadow-sm"
-              : "text-muted hover:bg-panel hover:text-strong"
-          } disabled:cursor-not-allowed disabled:opacity-60`}
+              ? "bg-surface text-strong"
+              : "text-muted/60 hover:text-strong"
+          } disabled:cursor-not-allowed disabled:opacity-40`}
           disabled={disabled}
           key={type}
           onClick={() => onEntryTypeChange(type)}
