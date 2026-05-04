@@ -21,6 +21,7 @@ export async function applyAppearanceSettings(
   const surfaceOpacity = appliesToTranslationWindow ? popupSurfaceOpacity(settings) : 1;
 
   document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.accent = settings.accentColor || "default";
   document.documentElement.dataset.backgroundStyle = appliesToTranslationWindow ? settings.backgroundStyle : "solid";
   document.documentElement.style.setProperty("--app-surface-opacity", String(surfaceOpacity));
 

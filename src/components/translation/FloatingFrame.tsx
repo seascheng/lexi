@@ -135,7 +135,7 @@ export function FloatingFrame({
                 className={cn(
                   "flex items-center gap-1 rounded-[4px] px-3 py-[3px] text-[11px] font-medium transition-colors",
                   activePanelId === panel.id
-                    ? "bg-strong/10 text-strong"
+                    ? "bg-accent/15 text-accent"
                     : "text-muted hover:text-strong",
                 )}
               >

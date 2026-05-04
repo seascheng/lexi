@@ -1,6 +1,6 @@
 import { Sun, Moon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { AppSettings, BackgroundStyle, DockMode } from "../types";
+import type { AccentColor, AppSettings, BackgroundStyle, DockMode } from "../types";
 import { applyAppearanceSettings, normalizedOpacity } from "../lib/appearance";
 import { saveSettings } from "../lib/database";
 import { errorMessage } from "../lib/errors";
@@ -11,6 +11,15 @@ interface SettingsPageProps {
   settings: AppSettings;
   onSettingsChanged: (settings: AppSettings) => Promise<void>;
 }
+
+const ACCENT_OPTIONS: { value: AccentColor; color: string }[] = [
+  { value: "default", color: "#8e8e93" },
+  { value: "blue", color: "#3b82f6" },
+  { value: "green", color: "#22c55e" },
+  { value: "red", color: "#ef4444" },
+  { value: "orange", color: "#f97316" },
+  { value: "purple", color: "#a855f7" },
+];
 
 export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps) {
   const [draft, setDraft] = useState(settings);
@@ -76,6 +85,22 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
                 label="Light"
                 onClick={() => setDraft({ ...draft, theme: "light" })}
               />
+            </div>
+          </Field>
+          <Field label="Accent color">
+            <div className="flex items-center gap-1.5">
+              {ACCENT_OPTIONS.map(({ value, color }) => (
+                <button
+                  key={value}
+                  className={`h-6 w-6 rounded-full border-2 transition ${
+                    draft.accentColor === value ? "border-strong scale-110" : "border-transparent hover:scale-105"
+                  }`}
+                  style={{ backgroundColor: color }}
+                  onClick={() => setDraft({ ...draft, accentColor: value })}
+                  title={value}
+                  type="button"
+                />
+              ))}
             </div>
           </Field>
           <Field label="Popup background" hint="Applied only to the translation popup and bar.">
