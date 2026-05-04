@@ -149,3 +149,7 @@ textarea {
 ::selection {
   background: rgb(var(--color-strong) / 0.22);
 }
+
+[data-theme="dark"] .app-logo {
+  filter: invert(1);
+}

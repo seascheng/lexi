@@ -1,5 +1,5 @@
 export type AppTheme = "dark" | "light";
-export type AccentColor = "default" | "blue" | "green" | "red" | "orange" | "purple";
+export type AccentColor = "default" | "blue" | "green" | "red" | "orange" | "purple" | "custom";
 export type DockMode = "dock_and_menu_bar" | "menu_bar_only";
 export type BackgroundStyle = "solid" | "transparent" | "macos_glass_clear";
 export type WordStatus = "new" | "learning" | "mastered";
@@ -40,6 +40,7 @@ export interface WordEntry extends TranslationResult {
 export interface AppSettings {
   theme: AppTheme;
   accentColor: AccentColor;
+  customAccentColor: string;
   windowOpacity: number;
   backgroundStyle: BackgroundStyle;
   dockMode: DockMode;

@@ -66,11 +66,13 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
     return () => window.clearTimeout(timeoutId);
   }, [draft, onSettingsChanged]);
 
+  const isCustomActive = draft.accentColor === "custom";
+
   return (
     <div className="space-y-4">
       <div className="space-y-2">
         <h2 className="text-base font-semibold">Appearance</h2>
-        <div className="grid items-start gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid items-start gap-2 sm:grid-cols-2">
           <Field label="Theme">
             <div className="flex gap-0.5 rounded-md bg-surface/30 p-0.5">
               <ThemeButton
@@ -101,9 +103,31 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
                   type="button"
                 />
               ))}
+              <label
+                className={`relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border-2 transition ${
+                  isCustomActive ? "border-strong scale-110" : "border-transparent hover:scale-105"
+                }`}
+                style={isCustomActive ? { backgroundColor: draft.customAccentColor } : undefined}
+                title="Custom color"
+              >
+                {!isCustomActive && (
+                  <span className="text-[10px] leading-none text-muted">+</span>
+                )}
+                <input
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                  onChange={(event) => setDraft({ ...draft, accentColor: "custom", customAccentColor: event.target.value })}
+                  type="color"
+                  value={draft.customAccentColor}
+                />
+              </label>
             </div>
           </Field>
-          <Field label="Popup background" hint="Applied only to the translation popup and bar.">
+        </div>
+      </div>
+      <div className="space-y-2">
+        <h3 className="text-sm font-medium text-muted">Popup window</h3>
+        <div className="grid items-start gap-2 sm:grid-cols-2">
+          <Field label="Background" hint="Applied only to the translation popup and bar.">
             <Select
               onChange={(event) => setDraft({ ...draft, backgroundStyle: event.target.value as BackgroundStyle })}
               value={draft.backgroundStyle}
@@ -113,7 +137,7 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
               <option value="macos_glass_clear">Liquid Glass</option>
             </Select>
           </Field>
-          <Field label={`Popup opacity: ${normalizedOpacity(draft.windowOpacity)}%`}>
+          <Field label={`Opacity: ${normalizedOpacity(draft.windowOpacity)}%`}>
             <Input
               max={100}
               min={0}
@@ -121,6 +145,12 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
               step={5}
               type="range"
               value={normalizedOpacity(draft.windowOpacity)}
+            />
+          </Field>
+          <Field label="Shortcut" hint="Global shortcut to show the popup from any Space.">
+            <ShortcutRecorder
+              value={draft.popupShortcut}
+              onChange={(shortcut) => setDraft({ ...draft, popupShortcut: shortcut })}
             />
           </Field>
           <Field label="App location" hint="Menu bar only hides the Dock icon.">
@@ -131,12 +161,6 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
               <option value="dock_and_menu_bar">Dock and menu bar</option>
               <option value="menu_bar_only">Menu bar only</option>
             </Select>
-          </Field>
-          <Field label="Popup shortcut" hint="Global shortcut to show the popup from any Space.">
-            <ShortcutRecorder
-              value={draft.popupShortcut}
-              onChange={(shortcut) => setDraft({ ...draft, popupShortcut: shortcut })}
-            />
           </Field>
         </div>
       </div>
@@ -160,7 +184,7 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
                 type="password"
                 value={draft.apiKey}
               />
-            </Field>
+              </Field>
           </div>
         </div>
         <div className="rounded-md bg-surface/50 px-3 py-1.5 text-xs leading-5 text-muted">

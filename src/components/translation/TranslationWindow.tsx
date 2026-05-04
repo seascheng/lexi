@@ -798,7 +798,7 @@ function RunTabs({
   onSelectRun: (id: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-0.5 border-b border-strong/5 px-2 pt-1">
+    <div className="flex items-center gap-0.5 border-b border-strong/10 px-2 pt-1">
       <div className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto">
         {runs.map((run) => (
           <button
@@ -831,7 +831,7 @@ function RunTabs({
       </div>
       <button
         aria-label="Close all results"
-        className="shrink-0 rounded px-2 py-1 text-[11px] text-muted/50 hover:bg-surface/30 hover:text-strong transition-colors"
+        className="shrink-0 rounded px-2 py-1 text-[11px] text-muted/50 hover:bg-surfaceHover hover:text-strong transition-colors"
         onClick={onClearRuns}
         title="Close all results"
         type="button"
@@ -874,7 +874,7 @@ function AiForm({
 
   return (
     <form className="px-2 pt-1" onSubmit={onSubmit}>
-      <div className={`flex items-center gap-1 rounded-lg border border-strong/5 bg-input p-1 ${isMultiline ? "flex-wrap" : ""}`}>
+      <div className={`flex items-center gap-1 rounded-lg border border-strong/10 bg-input p-1 ${isMultiline ? "flex-wrap" : ""}`}>
         <textarea
           className="max-h-[140px] min-h-[24px] min-w-0 flex-1 resize-none border-0 bg-transparent px-1.5 py-1 text-xs leading-[1.3] text-strong outline-none placeholder:text-muted"
           onChange={(event) => { onInputChange(event.target.value); resizeTextarea(event.currentTarget); }}
@@ -892,7 +892,7 @@ function AiForm({
         />
         {panelItems.length > 0 ? (
           isMultiline ? (
-            <div className="flex w-full gap-0.5 border-t border-strong/5 pt-1 pl-1">
+            <div className="flex w-full gap-0.5 border-t border-strong/10 pt-1 pl-1">
               {panelItems.map((item) => (
                 <AiFormActionButton key={item.kind === "feature" ? item.feature.id : item.tool.id} item={item} runs={runs} inputText={inputText} onRunFeatureInput={onRunFeatureInput} onToolAction={onToolAction} />
               ))}
@@ -927,7 +927,7 @@ function AiFormActionButton({
     return (
       <button
         aria-label={`${item.tool.name} input text`}
-        className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md bg-surface/40 text-muted hover:bg-surface/60 hover:text-strong disabled:opacity-40"
+        className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md border border-border bg-surface text-content hover:bg-surfaceHover hover:text-strong disabled:opacity-40"
         disabled={!inputText.trim()}
         onClick={() => onToolAction(item.tool.id)}
         title={`${item.tool.name} input text`}
@@ -941,7 +941,7 @@ function AiFormActionButton({
   return (
     <button
       aria-label={`${item.feature.name} input text`}
-      className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md bg-surface/40 text-muted hover:bg-surface/60 hover:text-strong disabled:opacity-40"
+      className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md border border-border bg-surface text-content hover:bg-surfaceHover hover:text-strong disabled:opacity-40"
       disabled={isLoading || !inputText.trim()}
       onClick={() => onRunFeatureInput(item.feature)}
       title={`${item.feature.name} input text`}
@@ -985,7 +985,7 @@ function WorkspaceRunCard({
             <div className="flex gap-1">
               <button
                 aria-label="Copy result"
-                className="rounded px-2 py-1 text-[11px] text-muted hover:bg-surface/30 hover:text-strong transition-colors"
+                className="rounded px-2 py-1 text-[11px] text-muted hover:bg-surfaceHover hover:text-strong transition-colors"
                 onClick={() => copyText(run.result?.outputText ?? "")}
                 title="Copy result"
                 type="button"

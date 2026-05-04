@@ -1,4 +1,10 @@
-import { ChevronDown, ChevronRight, Download, Search, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Download,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import type { LearningEntryType, WordEntry, WordStatus } from "../types";
 import { deleteWord, updateWordStatus } from "../lib/database";
@@ -16,8 +22,18 @@ interface VocabularyPageProps {
 }
 
 const PAGE_SIZE = 30;
-const statuses: Array<"all" | WordStatus> = ["all", "new", "learning", "mastered"];
-const entryTypes: Array<"all" | LearningEntryType> = ["all", "word", "phrase", "pattern"];
+const statuses: Array<"all" | WordStatus> = [
+  "all",
+  "new",
+  "learning",
+  "mastered",
+];
+const entryTypes: Array<"all" | LearningEntryType> = [
+  "all",
+  "word",
+  "phrase",
+  "pattern",
+];
 
 function buildDetailMarkdown(word: WordEntry): string {
   const parts: string[] = [];
@@ -52,7 +68,10 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
 
   const totalPages = Math.max(1, Math.ceil(filteredWords.length / PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
-  const pageWords = filteredWords.slice((safeCurrentPage - 1) * PAGE_SIZE, safeCurrentPage * PAGE_SIZE);
+  const pageWords = filteredWords.slice(
+    (safeCurrentPage - 1) * PAGE_SIZE,
+    safeCurrentPage * PAGE_SIZE,
+  );
 
   function resetPage() {
     setCurrentPage(1);
@@ -78,31 +97,65 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
       {/* Toolbar */}
       <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Expressions</h2>
-          <p className="text-sm text-muted">{filteredWords.length} of {words.length} entries</p>
+          <h2 className="text-lg font-semibold">Vocabulary</h2>
+          <p className="text-sm text-muted">
+            {filteredWords.length} of {words.length} entries
+          </p>
         </div>
         <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+              size={16}
+            />
             <Input
               className="pl-9"
-              onChange={(event) => { setQuery(event.target.value); resetPage(); }}
-              placeholder="Search expression or meaning"
+              onChange={(event) => {
+                setQuery(event.target.value);
+                resetPage();
+              }}
+              placeholder="Search vocabulary or meaning"
               value={query}
             />
           </div>
-          <Select onChange={(event) => { setEntryType(event.target.value as "all" | LearningEntryType); resetPage(); }} value={entryType}>
+          <Select
+            onChange={(event) => {
+              setEntryType(event.target.value as "all" | LearningEntryType);
+              resetPage();
+            }}
+            value={entryType}
+          >
             {entryTypes.map((t) => (
-              <option key={t} value={t}>{t === "all" ? "All types" : entryTypeLabel(t)}</option>
+              <option key={t} value={t}>
+                {t === "all" ? "All types" : entryTypeLabel(t)}
+              </option>
             ))}
           </Select>
-          <Select onChange={(event) => { setStatus(event.target.value as "all" | WordStatus); resetPage(); }} value={status}>
+          <Select
+            onChange={(event) => {
+              setStatus(event.target.value as "all" | WordStatus);
+              resetPage();
+            }}
+            value={status}
+          >
             {statuses.map((s) => (
-              <option key={s} value={s}>{s === "all" ? "All statuses" : s}</option>
+              <option key={s} value={s}>
+                {s === "all" ? "All statuses" : s}
+              </option>
             ))}
           </Select>
-          <Button onClick={() => exportWords(filteredWords, "json")} icon={<Download size={16} />}>JSON</Button>
-          <Button onClick={() => exportWords(filteredWords, "csv")} icon={<Download size={16} />}>CSV</Button>
+          <Button
+            onClick={() => exportWords(filteredWords, "json")}
+            icon={<Download size={16} />}
+          >
+            JSON
+          </Button>
+          <Button
+            onClick={() => exportWords(filteredWords, "csv")}
+            icon={<Download size={16} />}
+          >
+            CSV
+          </Button>
         </div>
       </div>
 
@@ -110,7 +163,7 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
       <div className="min-h-0 overflow-y-auto rounded-lg border border-border/60">
         {/* Table header */}
         <div className="sticky top-0 z-10 grid grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-border/60 bg-panel/95 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-muted backdrop-blur">
-          <span>Expression</span>
+          <span>Vocabulary</span>
           <span className="w-20 text-center">Status</span>
           <span className="w-8" />
         </div>
@@ -129,20 +182,34 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
                 )}
               >
                 {/* Collapsed row */}
-                <div
-                  className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-2 px-3 py-2 text-left"
-                >
+                <div className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-2 px-3 py-2 text-left">
                   <button
                     className="flex min-w-0 items-center gap-2 truncate"
                     onClick={() => toggleExpand(word.id)}
                     type="button"
                   >
-                    {isExpanded ? <ChevronDown size={14} className="shrink-0 text-muted" /> : <ChevronRight size={14} className="shrink-0 text-muted" />}
-                    <span className="truncate font-medium text-strong">{word.word}</span>
-                    <span className="truncate text-sm text-content/70">{word.translation}</span>
+                    {isExpanded ? (
+                      <ChevronDown size={14} className="shrink-0 text-muted" />
+                    ) : (
+                      <ChevronRight size={14} className="shrink-0 text-muted" />
+                    )}
+                    <span className="truncate font-medium text-strong">
+                      {word.word}
+                    </span>
+                    <span className="truncate text-sm text-content/70">
+                      {word.translation}
+                    </span>
                   </button>
-                  <span className="w-20 flex justify-center"><StatusBadge status={word.status} /></span>
-                  <Button aria-label="Delete" onClick={() => removeWord(word.id)} variant="ghost" icon={<Trash2 size={14} />} className="h-6 min-h-6 w-6 px-0 text-muted/50 hover:text-red-500" />
+                  <span className="w-20 flex justify-center">
+                    <StatusBadge status={word.status} />
+                  </span>
+                  <Button
+                    aria-label="Delete"
+                    onClick={() => removeWord(word.id)}
+                    variant="ghost"
+                    icon={<Trash2 size={14} />}
+                    className="h-6 min-h-6 w-6 px-0 text-muted/50 hover:text-red-500"
+                  />
                 </div>
 
                 {/* Expanded detail */}
@@ -156,8 +223,19 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
                         <span>Added {formatDate(word.created_at)}</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <StatusTags status={word.status} onStatusChange={(nextStatus) => changeStatus(word.id, nextStatus)} />
-                        <Button aria-label="Delete" onClick={() => removeWord(word.id)} variant="danger" icon={<Trash2 size={14} />} className="h-7 min-h-7 w-7 px-0" />
+                        <StatusTags
+                          status={word.status}
+                          onStatusChange={(nextStatus) =>
+                            changeStatus(word.id, nextStatus)
+                          }
+                        />
+                        <Button
+                          aria-label="Delete"
+                          onClick={() => removeWord(word.id)}
+                          variant="danger"
+                          icon={<Trash2 size={14} />}
+                          className="h-7 min-h-7 w-7 px-0"
+                        />
                       </div>
                     </div>
                   </div>
@@ -168,7 +246,9 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
         </div>
 
         {pageWords.length === 0 ? (
-          <div className="px-3 py-6 text-center text-sm text-muted">No matching learning entries.</div>
+          <div className="px-3 py-6 text-center text-sm text-muted">
+            No matching learning entries.
+          </div>
         ) : null}
 
         {/* Pagination */}
@@ -176,7 +256,10 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
           <div className="flex items-center justify-center gap-3 border-t border-border/40 py-2.5 text-sm">
             <Button
               disabled={safeCurrentPage <= 1}
-              onClick={() => { setCurrentPage((p) => p - 1); setExpandedId(null); }}
+              onClick={() => {
+                setCurrentPage((p) => p - 1);
+                setExpandedId(null);
+              }}
               variant="ghost"
               className="text-xs"
             >
@@ -187,7 +270,10 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
             </span>
             <Button
               disabled={safeCurrentPage >= totalPages}
-              onClick={() => { setCurrentPage((p) => p + 1); setExpandedId(null); }}
+              onClick={() => {
+                setCurrentPage((p) => p + 1);
+                setExpandedId(null);
+              }}
               variant="ghost"
               className="text-xs"
             >
@@ -227,7 +313,11 @@ function StatusTags({
           onClick={() => onStatusChange(entryStatus)}
           type="button"
         >
-          {entryStatus === "new" ? "New" : entryStatus === "learning" ? "Learning" : "Mastered"}
+          {entryStatus === "new"
+            ? "New"
+            : entryStatus === "learning"
+              ? "Learning"
+              : "Mastered"}
         </button>
       ))}
     </div>

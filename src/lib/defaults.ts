@@ -43,6 +43,7 @@ export const DEFAULT_PANELS: Panel[] = [
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "dark",
   accentColor: "default",
+  customAccentColor: "#3b82f6",
   windowOpacity: 100,
   backgroundStyle: "macos_glass_clear",
   dockMode: "dock_and_menu_bar",

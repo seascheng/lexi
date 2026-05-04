@@ -116,7 +116,7 @@ export function FloatingFrame({
       {onClose ? (
         <Button
           aria-label="Hide popup"
-          className="absolute left-2 top-2 z-20 h-[22px] min-h-0 w-[22px] rounded-full bg-transparent p-0 text-muted/50 hover:bg-strong/10 hover:text-strong"
+          className="absolute left-2 top-2 z-20 h-[22px] min-h-0 w-[22px] rounded-full bg-transparent p-0 text-muted hover:bg-surface hover:text-strong"
           icon={<X size={13} />}
           onClick={() => void onClose()}
           title="Hide popup"
@@ -127,7 +127,7 @@ export function FloatingFrame({
       {/* Panel Tabs */}
       {panels && panels.filter(p => p.enabled).length > 1 ? (
         <div className="absolute left-1/2 top-2 z-20 -translate-x-1/2">
-          <div className="flex items-center gap-0.5 rounded-md bg-surface/30 p-0.5">
+          <div className="flex items-center gap-0.5 rounded-md bg-surface p-0.5">
             {panels.filter(p => p.enabled).map((panel) => (
               <button
                 key={panel.id}
@@ -135,7 +135,7 @@ export function FloatingFrame({
                 className={cn(
                   "flex items-center gap-1 rounded-[4px] px-3 py-[3px] text-[11px] font-medium transition-colors",
                   activePanelId === panel.id
-                    ? "bg-accent/15 text-accent"
+                    ? "bg-accent text-accentForeground"
                     : "text-muted hover:text-strong",
                 )}
               >
@@ -150,7 +150,7 @@ export function FloatingFrame({
       {onTogglePin ? (
         <Button
           aria-label={isPinned ? "Unpin popup" : "Pin popup"}
-          className="absolute right-2 top-2 z-20 h-[22px] min-h-0 w-[22px] rounded-full bg-transparent p-0 text-muted/50 hover:bg-strong/10 hover:text-strong"
+          className="absolute right-2 top-2 z-20 h-[22px] min-h-0 w-[22px] rounded-full bg-transparent p-0 text-muted hover:bg-surface hover:text-strong"
           icon={isPinned ? <Pin size={13} /> : <PinOff size={13} />}
           onClick={onTogglePin}
           title={isPinned ? "Unpin popup" : "Pin popup"}

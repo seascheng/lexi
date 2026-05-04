@@ -191,8 +191,8 @@ export function NotesPanel({ isPinned }: PanelProps) {
               className={cn(
                 "flex items-center gap-2 rounded px-2 py-1.5 cursor-pointer outline-none transition-colors",
                 selectedIdx === index
-                  ? "bg-accent/25 text-strong"
-                  : "hover:bg-surface/30",
+                  ? "bg-surface text-accent"
+                  : "hover:bg-surfaceHover",
               )}
               onClick={() => {
                 setSelectedIdx(index);

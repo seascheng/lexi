@@ -803,7 +803,7 @@ type Page = "vocabulary" | "review" | "configs" | "settings";
 Update navItems (lines 20-25):
 ```typescript
 const navItems = [
-  { page: "vocabulary", label: "Expressions", icon: <BookOpen /> },
+  { page: "vocabulary", label: "Vocabulary", icon: <BookOpen /> },
   { page: "review", label: "Review", icon: <Languages /> },
   { page: "configs", label: "Configs", icon: <Sparkles /> },
   { page: "settings", label: "Settings", icon: <Settings /> },

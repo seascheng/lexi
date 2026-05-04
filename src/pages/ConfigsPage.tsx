@@ -558,8 +558,8 @@ function NavItem({
         indent ? "pl-6" : ""
       } ${
         active
-          ? "bg-accent/10 text-accent"
-          : "text-strong hover:bg-surfaceHover"
+          ? "bg-accent text-accentForeground"
+          : "text-muted hover:bg-surface hover:text-strong"
       }`}
       onClick={onClick}
       type="button"
