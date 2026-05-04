@@ -66,7 +66,7 @@ fn configure_window_all_spaces(window: &tauri::WebviewWindow) {
     }
 }
 
-const DEFAULT_POPUP_SIZE: f64 = 360.0;
+const DEFAULT_POPUP_SIZE: f64 = 420.0;
 const IPC_HOST: &str = "127.0.0.1";
 const LOG_PATH: &str = "/tmp/englist-native-toolbar.log";
 const SELECTION_DRAG_THRESHOLD: f64 = 6.0;
