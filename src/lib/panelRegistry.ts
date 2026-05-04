@@ -4,6 +4,7 @@ import type { WordEntry } from "../types";
 export interface PanelProps {
   words: WordEntry[];
   onWordsChanged: () => void;
+  isPinned?: boolean;
 }
 
 const registry = new Map<string, ComponentType<PanelProps>>();

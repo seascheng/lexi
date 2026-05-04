@@ -7,7 +7,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, LearningEntryInput, LearningEntryType, Panel, ToolbarTool, WordEntry } from "../../types";
 import { copyText, runAiFeature, speakText } from "../../lib/ai";
 import { applyAppearanceSettings } from "../../lib/appearance";
-import { addWord, listAiFeatures, listPanels, listWords, loadSettings, loadToolbarTools, savePopupPosition, savePopupSize, saveSettings } from "../../lib/database";
+import { addWord, addNote, listAiFeatures, listPanels, listWords, loadSettings, loadToolbarTools, savePopupPosition, savePopupSize, saveSettings } from "../../lib/database";
 import { errorMessage } from "../../lib/errors";
 import { FeatureIcon } from "../../lib/featureIcons";
 import { syncNativeToolbar } from "../../lib/nativeToolbar";
@@ -16,10 +16,12 @@ import { FloatingFrame, type PopupResizeStart } from "./FloatingFrame";
 import { MarkdownRenderer } from "../ui/MarkdownRenderer";
 import { registerPanel, getPanelComponent } from "../../lib/panelRegistry";
 import { ReviewPanel } from "./ReviewPanel";
+import { NotesPanel } from "./NotesPanel";
 
 const DEFAULT_POPUP_SIZE = 360;
 
 registerPanel("review", ReviewPanel);
+registerPanel("notes", NotesPanel);
 
 type WorkspaceRunStatus = "loading" | "ready" | "error";
 type WorkspaceRunKind = "feature";
@@ -72,6 +74,9 @@ export function TranslationWindow() {
   const inputTextRef = useRef("");
   const runsRef = useRef<WorkspaceRun[]>([]);
   const isPinnedRef = useRef(true);
+  const activePanelIdRef = useRef(activePanelId);
+
+  useEffect(() => { activePanelIdRef.current = activePanelId; }, [activePanelId]);
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const windowName = params.get("window");
   const isBar = windowName === "float_bar";
@@ -176,6 +181,12 @@ export function TranslationWindow() {
       listen("englist://words-changed", async () => {
         const refreshed = await listWords();
         setWords(refreshed);
+      }),
+      listen<{ text: string }>("englist://save-note", async (event) => {
+        const isPopup = new URLSearchParams(window.location.search).get("window") === "popup_card";
+        if (!isPopup) return;
+        await addNote({ content: event.payload.text });
+        await emit("englist://notes-changed");
       }),
     ];
 
@@ -504,6 +515,37 @@ export function TranslationWindow() {
     void loadSettings().then((s) => saveSettings({ ...s, activePanelId: id }));
   }
 
+  // Global keyboard handler via document event listener (not React onKeyDown)
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const enabledPanels = panels.filter(p => p.enabled).sort((a, b) => a.sortOrder - b.sortOrder);
+      if (enabledPanels.length === 0) return;
+      const tag = (e.target as HTMLElement).tagName;
+      const inInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
+      // Tab cycles panels
+      if (e.key === "Tab" && !inInput) {
+        e.preventDefault();
+        e.stopPropagation();
+        const idx = enabledPanels.findIndex(p => p.id === activePanelIdRef.current);
+        const next = e.shiftKey
+          ? (idx - 1 + enabledPanels.length) % enabledPanels.length
+          : (idx + 1) % enabledPanels.length;
+        handlePanelChange(enabledPanels[next].id);
+        return;
+      }
+
+      // Arrow keys and Enter: prevent default only (panels handle via own listeners)
+      if (["ArrowUp", "ArrowDown", "Enter"].includes(e.key) && !inInput) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [panels]);
+
   async function hidePopup() {
     await getCurrentWindow().hide();
   }
@@ -547,6 +589,10 @@ export function TranslationWindow() {
       }
       case "read":
         await speakText(text);
+        break;
+      case "note":
+        await addNote({ content: text });
+        await emit("englist://notes-changed");
         break;
     }
   }
@@ -607,7 +653,11 @@ export function TranslationWindow() {
         ) : (() => {
           const PanelComponent = getPanelComponent(activePanelId);
           return PanelComponent ? (
-            <PanelComponent words={words} onWordsChanged={() => listWords().then(setWords)} />
+            <PanelComponent
+              words={words}
+              onWordsChanged={() => listWords().then(setWords)}
+              isPinned={isPinned}
+            />
           ) : null;
         })()}
       </FloatingFrame>

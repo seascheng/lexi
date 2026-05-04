@@ -2,7 +2,7 @@ import Database from "@tauri-apps/plugin-sql";
 import { DEFAULT_CUSTOM_PROMPT_TEMPLATE, DEFAULT_PANELS, DEFAULT_PROMPT_TEMPLATE, DEFAULT_SETTINGS, DEFAULT_TOOLS, DEFAULT_TRANSLATION_FEATURE } from "./defaults";
 import { isFeatureIcon } from "./featureIcons";
 import { currentIsoDate, isTauriRuntime } from "./platform";
-import type { AiFeature, AiFeatureIcon, AiFeatureKind, AiOutputMode, AppSettings, LearningEntryInput, LearningEntryType, Panel, ReviewUpdate, ToolbarTool, WordEntry, WordStatus } from "../types";
+import type { AiFeature, AiFeatureIcon, AiFeatureKind, AiOutputMode, AppSettings, LearningEntryInput, LearningEntryType, NoteEntry, NoteInput, Panel, ReviewUpdate, TagEntry, ToolbarTool, WordEntry, WordStatus } from "../types";
 
 type SqlDatabase = Awaited<ReturnType<typeof Database.load>>;
 
@@ -12,6 +12,8 @@ const AI_FEATURES_KEY = "englist.aiFeatures";
 const POPUP_POSITION_KEY = "popupCardPosition";
 const POPUP_SIZE_KEY = "popupCardSize";
 const TOOL_SETTINGS_KEY = "toolbar_tools";
+const NOTES_KEY = "englist.notes";
+const TAGS_KEY = "englist.tags";
 
 export interface WindowPosition {
   x: number;
@@ -789,4 +791,233 @@ function withBuiltInPanels(panels: Panel[]): Panel[] {
     }
   }
   return panels.sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+// ── Tags ──────────────────────────────────────────────
+
+export async function listTags(): Promise<TagEntry[]> {
+  if (!isTauriRuntime()) return loadBrowserTags();
+
+  const db = await getSqlDatabase();
+  return db.select<TagEntry[]>("SELECT * FROM tags ORDER BY id");
+}
+
+export async function saveTag(name: string): Promise<TagEntry> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Tag name cannot be empty");
+
+  if (!isTauriRuntime()) {
+    const tags = loadBrowserTags();
+    const existing = tags.find((t) => t.name === trimmed);
+    if (existing) return existing;
+    const tag: TagEntry = { id: Date.now(), name: trimmed };
+    tags.push(tag);
+    saveBrowserTags(tags);
+    return tag;
+  }
+
+  const db = await getSqlDatabase();
+  await db.execute("INSERT OR IGNORE INTO tags (name) VALUES ($1)", [trimmed]);
+  const rows = await db.select<TagEntry[]>("SELECT * FROM tags WHERE name = $1", [trimmed]);
+  return rows[0];
+}
+
+export async function deleteTag(id: number): Promise<void> {
+  if (!isTauriRuntime()) {
+    const tags = loadBrowserTags().filter((t) => t.id !== id);
+    saveBrowserTags(tags);
+    // Move affected notes to "Tmp"
+    const notes = loadBrowserNotes();
+    for (const note of notes) {
+      if (note.tags.length > 0) {
+        note.tags = ["Tmp"];
+      }
+    }
+    saveBrowserNotes(notes);
+    return;
+  }
+
+  const db = await getSqlDatabase();
+  // Move affected notes to "Tmp" before deleting tag
+  await db.execute("INSERT OR IGNORE INTO tags (name) VALUES ('Tmp')");
+  const tmpRows = await db.select<TagEntry[]>("SELECT * FROM tags WHERE name = 'Tmp'");
+  const tmpTagId = tmpRows[0].id;
+  // Find notes that only have this tag
+  const affected = await db.select<{ note_id: number }[]>(
+    "SELECT DISTINCT note_id FROM note_tags WHERE tag_id = $1", [id],
+  );
+  for (const row of affected) {
+    await db.execute("DELETE FROM note_tags WHERE note_id = $1", [row.note_id]);
+    await db.execute("INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES ($1, $2)", [row.note_id, tmpTagId]);
+  }
+  await db.execute("DELETE FROM tags WHERE id = $1", [id]);
+}
+
+export async function renameTag(id: number, newName: string): Promise<void> {
+  const trimmed = newName.trim();
+  if (!trimmed) return;
+
+  if (!isTauriRuntime()) {
+    const tags = loadBrowserTags();
+    const tag = tags.find((t) => t.id === id);
+    if (tag) tag.name = trimmed;
+    saveBrowserTags(tags);
+    return;
+  }
+
+  const db = await getSqlDatabase();
+  await db.execute("UPDATE tags SET name = $1 WHERE id = $2", [trimmed, id]);
+}
+
+// ── Notes ──────────────────────────────────────────────
+
+export async function listNotes(): Promise<NoteEntry[]> {
+  if (!isTauriRuntime()) return loadBrowserNotes();
+
+  const db = await getSqlDatabase();
+  const rows = await db.select<Array<{ id: number; name: string | null; content: string; created_at: string; tag_names: string | null }>>(
+    `SELECT n.*, GROUP_CONCAT(t.name) AS tag_names
+     FROM notes n
+     LEFT JOIN note_tags nt ON n.id = nt.note_id
+     LEFT JOIN tags t ON t.id = nt.tag_id
+     GROUP BY n.id
+     ORDER BY datetime(n.created_at) DESC`,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    content: row.content,
+    created_at: row.created_at,
+    tags: row.tag_names ? row.tag_names.split(",") : [],
+  }));
+}
+
+export async function addNote(input: NoteInput): Promise<NoteEntry> {
+  const tagName = input.tagName ?? "Tmp";
+
+  if (!isTauriRuntime()) {
+    const notes = loadBrowserNotes();
+    const tags = loadBrowserTags();
+    let tag = tags.find((t) => t.name === tagName);
+    if (!tag) {
+      tag = { id: Date.now(), name: tagName };
+      tags.push(tag);
+      saveBrowserTags(tags);
+    }
+    const note: NoteEntry = {
+      id: Date.now(),
+      name: input.name ?? null,
+      content: input.content,
+      created_at: currentIsoDate(),
+      tags: [tagName],
+    };
+    notes.unshift(note);
+    saveBrowserNotes(notes);
+    return note;
+  }
+
+  const db = await getSqlDatabase();
+  const tag = await saveTag(tagName);
+  const createdAt = currentIsoDate();
+  await db.execute(
+    "INSERT INTO notes (name, content, created_at) VALUES ($1, $2, $3)",
+    [input.name ?? null, input.content, createdAt],
+  );
+  const rows = await db.select<Array<{ id: number }>>("SELECT id FROM notes ORDER BY id DESC LIMIT 1");
+  const noteId = rows[0].id;
+  await db.execute("INSERT INTO note_tags (note_id, tag_id) VALUES ($1, $2)", [noteId, tag.id]);
+
+  const noteRows = await db.select<Array<{ id: number; name: string | null; content: string; created_at: string; tag_names: string | null }>>(
+    `SELECT n.*, GROUP_CONCAT(t.name) AS tag_names
+     FROM notes n
+     LEFT JOIN note_tags nt ON n.id = nt.note_id
+     LEFT JOIN tags t ON t.id = nt.tag_id
+     WHERE n.id = $1
+     GROUP BY n.id`,
+    [noteId],
+  );
+  const row = noteRows[0];
+  return {
+    id: row.id,
+    name: row.name,
+    content: row.content,
+    created_at: row.created_at,
+    tags: row.tag_names ? row.tag_names.split(",") : [],
+  };
+}
+
+export async function updateNote(id: number, update: { name?: string | null; content?: string }): Promise<void> {
+  if (!isTauriRuntime()) {
+    const notes = loadBrowserNotes();
+    const note = notes.find((n) => n.id === id);
+    if (note) {
+      if (update.name !== undefined) note.name = update.name;
+      if (update.content !== undefined) note.content = update.content;
+      saveBrowserNotes(notes);
+    }
+    return;
+  }
+
+  const db = await getSqlDatabase();
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (update.name !== undefined) { fields.push("name = $1"); values.push(update.name); }
+  if (update.content !== undefined) { fields.push("content = $" + String(values.length + 1)); values.push(update.content); }
+  if (fields.length === 0) return;
+  values.push(id);
+  await db.execute(`UPDATE notes SET ${fields.join(", ")} WHERE id = $${values.length}`, values);
+}
+
+export async function deleteNote(id: number): Promise<void> {
+  if (!isTauriRuntime()) {
+    saveBrowserNotes(loadBrowserNotes().filter((n) => n.id !== id));
+    return;
+  }
+
+  const db = await getSqlDatabase();
+  await db.execute("DELETE FROM notes WHERE id = $1", [id]);
+}
+
+export async function setNoteTag(noteId: number, tagName: string): Promise<void> {
+  const tag = await saveTag(tagName);
+
+  if (!isTauriRuntime()) {
+    const notes = loadBrowserNotes();
+    const note = notes.find((n) => n.id === noteId);
+    if (note) note.tags = [tagName];
+    saveBrowserNotes(notes);
+    return;
+  }
+
+  const db = await getSqlDatabase();
+  await db.execute("DELETE FROM note_tags WHERE note_id = $1", [noteId]);
+  await db.execute("INSERT INTO note_tags (note_id, tag_id) VALUES ($1, $2)", [noteId, tag.id]);
+}
+
+function loadBrowserTags(): TagEntry[] {
+  const raw = localStorage.getItem(TAGS_KEY);
+  if (!raw) return [{ id: 1, name: "Tmp" }];
+  try {
+    return JSON.parse(raw) as TagEntry[];
+  } catch {
+    return [{ id: 1, name: "Tmp" }];
+  }
+}
+
+function saveBrowserTags(tags: TagEntry[]): void {
+  localStorage.setItem(TAGS_KEY, JSON.stringify(tags));
+}
+
+function loadBrowserNotes(): NoteEntry[] {
+  const raw = localStorage.getItem(NOTES_KEY);
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as NoteEntry[];
+  } catch {
+    return [];
+  }
+}
+
+function saveBrowserNotes(notes: NoteEntry[]): void {
+  localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
 }

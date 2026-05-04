@@ -7,6 +7,7 @@ import type {
   AiFeatureIcon,
   AppSettings,
   Panel,
+  TagEntry,
   ToolbarTool,
 } from "../types";
 import {
@@ -16,13 +17,17 @@ import {
 } from "../lib/defaults";
 import {
   deleteAiFeature,
+  deleteTag,
   listAiFeatures,
   listPanels,
+  listTags,
   loadSettings,
   loadToolbarTools,
+  renameTag,
   saveAiFeature,
   savePanel,
   saveSettings,
+  saveTag,
   saveToolbarTools,
 } from "../lib/database";
 import { errorMessage } from "../lib/errors";
@@ -1041,6 +1046,8 @@ function ToolConfigPanel({
           )}
         </div>
       )}
+
+      {tool.id === "note" && <NoteTagConfig />}
     </>
   );
 }
@@ -1259,4 +1266,102 @@ async function notifyChanged() {
 
 function selectedFeatureIcon(value: string): AiFeatureIcon {
   return isFeatureIcon(value) ? value : "wand";
+}
+
+// ── Note Tag Config ──────────────────────────────────
+
+function NoteTagConfig() {
+  const [tags, setTags] = useState<TagEntry[]>([]);
+  const [newTagName, setNewTagName] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+
+  useEffect(() => {
+    void loadTags();
+  }, []);
+
+  async function loadTags() {
+    setTags(await listTags());
+  }
+
+  async function handleAdd() {
+    const name = newTagName.trim();
+    if (!name) return;
+    await saveTag(name);
+    setNewTagName("");
+    await loadTags();
+  }
+
+  async function handleDelete(id: number) {
+    await deleteTag(id);
+    await loadTags();
+  }
+
+  function startRename(tag: TagEntry) {
+    setEditingId(tag.id);
+    setEditName(tag.name);
+  }
+
+  async function handleRename(id: number) {
+    const name = editName.trim();
+    if (!name) { setEditingId(null); return; }
+    await renameTag(id, name);
+    setEditingId(null);
+    await loadTags();
+  }
+
+  return (
+    <div className="grid gap-2.5">
+      <p className="text-sm text-muted">
+        Manage tags for notes. The &quot;Tmp&quot; tag is used as default when saving from toolbar.
+      </p>
+
+      {/* Tag list */}
+      <div className="grid gap-1">
+        {tags.map((tag) => (
+          <div key={tag.id} className="flex items-center gap-2 rounded-md bg-surface/50 px-2.5 py-1.5">
+            {editingId === tag.id ? (
+              <>
+                <Input
+                  autoFocus
+                  className="h-7 flex-1 text-xs"
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void handleRename(tag.id); if (e.key === "Escape") setEditingId(null); }}
+                  value={editName}
+                />
+                <Button onClick={() => void handleRename(tag.id)} variant="ghost" className="h-6 min-h-6 px-1 text-xs">Save</Button>
+              </>
+            ) : (
+              <>
+                <span className="flex-1 text-sm text-strong">{tag.name}</span>
+                <Button onClick={() => startRename(tag)} variant="ghost" className="h-6 min-h-6 px-1 text-xs text-muted/50 hover:text-strong">
+                  Rename
+                </Button>
+                <Button
+                  onClick={() => void handleDelete(tag.id)}
+                  variant="ghost"
+                  icon={<Trash2 size={13} />}
+                  className="h-6 min-h-6 w-6 px-0 text-muted/50 hover:text-red-500"
+                />
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Add tag */}
+      <div className="flex items-center gap-2">
+        <Input
+          className="h-7 flex-1 text-xs"
+          onChange={(e) => setNewTagName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") void handleAdd(); }}
+          placeholder="New tag name"
+          value={newTagName}
+        />
+        <Button onClick={() => void handleAdd()} variant="secondary" icon={<Plus size={14} />} className="h-7 text-xs">
+          Add Tag
+        </Button>
+      </div>
+    </div>
+  );
 }

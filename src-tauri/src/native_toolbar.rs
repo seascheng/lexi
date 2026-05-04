@@ -1174,9 +1174,18 @@ fn dispatch_toolbar_action(
         "copy" => copy_to_clipboard(text),
         "search" => open_search(text),
         "read" | "speak" => speak_text(text),
+        "note" => save_note_from_toolbar(app, text),
         "translate" | "translation" => open_popup_with_feature(app, text, "translation"),
         feature_id => open_popup_with_feature(app, text, feature_id),
     }
+}
+
+fn save_note_from_toolbar(app: &tauri::AppHandle, text: String) -> Result<(), String> {
+    app.emit(
+        "englist://save-note",
+        serde_json::json!({ "text": text }),
+    )
+    .map_err(|error| format!("Could not emit save-note event: {error}"))
 }
 
 fn open_popup_with_feature(

@@ -5,8 +5,8 @@ export type WordStatus = "new" | "learning" | "mastered";
 export type ReviewRating = "again" | "hard" | "good" | "easy";
 export type AiFeatureKind = "translation" | "custom";
 export type AiOutputMode = "translation_json" | "plain_text";
-export type AiFeatureIcon = "languages" | "wand" | "pen" | "sparkles" | "book-plus" | "book-open" | "highlighter" | "file-text" | "message" | "clipboard" | "search" | "volume";
-export type ToolbarToolId = "copy" | "search" | "read";
+export type AiFeatureIcon = "languages" | "wand" | "pen" | "sparkles" | "book-plus" | "book-open" | "highlighter" | "file-text" | "message" | "clipboard" | "search" | "volume" | "sticky-note";
+export type ToolbarToolId = "copy" | "search" | "read" | "note";
 export type LearningEntryType = "word" | "phrase" | "pattern";
 
 export interface TranslationResult {
@@ -100,4 +100,23 @@ export interface Panel {
 export interface AiRunResult {
   outputText: string;
   translation?: TranslationResult;
+}
+
+export interface NoteEntry {
+  id: number;
+  name: string | null;
+  content: string;
+  created_at: string;
+  tags: string[];
+}
+
+export interface TagEntry {
+  id: number;
+  name: string;
+}
+
+export interface NoteInput {
+  name?: string | null;
+  content: string;
+  tagName?: string;
 }

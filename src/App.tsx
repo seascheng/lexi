@@ -1,6 +1,6 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { BookOpen, Eye, Settings, Sparkles } from "lucide-react";
+import { BookOpen, Eye, Settings, Sparkles, StickyNote } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppSettings, WordEntry } from "./types";
 import logoUrl from "../logo.svg";
@@ -15,12 +15,14 @@ import { VocabularyPage } from "./pages/VocabularyPage";
 import { ReviewPage } from "./pages/ReviewPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ConfigsPage } from "./pages/ConfigsPage";
+import { NotebookPage } from "./pages/NotebookPage";
 
-type Page = "vocabulary" | "review" | "configs" | "settings";
+type Page = "vocabulary" | "review" | "notebook" | "configs" | "settings";
 
 const navItems: Array<{ page: Page; label: string; icon: JSX.Element }> = [
   { page: "vocabulary", label: "Expressions", icon: <BookOpen size={17} /> },
   { page: "review", label: "Review", icon: <Eye size={17} /> },
+  { page: "notebook", label: "Notebook", icon: <StickyNote size={17} /> },
   { page: "configs", label: "Configs", icon: <Sparkles size={17} /> },
   { page: "settings", label: "Settings", icon: <Settings size={17} /> },
 ];
@@ -99,6 +101,8 @@ function MainWindow() {
       <VocabularyPage words={words} onWordsChanged={refreshWords} />
     ) : page === "review" ? (
       <ReviewPage words={words} onWordsChanged={refreshWords} />
+    ) : page === "notebook" ? (
+      <NotebookPage />
     ) : page === "configs" ? (
       <ConfigsPage />
     ) : page === "settings" && settings ? (

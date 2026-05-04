@@ -92,73 +92,74 @@ No router library. URL-param based:
 <claude-mem-context>
 # Memory Context
 
-# [englist-tool] recent context, 2026-05-03 1:44pm GMT+8
+# [englist-tool] recent context, 2026-05-04 12:24pm GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (13,369t read) | 0t work
+Stats: 50 obs (16,481t read) | 0t work
 
 ### May 3, 2026
-496 11:41a 🔄 Removed ToolbarPage import from App.tsx during consolidation
-497 " 🔄 Removed toolbar navigation item and page type from App.tsx
-498 " 🔄 Removed toolbar page routing logic from App.tsx
-499 " 🔄 Added config property to ToolbarTool interface for tool-specific settings
-500 " 🔄 Updated database layer to persist and load tool config properties
-501 11:42a 🔄 Updated saveToolbarTools to persist tool config property
-S189 Toolbar drag-and-drop fixed with Pointer Events refactor (May 3 at 11:43 AM)
-502 11:45a 🔴 Toolbar configuration drag-and-drop functionality broken
-503 " 🔴 Enable button styling broken in toolbar configuration
-504 " 🟣 Toolbar preview styling optimization requested
-505 11:49a 🔴 TypeScript ref type error resolved with dual approach
-506 " 🔵 Toolbar styling system uses native Swift theming
-508 " 🔵 Native toolbar uses specific 34x30 pixel segments with 16px icons
-509 " 🔴 Fixed drag-and-drop functionality and toggle button styling
-510 " 🟣 Toolbar preview redesigned to match native macOS appearance
-507 11:50a 🔵 Native toolbar implementation details revealed
-514 11:51a 🔴 Drag-and-drop reordering still non-functional in toolbar configuration
-511 11:52a 🔴 Implemented proper React drag-and-drop event handling
-512 " 🔴 Fixed toggle button styling and interaction
-513 " 🟣 Toolbar preview redesigned to match native macOS toolbar exactly
-515 " 🔴 Drag-and-drop event handling updated with proper dataTransfer API
-516 11:56a 🔄 Drag-and-drop refactor from HTML5 API to pointer events approach
-517 11:57a 🔄 Implemented pointer events-based drag-and-drop to replace HTML5 API
-519 " 🔄 Pointer events drag-and-drop implementation completed successfully
-518 " 🔵 TypeScript compilation passed successfully after pointer events refactor
-S190 Clean up Extract/capture feature code across entire project - toolbar and popup panel no longer need it since product now uses toolbar instead (May 3 at 11:58 AM)
-520 12:00p 🔵 Screenshot functionality search returned no results in codebase
-521 " 🔵 Existing text capture functionality found in native toolbar
-522 " 🔵 Multi-mode display architecture discovered with multiple window types
-523 12:01p 🔵 Comprehensive Extract learning point feature discovered across application layers
-524 " 🔵 Native toolbar action routing and popup management system examined
-525 12:02p 🔵 Complete AI processing pipeline and extract learning point architecture documented
-526 " 🔵 TranslationWindow component architecture with extract learning point workflow
-S191 Toolbar enable toggle and Panel Config implementation for popup action buttons (May 3 at 12:02 PM)
-527 12:05p 🟣 Added toolbarEnabled setting to AppSettings
-528 12:11p 🟣 Added toolbarEnabled setting infrastructure
-529 " 🟣 Added settings imports to FeaturesPage for toolbar/panel config
-530 " 🟣 Added settings state management to FeaturesPage
-531 12:12p 🟣 Added toggleToolbarEnabled function for toolbar enable/disable
-S192 Implement toolbar enable/disable toggle and Panel Config for popup action buttons (May 3 at 12:12 PM)
-S193 Update PanelConfigPanel to work with combined toolbar items (May 3 at 12:13 PM)
-S194 Verify Tauri build after PanelConfigPanel updates (May 3 at 12:13 PM)
-S195 Update PanelConfigPanel to work with combined toolbar items (tools + AI features) (May 3 at 12:14 PM)
-S196 Fixed two bugs: 1) Toolbar disable setting not being respected, 2) Panel Config items not matching popup button group (May 3 at 12:18 PM)
-532 12:22p 🔴 Fixed toolbar disable functionality and panel config consistency
-533 " 🔵 Root cause identified for toolbar disable bug
-534 " 🔵 Native toolbar action system architecture documented
-536 " ✅ Added ToolbarTool type import to TranslationWindow component
-535 12:23p 🔵 TranslationWindow component structure and state management
-537 12:24p ✅ Added tools state to TranslationWindow component
-538 " ✅ Updated initializePopup to load and store toolbar tools
-539 " 🔴 Fixed toolbar disable functionality in syncNativeToolbarActions
-S197 Investigate and fix automatic toolbar re-enablement issue - trace the code path causing toolbar to be re-enabled after being disabled (May 3 at 12:24 PM)
-540 12:57p 🔴 Toolbar disable config not respected during text selection
-541 " 🔵 Clean Code skill definition loaded for toolbar bug investigation
-542 " 🔵 Root cause identified: Selection monitor ignores global toolbar disable setting
-543 12:58p 🔵 Architecture mapped for toolbar disable feature
-544 " 🔵 Toolbar disable logic duplicated across two components
-545 " 🔵 Tauri command bridge exposes three native toolbar functions to frontend
-S198 修复工具栏禁用后自动重新开启的问题 (May 3 at 1:15 PM)
+685 9:31p 🟣 Settings UI redesign for minimal layout
+689 9:43p ✅ Removed grid gap spacing in ConfigsPage layout
+690 9:47p ✅ Config page layout refined with narrower sidebar and spacing
+691 9:51p 🔴 SettingsPage layout alignment issues with theme buttons and field positioning
+692 9:52p 🔴 Fixed SettingsPage layout alignment issues with theme buttons and field positioning
+693 9:59p 🔄 Changed Review page icon from Languages to Eye and reduced App sidebar width to 180px
+694 10:06p 🔴 Clipboard corruption bug reported
+695 " 🔵 Clipboard implementation files identified
+696 10:07p 🔵 Clipboard code spans frontend and backend
+697 " 🔵 Clipboard probe mechanism identified as corruption source
+698 " 🔵 Clipboard architecture mapped across Rust and TypeScript layers
+699 10:09p 🔵 Complete clipboard architecture mapped by explore agent
+700 10:14p 🔵 DisplayMode setting controls AI translation window presentation behavior
+701 10:25p 🔵 DisplayMode setting investigation completed - three presentation modes for AI translation results
+702 10:26p 🔵 DisplayMode actively used in IPC event payloads and auto-hide logic, but UI shows non-functional options
+703 " 🔵 DisplayMode parameter flows through Tauri IPC events between main window and popup window
+704 " 🔵 Rust backend emits cycle-display-mode event at lib.rs line 127, completing full DisplayMode data flow
+705 10:27p 🔵 System tray menu "Switch Mode" option provides second user access point for DisplayMode cycling
+706 " ⚖️ Decision made to remove DisplayMode legacy code and replace with isBar-based auto-hide logic
+707 " 🔄 Untitled
+708 " 🔄 Untitled
+709 " 🔄 Untitled
+710 " 🔄 Untitled
+S270 Markdown rendering not working for word details in VocabularyPage (May 3 at 10:42 PM)
+711 10:45p 🔴 Markdown rendering not working in VocabularyPage
+S271 Fix Mac application multi-desktop/multi-monitor popup positioning bug (May 3 at 10:46 PM)
+712 10:51p 🔵 Mac popup window positioning issue identified
+713 " 🔵 Popup window positioning uses cursor coordinates without desktop/monitor context
+714 10:52p 🔵 Multi-desktop popup positioning requires NSScreen context awareness
+716 " 🔵 Comprehensive popup architecture analysis reveals complete multi-monitor support gap
+S272 Fix Mac application multi-desktop popup positioning - multi-Spaces support completed (May 3 at 10:52 PM)
+715 10:53p 🔵 Swift toolbar helper implements correct multi-monitor screen detection
+S273 Fix Mac application multi-desktop popup positioning - multi-Spaces support completed with thread-safe implementation (May 3 at 11:03 PM)
+S274 Implemented configurable popup keyboard shortcut in settings (May 3 at 11:03 PM)
+717 11:07p 🔵 Project structure analysis for global shortcut feature
+718 " 🔵 Tauri app architecture analysis for global hotkey implementation
+719 " 🔵 Frontend and backend codebase structure mapped
+720 " 🔵 Existing global hotkey implementation found in native toolbar
+721 " 🔵 Comprehensive popup lifecycle and hotkey architecture documented
+722 11:08p 🟣 Added useCallback import to SettingsPage
+723 11:16p 🟣 Implemented backend infrastructure for popup shortcut configuration
+724 11:17p 🟣 Implemented ShortcutRecorder component for keyboard shortcut capture
+725 " 🟣 Integrated popup shortcut sync with Tauri backend
+726 11:18p 🔄 Refactored keycode enum references to explicit paths in key_name_to_code
+727 " 🔴 Fixed keycode mapping for quote/apostrophe key in key_name_to_code
+S275 Fixed popup keyboard shortcut not appearing when pressed without selected text (May 3 at 11:18 PM)
+728 11:20p 🔴 Popup keyboard shortcut not triggering window display
+729 " 🔴 Investigating popup shortcut failure - examining event tap callback
+730 11:31p 🔴 Found event handler structure - examining KeyDown case
+731 " 🔵 Found the bug - KeyDown handler only shows popup when text is selected
+732 " 🔴 Fixing popup shortcut handler to show window without selected text
+733 11:32p 🔴 Fixed popup shortcut to show window without selected text
+734 " 🔴 Popup shortcut fix successfully applied and compiled
+S278 User inquired whether rewriting popup in Swift+AppUI would improve performance compared to current Tauri implementation (May 3 at 11:33 PM)
+736 11:34p 🟣 Optimized popup shortcut UX - shows popup immediately without delay
+S276 Fixed and optimized popup keyboard shortcut that wasn't working when pressed (May 3 at 11:35 PM)
+S277 User asked whether rewriting popup in Swift+AppUI would improve performance (May 3 at 11:35 PM)
+### May 4, 2026
+S279 User asked whether rewriting popup in Swift+AppUI would improve performance (May 4 at 10:09 AM)
+738 10:20a 🔵 Project structure and technology stack identified
+739 " 🔵 Codebase architecture and patterns analyzed for note feature implementation
 </claude-mem-context>

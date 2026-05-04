@@ -105,6 +105,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/007_panels.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 8,
+            description: "create notes and tags tables",
+            sql: include_str!("../migrations/008_notes.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
