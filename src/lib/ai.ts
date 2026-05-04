@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import type { AiFeature, AiRunResult, AppSettings } from "../types";
+import type { AiFeature, AiRunResult, AppSettings, StreamChunkEvent } from "../types";
 import { isTauriRuntime } from "./platform";
 
 interface AiRunRequest {
@@ -46,6 +47,70 @@ export async function runAiFeature(text: string, feature: AiFeature, settings: A
     outputText: result.output_text,
     translation: result.translation ?? parseTranslationMarkdown(feature, result.output_text),
   };
+}
+
+export interface StreamCallbacks {
+  onChunk: (accumulated: string, delta: string) => void;
+  onDone: (result: AiRunResult) => void;
+  onError: (error: string) => void;
+}
+
+export async function runAiFeatureStream(
+  text: string,
+  feature: AiFeature,
+  settings: AppSettings,
+  callbacks: StreamCallbacks,
+): Promise<void> {
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error("Select or enter text first.");
+  if (!settings.apiKey.trim()) {
+    throw new Error("API key is not saved. Open Settings, enter the key, then click Save settings.");
+  }
+  if (!settings.apiBaseUrl.trim()) throw new Error("API base URL is not saved.");
+  if (!settings.model.trim()) throw new Error("Model is not saved.");
+
+  if (!isTauriRuntime()) {
+    const result = browserAiResult(trimmed, feature);
+    callbacks.onChunk(result.outputText, result.outputText);
+    callbacks.onDone(result);
+    return;
+  }
+
+  const request: AiRunRequest = {
+    text: trimmed,
+    api_base_url: settings.apiBaseUrl,
+    api_key: settings.apiKey,
+    model: settings.model,
+    prompt_template: feature.promptTemplate,
+    output_mode: feature.outputMode,
+    target_language: feature.targetLanguage || null,
+  };
+
+  const runId: string = await invoke("run_ai_prompt_stream", { request });
+
+  let accumulated = "";
+  const unlisten = await listen<StreamChunkEvent>("lexi://ai-stream-chunk", (event) => {
+    const data = event.payload;
+    if (data.run_id !== runId) return;
+
+    if (data.error) {
+      unlisten();
+      callbacks.onError(data.error);
+      return;
+    }
+
+    if (data.chunk) {
+      accumulated += data.chunk;
+      callbacks.onChunk(accumulated, data.chunk);
+    }
+
+    if (data.done) {
+      unlisten();
+      const outputText = data.chunk ?? accumulated;
+      const translation = data.translation ?? (feature.kind === "translation" ? parseTranslationMarkdown(feature, outputText) : undefined);
+      callbacks.onDone({ outputText, translation });
+    }
+  });
 }
 
 export async function copyText(text: string) {

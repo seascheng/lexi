@@ -133,13 +133,13 @@ export function FloatingFrame({
                 key={panel.id}
                 onClick={() => onPanelChange?.(panel.id)}
                 className={cn(
-                  "flex items-center gap-1 rounded-[4px] px-3 py-[3px] text-[11px] font-medium transition-colors",
+                  "flex items-center gap-1 rounded-[4px] px-3 py-[3px] text-xs font-medium transition-colors",
                   activePanelId === panel.id
                     ? "bg-accent text-accentForeground"
                     : "text-muted hover:text-strong",
                 )}
               >
-                <FeatureIcon icon={panel.icon} size={11} />
+                <FeatureIcon icon={panel.icon} size={13} />
                 {panel.name}
               </button>
             ))}

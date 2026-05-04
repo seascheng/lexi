@@ -105,6 +105,14 @@ export interface AiRunResult {
   translation?: TranslationResult;
 }
 
+export interface StreamChunkEvent {
+  run_id: string;
+  chunk?: string;
+  done: boolean;
+  error?: string;
+  translation?: TranslationResult;
+}
+
 export interface NoteEntry {
   id: number;
   name: string | null;

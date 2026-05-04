@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AlertCircle, Loader2, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, LearningEntryInput, LearningEntryType, Panel, ToolbarTool, WordEntry } from "../../types";
-import { copyText, runAiFeature, speakText } from "../../lib/ai";
+import { copyText, runAiFeatureStream, speakText } from "../../lib/ai";
 import { applyAppearanceSettings } from "../../lib/appearance";
 import { addWord, addNote, listAiFeatures, listPanels, listWords, loadSettings, loadToolbarTools, savePopupPosition, savePopupSize, saveSettings } from "../../lib/database";
 import { errorMessage } from "../../lib/errors";
@@ -22,7 +22,7 @@ const DEFAULT_POPUP_SIZE = 420;
 registerPanel("review", ReviewPanel);
 registerPanel("notes", NotesPanel);
 
-type WorkspaceRunStatus = "loading" | "ready" | "error";
+type WorkspaceRunStatus = "loading" | "streaming" | "ready" | "error";
 type WorkspaceRunKind = "feature";
 
 interface WorkspaceRun {
@@ -34,6 +34,7 @@ interface WorkspaceRun {
   inputText: string;
   status: WorkspaceRunStatus;
   result?: AiRunResult;
+  streamingText?: string;
   message?: string;
   learningEntry?: LearningEntryInput;
   saved?: boolean;
@@ -294,7 +295,8 @@ export function TranslationWindow() {
       isPinned ||
       !latestRun ||
       !isBar ||
-      latestRun.status === "loading"
+      latestRun.status === "loading" ||
+      latestRun.status === "streaming"
     ) {
       return;
     }
@@ -413,19 +415,23 @@ export function TranslationWindow() {
     try {
       const settings = await loadSettings();
       await applyAppearanceSettings(settings);
-      const result = await runAiFeature(text, feature, settings);
-      let saved = false;
 
-      if (feature.kind === "translation" && feature.autoSaveToVocabulary && isSingleWordTranslation(text, result)) {
-        await addWord(wordLearningEntry(text, result));
-        await emit("lexi://words-changed");
-        saved = true;
-      }
-
-      updateWorkspaceRun(runId, {
-        status: "ready",
-        result,
-        saved,
+      await runAiFeatureStream(text, feature, settings, {
+        onChunk: (accumulated) => {
+          updateWorkspaceRun(runId, { status: "streaming", streamingText: accumulated });
+        },
+        onDone: (result) => {
+          let saved = false;
+          if (feature.kind === "translation" && feature.autoSaveToVocabulary && isSingleWordTranslation(text, result)) {
+            void addWord(wordLearningEntry(text, result));
+            void emit("lexi://words-changed");
+            saved = true;
+          }
+          updateWorkspaceRun(runId, { status: "ready", result, streamingText: undefined, saved });
+        },
+        onError: (message) => {
+          updateWorkspaceRun(runId, { status: "error", message });
+        },
       });
     } catch (error) {
       updateWorkspaceRun(runId, {
@@ -859,13 +865,11 @@ function AiForm({
   onToolAction: (toolId: string) => void;
   onSubmit: (event: FormEvent) => void;
 }) {
-  const [isMultiline, setIsMultiline] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   function resizeTextarea(element: HTMLTextAreaElement) {
     element.style.height = "auto";
     element.style.height = `${Math.min(140, element.scrollHeight)}px`;
-    setIsMultiline(element.scrollHeight > 36);
   }
 
   useEffect(() => {
@@ -874,9 +878,9 @@ function AiForm({
 
   return (
     <form className="px-2 pt-1" onSubmit={onSubmit}>
-      <div className={`flex items-center gap-1 rounded-lg border border-strong/10 bg-input p-1 ${isMultiline ? "flex-wrap" : ""}`}>
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-0 rounded-lg border border-strong/10 bg-input p-1">
         <textarea
-          className="max-h-[140px] min-h-[24px] min-w-0 flex-1 resize-none border-0 bg-transparent px-1.5 py-1 text-xs leading-[1.3] text-strong outline-none placeholder:text-muted"
+          className="max-h-[140px] min-h-[24px] min-w-0 flex-1 resize-none border-0 bg-transparent px-1.5 py-1 text-sm leading-[1.3] text-strong outline-none placeholder:text-muted"
           onChange={(event) => { onInputChange(event.target.value); resizeTextarea(event.currentTarget); }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -891,19 +895,11 @@ function AiForm({
           value={inputText}
         />
         {panelItems.length > 0 ? (
-          isMultiline ? (
-            <div className="flex w-full gap-0.5 border-t border-strong/10 pt-1 pl-1">
-              {panelItems.map((item) => (
-                <AiFormActionButton key={item.kind === "feature" ? item.feature.id : item.tool.id} item={item} runs={runs} inputText={inputText} onRunFeatureInput={onRunFeatureInput} onToolAction={onToolAction} />
-              ))}
-            </div>
-          ) : (
-            <div className="flex shrink-0 gap-0.5">
-              {panelItems.map((item) => (
-                <AiFormActionButton key={item.kind === "feature" ? item.feature.id : item.tool.id} item={item} runs={runs} inputText={inputText} onRunFeatureInput={onRunFeatureInput} onToolAction={onToolAction} />
-              ))}
-            </div>
-          )
+          <div className="flex shrink-0 gap-0.5">
+            {panelItems.map((item) => (
+              <AiFormActionButton key={item.kind === "feature" ? item.feature.id : item.tool.id} item={item} runs={runs} inputText={inputText} onRunFeatureInput={onRunFeatureInput} onToolAction={onToolAction} />
+            ))}
+          </div>
         ) : null}
       </div>
     </form>
@@ -927,27 +923,27 @@ function AiFormActionButton({
     return (
       <button
         aria-label={`${item.tool.name} input text`}
-        className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md border border-border bg-surface text-content hover:bg-surfaceHover hover:text-strong disabled:opacity-40"
+        className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-md border border-border bg-surface text-content hover:bg-surfaceHover hover:text-strong disabled:opacity-40"
         disabled={!inputText.trim()}
         onClick={() => onToolAction(item.tool.id)}
         title={`${item.tool.name} input text`}
         type="button"
       >
-        <FeatureIcon icon={item.tool.icon} size={13} />
+        <FeatureIcon icon={item.tool.icon} size={14} />
       </button>
     );
   }
-  const isLoading = runs.some((run) => run.status === "loading" && run.featureId === item.feature.id && run.kind === "feature");
+  const isLoading = runs.some((run) => (run.status === "loading" || run.status === "streaming") && run.featureId === item.feature.id && run.kind === "feature");
   return (
     <button
       aria-label={`${item.feature.name} input text`}
-      className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-md border border-border bg-surface text-content hover:bg-surfaceHover hover:text-strong disabled:opacity-40"
+      className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-md border border-border bg-surface text-content hover:bg-surfaceHover hover:text-strong disabled:opacity-40"
       disabled={isLoading || !inputText.trim()}
       onClick={() => onRunFeatureInput(item.feature)}
       title={`${item.feature.name} input text`}
       type="button"
     >
-      <FeatureIcon icon={item.feature.icon} size={13} />
+      <FeatureIcon icon={item.feature.icon} size={14} />
     </button>
   );
 }
@@ -972,6 +968,11 @@ function WorkspaceRunCard({
   return (
     <article className="grid min-w-0 gap-1.5 px-3 py-2">
       {run.status === "loading" ? <LoadingRun title={run.title} /> : null}
+      {run.status === "streaming" && run.streamingText != null ? (
+        <div className="leading-[1.65] tracking-[-0.01em] text-content">
+          <MarkdownRenderer content={run.streamingText} />
+        </div>
+      ) : null}
       {run.status === "error" ? <ErrorRun title={run.title} message={run.message ?? "Action failed."} /> : null}
       {run.status === "ready" && run.result ? (
         <>
