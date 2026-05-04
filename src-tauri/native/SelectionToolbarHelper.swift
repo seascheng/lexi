@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import Network
 
-private let logURL = URL(fileURLWithPath: "/tmp/englist-selection-helper.log")
+private let logURL = URL(fileURLWithPath: "/tmp/lexi-selection-helper.log")
 private let toolbarHandleWidth: CGFloat = 18
 private let toolbarSegmentWidth: CGFloat = 34
 private let toolbarHeight: CGFloat = 30

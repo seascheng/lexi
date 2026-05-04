@@ -12,21 +12,21 @@ export async function showAiLoading(text: string) {
   if (!isTauriRuntime()) return;
 
   await showAiWindow();
-  await emit("englist://ai-loading", { text, featureId: "translation" });
+  await emit("lexi://ai-loading", { text, featureId: "translation" });
 }
 
 export async function showAiResult(result: AiRunResult, feature: AiFeature, text: string) {
   if (!isTauriRuntime()) return;
 
   await showAiWindow();
-  await emit("englist://ai-ready", { result, feature, text });
+  await emit("lexi://ai-ready", { result, feature, text });
 }
 
 export async function showAiError(message: string) {
   if (!isTauriRuntime()) return;
 
   await showAiWindow();
-  await emit("englist://ai-error", { message, featureId: "translation" });
+  await emit("lexi://ai-error", { message, featureId: "translation" });
 }
 
 async function showAiWindow() {
@@ -48,5 +48,5 @@ async function showAiWindow() {
   await targetWindow.show();
   await targetWindow.setSize(new LogicalSize(DEFAULT_POPUP_SIZE, DEFAULT_POPUP_SIZE));
   await targetWindow.setFocus();
-  await emit("englist://popup-shown", {});
+  await emit("lexi://popup-shown", {});
 }

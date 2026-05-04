@@ -79,7 +79,7 @@ function MainWindow() {
     if (!isTauriRuntime()) return;
 
     returnEffect(
-      listen("englist://words-changed", async () => {
+      listen("lexi://words-changed", async () => {
         await refreshWords();
       }),
     );
@@ -105,7 +105,7 @@ function MainWindow() {
     async (nextSettings: AppSettings) => {
       setSettings(nextSettings);
       if (isTauriRuntime()) {
-        await emit("englist://settings-changed", nextSettings);
+        await emit("lexi://settings-changed", nextSettings);
       }
     },
     [],

@@ -6,14 +6,14 @@ import type { AiFeature, AiFeatureIcon, AiFeatureKind, AiOutputMode, AppSettings
 
 type SqlDatabase = Awaited<ReturnType<typeof Database.load>>;
 
-const WORDS_KEY = "englist.words";
-const SETTINGS_KEY = "englist.settings";
-const AI_FEATURES_KEY = "englist.aiFeatures";
+const WORDS_KEY = "lexi.words";
+const SETTINGS_KEY = "lexi.settings";
+const AI_FEATURES_KEY = "lexi.aiFeatures";
 const POPUP_POSITION_KEY = "popupCardPosition";
 const POPUP_SIZE_KEY = "popupCardSize";
 const TOOL_SETTINGS_KEY = "toolbar_tools";
-const NOTES_KEY = "englist.notes";
-const TAGS_KEY = "englist.tags";
+const NOTES_KEY = "lexi.notes";
+const TAGS_KEY = "lexi.tags";
 
 export interface WindowPosition {
   x: number;
@@ -142,7 +142,7 @@ export async function saveToolbarTools(tools: ToolbarTool[]): Promise<void> {
 
 export async function listPanels(): Promise<Panel[]> {
   if (!isTauriRuntime()) {
-    const raw = localStorage.getItem("englist.panels");
+    const raw = localStorage.getItem("lexi.panels");
     const rows: Panel[] = raw ? JSON.parse(raw) : [];
     return withBuiltInPanels(rows);
   }
@@ -157,7 +157,7 @@ export async function savePanel(panel: Panel): Promise<void> {
     const idx = panels.findIndex((p) => p.id === panel.id);
     if (idx >= 0) panels[idx] = panel;
     else panels.push(panel);
-    localStorage.setItem("englist.panels", JSON.stringify(panels));
+    localStorage.setItem("lexi.panels", JSON.stringify(panels));
     return;
   }
   const db = await getSqlDatabase();
@@ -364,7 +364,7 @@ export function dueWords(words: WordEntry[]) {
 
 async function getSqlDatabase() {
   if (!sqlDatabase) {
-    sqlDatabase = await Database.load("sqlite:englist.db");
+    sqlDatabase = await Database.load("sqlite:lexi.db");
   }
   return sqlDatabase;
 }

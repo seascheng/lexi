@@ -68,7 +68,7 @@ fn configure_window_all_spaces(window: &tauri::WebviewWindow) {
 
 const DEFAULT_POPUP_SIZE: f64 = 420.0;
 const IPC_HOST: &str = "127.0.0.1";
-const LOG_PATH: &str = "/tmp/englist-native-toolbar.log";
+const LOG_PATH: &str = "/tmp/lexi-native-toolbar.log";
 const SELECTION_DRAG_THRESHOLD: f64 = 6.0;
 const WINDOW_MOVE_THRESHOLD: f64 = 4.0;
 const SELECTION_COPY_ATTEMPTS: usize = 2;
@@ -222,7 +222,7 @@ fn initialize_popup_shortcut(app: &tauri::App) {
         .path()
         .app_data_dir()
         .ok()
-        .map(|dir| dir.join("englist.db"));
+        .map(|dir| dir.join("lexi.db"));
 
     let shortcut = path
         .as_ref()
@@ -352,7 +352,7 @@ fn saved_toolbar_enabled(app: &tauri::App) -> Option<bool> {
         .path()
         .app_data_dir()
         .ok()
-        .map(|dir| dir.join("englist.db"))?;
+        .map(|dir| dir.join("lexi.db"))?;
     read_toolbar_enabled_from_sqlite(&path)
 }
 
@@ -361,7 +361,7 @@ fn saved_toolbar_enabled_for_app(app: &tauri::AppHandle) -> Option<bool> {
         .path()
         .app_data_dir()
         .ok()
-        .map(|dir| dir.join("englist.db"))?;
+        .map(|dir| dir.join("lexi.db"))?;
     read_toolbar_enabled_from_sqlite(&path)
 }
 
@@ -736,7 +736,7 @@ fn handle_system_event(
                     Ok(Some(text)) => {
                         log_native(&format!("shortcut text length={}", text.len()));
                         let _ = app.emit(
-                            "englist://ai-request",
+                            "lexi://ai-request",
                             AiRequestPayload {
                                 text,
                                 mode: "popup_card",
@@ -1094,7 +1094,7 @@ fn clipboard_marker() -> String {
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
     format!(
-        "__ENGLIST_CLIPBOARD_MARKER_{}_{}__",
+        "__LEXI_CLIPBOARD_MARKER_{}_{}__",
         std::process::id(),
         timestamp
     )
@@ -1182,7 +1182,7 @@ fn dispatch_toolbar_action(
 
 fn save_note_from_toolbar(app: &tauri::AppHandle, text: String) -> Result<(), String> {
     app.emit(
-        "englist://save-note",
+        "lexi://save-note",
         serde_json::json!({ "text": text }),
     )
     .map_err(|error| format!("Could not emit save-note event: {error}"))
@@ -1195,7 +1195,7 @@ fn open_popup_with_feature(
 ) -> Result<(), String> {
     show_popup(app)?;
     app.emit(
-        "englist://ai-request",
+        "lexi://ai-request",
         AiRequestPayload {
             text,
             mode: "popup_card",
@@ -1233,7 +1233,7 @@ fn show_popup(app: &tauri::AppHandle) -> Result<(), String> {
         .set_focus()
         .map_err(|error| format!("Could not focus popup: {error}"))?;
     app.emit(
-        "englist://popup-shown",
+        "lexi://popup-shown",
         PopupShownPayload { mode: "popup_card" },
     )
     .map_err(|error| format!("Could not emit popup shown: {error}"))

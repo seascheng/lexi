@@ -125,10 +125,10 @@ export function TranslationWindow() {
     void initializePopup();
 
     const cleanups = [
-      listen<RequestPayload>("englist://ai-request", (event) => {
+      listen<RequestPayload>("lexi://ai-request", (event) => {
         void runActiveFeature(event.payload.text, event.payload.featureId);
       }),
-      listen<RequestPayload>("englist://ai-loading", (event) => {
+      listen<RequestPayload>("lexi://ai-loading", (event) => {
         const feature = currentActionFeature(event.payload.featureId);
         if (!feature) return;
         const text = event.payload.text.trim();
@@ -142,7 +142,7 @@ export function TranslationWindow() {
           status: "loading",
         });
       }),
-      listen<ErrorPayload>("englist://ai-error", (event) => {
+      listen<ErrorPayload>("lexi://ai-error", (event) => {
         const feature = currentActionFeature(event.payload.featureId);
         addWorkspaceRun({
           kind: "feature",
@@ -154,7 +154,7 @@ export function TranslationWindow() {
           message: event.payload.message,
         });
       }),
-      listen<ReadyPayload>("englist://ai-ready", (event) => {
+      listen<ReadyPayload>("lexi://ai-ready", (event) => {
         const text = event.payload.text.trim();
         if (text) setInputText(text);
         addWorkspaceRun({
@@ -167,25 +167,25 @@ export function TranslationWindow() {
           result: event.payload.result,
         });
       }),
-      listen<AppSettings>("englist://settings-changed", (event) => {
+      listen<AppSettings>("lexi://settings-changed", (event) => {
         void applyAppearanceSettings(event.payload);
         void syncNativeToolbarActions(featuresRef.current);
       }),
-      listen("englist://features-changed", () => {
+      listen("lexi://features-changed", () => {
         void reloadFeatures();
       }),
-      listen("englist://popup-shown", () => {
+      listen("lexi://popup-shown", () => {
         resetPopupWorkspace();
       }),
-      listen("englist://words-changed", async () => {
+      listen("lexi://words-changed", async () => {
         const refreshed = await listWords();
         setWords(refreshed);
       }),
-      listen<{ text: string }>("englist://save-note", async (event) => {
+      listen<{ text: string }>("lexi://save-note", async (event) => {
         const isPopup = new URLSearchParams(window.location.search).get("window") === "popup_card";
         if (!isPopup) return;
         await addNote({ content: event.payload.text });
-        await emit("englist://notes-changed");
+        await emit("lexi://notes-changed");
       }),
     ];
 
@@ -418,7 +418,7 @@ export function TranslationWindow() {
 
       if (feature.kind === "translation" && feature.autoSaveToVocabulary && isSingleWordTranslation(text, result)) {
         await addWord(wordLearningEntry(text, result));
-        await emit("englist://words-changed");
+        await emit("lexi://words-changed");
         saved = true;
       }
 
@@ -591,7 +591,7 @@ export function TranslationWindow() {
         break;
       case "note":
         await addNote({ content: text });
-        await emit("englist://notes-changed");
+        await emit("lexi://notes-changed");
         break;
     }
   }
@@ -601,7 +601,7 @@ export function TranslationWindow() {
     if (!run?.learningEntry || run.saved) return;
 
     await addWord(run.learningEntry);
-    await emit("englist://words-changed");
+    await emit("lexi://words-changed");
     updateWorkspaceRun(runId, { saved: true });
   }
 

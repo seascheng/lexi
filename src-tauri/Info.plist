@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
   <key>NSAccessibilityUsageDescription</key>
-  <string>Englist needs Accessibility permission to copy selected text for translation actions.</string>
+  <string>Lexi needs Accessibility permission to copy selected text for translation actions.</string>
   <key>NSInputMonitoringUsageDescription</key>
-  <string>Englist needs Input Monitoring permission to show the toolbar after text selection and handle the translate shortcut.</string>
+  <string>Lexi needs Input Monitoring permission to show the toolbar after text selection and handle the translate shortcut.</string>
 </dict>
 </plist>

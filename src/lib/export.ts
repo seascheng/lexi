@@ -3,7 +3,7 @@ import type { WordEntry } from "../types";
 export function exportWords(words: WordEntry[], format: "json" | "csv") {
   const content = format === "json" ? toJson(words) : toCsv(words);
   const type = format === "json" ? "application/json" : "text/csv";
-  downloadFile(content, `englist-words.${format}`, type);
+  downloadFile(content, `lexi-words.${format}`, type);
 }
 
 function toJson(words: WordEntry[]) {

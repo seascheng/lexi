@@ -1437,7 +1437,7 @@ function ToggleSwitch({
 
 async function notifyChanged() {
   if (isTauriRuntime()) {
-    await emit("englist://features-changed");
+    await emit("lexi://features-changed");
   }
 }
 

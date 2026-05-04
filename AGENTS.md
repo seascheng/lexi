@@ -3,7 +3,7 @@
 3. For implementing new feature, it is essential to ensure code reusability and follow the current file directory based on the existing architecture.
 4. We pursue the separation of duties while avoiding excessive complexity and abstraction; we aim for clean code while avoiding fragmentation.
 
-# Englist Tool
+# Lexi
 
 A macOS desktop app for English learning with AI-powered translation, vocabulary management, and spaced repetition review.
 
@@ -92,7 +92,7 @@ No router library. URL-param based:
 <claude-mem-context>
 # Memory Context
 
-# [englist-tool] recent context, 2026-05-04 12:24pm GMT+8
+# [lexi] recent context, 2026-05-04 12:24pm GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE

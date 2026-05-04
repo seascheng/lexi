@@ -23,7 +23,7 @@ pub fn run() {
         .plugin(tauri_plugin_liquid_glass::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
-                .add_migrations("sqlite:englist.db", migrations())
+                .add_migrations("sqlite:lexi.db", migrations())
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![

@@ -71,7 +71,7 @@ export function NotesPanel({ isPinned }: PanelProps) {
     void loadNotes();
 
     if (isTauriRuntime()) {
-      const cleanup = listen("englist://notes-changed", () => { void loadNotes(); });
+      const cleanup = listen("lexi://notes-changed", () => { void loadNotes(); });
       return () => { void cleanup.then((unsub) => unsub()); };
     }
   }, []);
@@ -135,7 +135,7 @@ export function NotesPanel({ isPinned }: PanelProps) {
 
   async function removeNote(id: number) {
     await deleteNote(id);
-    await emit("englist://notes-changed");
+    await emit("lexi://notes-changed");
     await loadNotes();
   }
 
