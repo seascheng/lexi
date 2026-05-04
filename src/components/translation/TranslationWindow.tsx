@@ -751,7 +751,6 @@ function WorkspacePage({
     <div className="translation-tab-page flex min-h-0 flex-col gap-2 pt-2">
       <section className="translation-action-area shrink-0">
         <AiForm
-          defaultFeature={defaultFeature}
           inputText={inputText}
           panelItems={panelItems}
           runs={runs}
@@ -849,7 +848,6 @@ function RunTabs({
 }
 
 function AiForm({
-  defaultFeature,
   inputText,
   panelItems,
   runs,
@@ -858,14 +856,13 @@ function AiForm({
   onToolAction,
   onSubmit,
 }: {
-  defaultFeature?: AiFeature;
   inputText: string;
   panelItems: Array<{ kind: "feature"; feature: AiFeature } | { kind: "tool"; tool: ToolbarTool }>;
   runs: WorkspaceRun[];
   onInputChange: (value: string) => void;
   onRunFeatureInput: (feature: AiFeature) => void;
   onToolAction: (toolId: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onSubmit: (event: FormEvent) => void;
 }) {
   const [isMultiline, setIsMultiline] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
