@@ -128,11 +128,12 @@ export function FloatingFrame({
             <button
               key={panel.id}
               onClick={() => onPanelChange?.(panel.id)}
-              className={`rounded px-3 py-0.5 text-xs font-medium transition-colors ${
+              className={cn(
+                "relative rounded px-3 py-0.5 text-xs font-medium transition-colors",
                 activePanelId === panel.id
-                  ? "bg-surface-hover text-strong"
-                  : "text-muted hover:text-strong"
-              }`}
+                  ? "bg-accent/20 text-strong"
+                  : "text-muted hover:text-strong",
+              )}
             >
               {panel.name}
             </button>
