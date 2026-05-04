@@ -145,7 +145,7 @@ export function NotesPanel({ isPinned }: PanelProps) {
 
   return (
     <div className="flex min-h-0 flex-col gap-1.5 p-2">
-      <div className="flex shrink-0 items-center rounded-lg border border-strong/10 bg-input p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <div className="flex shrink-0 items-center rounded-lg border border-strong/10 bg-input p-1">
         <Search size={13} className="ml-1.5 shrink-0 text-muted/60" />
         <input
           ref={searchRef}
@@ -213,7 +213,7 @@ export function NotesPanel({ isPinned }: PanelProps) {
                 onClick={(e) => { e.stopPropagation(); void removeNote(note.id); }}
                 variant="ghost"
                 icon={<Trash2 size={13} />}
-                className="h-6 min-h-6 w-6 shrink-0 px-0 text-muted/50 hover:text-red-500"
+                className="h-6 min-h-6 w-6 shrink-0 px-0 text-muted/50 hover:text-danger"
               />
             </div>
           ))
