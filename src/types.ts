@@ -5,7 +5,7 @@ export type WordStatus = "new" | "learning" | "mastered";
 export type ReviewRating = "again" | "hard" | "good" | "easy";
 export type AiFeatureKind = "translation" | "custom";
 export type AiOutputMode = "translation_json" | "plain_text";
-export type AiFeatureIcon = "languages" | "wand" | "pen" | "sparkles" | "book-plus" | "book-open" | "highlighter" | "file-text" | "message" | "clipboard" | "search" | "volume" | "sticky-note";
+export type AiFeatureIcon = "languages" | "wand" | "pen" | "sparkles" | "book-plus" | "book-open" | "highlighter" | "file-text" | "message" | "clipboard" | "search" | "volume" | "notebook-pen";
 export type ToolbarToolId = "copy" | "search" | "read" | "note";
 export type LearningEntryType = "word" | "phrase" | "pattern";
 

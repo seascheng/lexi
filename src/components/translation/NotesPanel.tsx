@@ -144,9 +144,9 @@ export function NotesPanel({ isPinned }: PanelProps) {
   }
 
   return (
-    <div className="flex flex-col gap-1 p-2">
-      <div className="flex items-center gap-1.5 rounded-md border border-strong/10 bg-input px-2 py-1">
-        <Search size={13} className="shrink-0 text-muted/60" />
+    <div className="flex min-h-0 flex-col gap-1.5 p-2">
+      <div className="flex shrink-0 items-center rounded-lg border border-strong/10 bg-input p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+        <Search size={13} className="ml-1.5 shrink-0 text-muted/60" />
         <input
           ref={searchRef}
           type="text"
@@ -178,10 +178,10 @@ export function NotesPanel({ isPinned }: PanelProps) {
             }
           }}
           placeholder="Search notes..."
-          className="min-w-0 flex-1 border-0 bg-transparent text-sm text-strong outline-none placeholder:text-muted"
+          className="min-w-0 flex-1 border-0 bg-transparent px-2 py-1.5 text-sm leading-5 text-strong outline-none placeholder:text-muted"
         />
       </div>
-      <div className="flex flex-col overflow-y-auto">
+      <div className="flex min-h-0 flex-col overflow-y-auto">
         {filteredNotes.length === 0 ? (
           <div className="px-2 py-3 text-sm text-muted">No matching notes.</div>
         ) : (
@@ -189,7 +189,7 @@ export function NotesPanel({ isPinned }: PanelProps) {
             <div
               key={note.id}
               className={cn(
-                "flex items-center gap-2 rounded px-2 py-1.5 cursor-pointer transition-colors",
+                "flex items-center gap-2 rounded px-2 py-1.5 cursor-pointer outline-none transition-colors",
                 selectedIdx === index
                   ? "bg-accent/15"
                   : "hover:bg-surface/30",

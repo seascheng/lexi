@@ -42,6 +42,7 @@ import { Button } from "../components/ui/Button";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
 
 type DraftItem =
+  | { kind: "workspace" }
   | { kind: "toolbar-config" }
   | { kind: "panel"; panelId: string }
   | { kind: "tool"; data: ToolbarTool }
@@ -79,7 +80,7 @@ export function ConfigsPage() {
     setTools(nextTools);
     setSettings(nextSettings);
     setPanels(loadedPanels);
-    setDraft((current) => current ?? { kind: "toolbar-config" });
+    setDraft((current) => current ?? { kind: "workspace" });
   }
 
   // --- Toolbar Config ---
@@ -369,25 +370,65 @@ export function ConfigsPage() {
     setPanels(await listPanels());
   }
 
+  async function togglePanelEnabled(panelId: string) {
+    const panel = panels.find((p) => p.id === panelId);
+    if (!panel) return;
+    await savePanelDraft({ ...panel, enabled: !panel.enabled });
+  }
+
+  async function applyPanelOrder(from: number, to: number) {
+    const sorted = [...panels].sort((a, b) => a.sortOrder - b.sortOrder);
+    const [moved] = sorted.splice(from, 1);
+    sorted.splice(to, 0, moved);
+    const updated = sorted.map((p, i) => ({ ...p, sortOrder: (i + 1) * 10 }));
+    for (const p of updated) {
+      await savePanel(p);
+    }
+    setPanels(updated);
+    await notifyChanged();
+  }
+
   // --- Selected ID tracking ---
 
   const selectedId =
-    draft?.kind === "feature"
-      ? draft.data.id
-      : draft?.kind === "tool"
-        ? draft.data.id
-        : draft?.kind === "toolbar-config"
-          ? "__toolbar__"
-          : draft?.kind === "panel"
-            ? `__panel_${draft.panelId}__`
-            : "__none__";
+    draft?.kind === "workspace"
+      ? "__workspace__"
+      : draft?.kind === "toolbar-config"
+        ? "__toolbar__"
+        : draft?.kind === "panel"
+          ? `__panel_${draft.panelId}__`
+          : draft?.kind === "tool"
+            ? draft.data.id
+            : draft?.kind === "feature"
+              ? draft.data.id
+              : "__none__";
 
   return (
     <div className="grid h-full min-h-0 overflow-hidden lg:grid-cols-[180px_1fr]">
       {/* Left Panel */}
       <div className="grid h-full min-h-0 content-start gap-3 overflow-y-auto border-r border-border/30 px-1 py-3 pr-3 mr-4">
-        {/* Config Section */}
-        <SectionLabel>Config</SectionLabel>
+        {/* Workspace Section */}
+        <NavItem
+          icon={<PanelIcon />}
+          label="Workspace"
+          active={selectedId === "__workspace__"}
+          onClick={() => setDraft({ kind: "workspace" })}
+        />
+        {[...panels]
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+          .map((panel) => (
+            <NavItem
+              key={panel.id}
+              icon={<FeatureIcon icon={panel.icon} size={15} />}
+              label={panel.name}
+              badge={!panel.enabled ? "off" : undefined}
+              active={selectedId === `__panel_${panel.id}__`}
+              onClick={() => setDraft({ kind: "panel", panelId: panel.id })}
+              indent
+            />
+          ))}
+
+        {/* Toolbar */}
         <NavItem
           icon={<ToolbarIcon />}
           label="Toolbar"
@@ -429,24 +470,17 @@ export function ConfigsPage() {
             onClick={() => setDraft({ kind: "feature", data: f })}
           />
         ))}
-
-        {/* Panels Section */}
-        <SectionLabel>Panels</SectionLabel>
-        {panels.map((panel) => (
-          <NavItem
-            key={panel.id}
-            icon={<FeatureIcon icon={panel.icon} size={15} />}
-            label={panel.name}
-            badge={!panel.enabled ? "off" : undefined}
-            active={selectedId === `__panel_${panel.id}__`}
-            onClick={() => setDraft({ kind: "panel", panelId: panel.id })}
-          />
-        ))}
       </div>
 
       {/* Right Panel */}
       <div className="grid h-full min-h-0 content-start gap-3 overflow-y-auto">
-        {draft?.kind === "toolbar-config" ? (
+        {draft?.kind === "workspace" ? (
+          <WorkspaceConfigPanel
+            panels={panels}
+            onToggle={togglePanelEnabled}
+            onReorder={(from, to) => void applyPanelOrder(from, to)}
+          />
+        ) : draft?.kind === "toolbar-config" ? (
           <ToolbarConfigPanel
             items={allToolbarItems}
             enabledItems={enabledToolbarItems}
@@ -509,16 +543,20 @@ function NavItem({
   badge,
   active,
   onClick,
+  indent,
 }: {
   icon: React.ReactNode;
   label: string;
   badge?: string;
   active: boolean;
   onClick: () => void;
+  indent?: boolean;
 }) {
   return (
     <button
       className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${
+        indent ? "pl-6" : ""
+      } ${
         active
           ? "bg-accent/10 text-accent"
           : "text-strong hover:bg-surfaceHover"
@@ -799,6 +837,145 @@ function ToolbarDragHandleIcon() {
         strokeLinecap="round"
       />
     </svg>
+  );
+}
+
+/* ========== Right Panel: Workspace Config ========== */
+
+function WorkspaceConfigPanel({
+  panels,
+  onToggle,
+  onReorder,
+}: {
+  panels: Panel[];
+  onToggle: (panelId: string) => void;
+  onReorder: (from: number, to: number) => void;
+}) {
+  const sorted = useMemo(
+    () => [...panels].sort((a, b) => a.sortOrder - b.sortOrder),
+    [panels],
+  );
+  const enabledPanels = sorted.filter((p) => p.enabled);
+
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dropIdx, setDropIdx] = useState<number | null>(null);
+  const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const dragging = useRef(false);
+
+  function handlePointerDown(idx: number, e: React.PointerEvent) {
+    dragging.current = true;
+    setDragIdx(idx);
+    setDropIdx(null);
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function handlePointerMove(e: React.PointerEvent) {
+    if (!dragging.current || dragIdx === null) return;
+    const y = e.clientY;
+    let found: number | null = null;
+    for (let i = 0; i < sorted.length; i++) {
+      const el = rowRefs.current[i];
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      if (y >= rect.top && y <= rect.bottom && i !== dragIdx) {
+        found = i;
+        break;
+      }
+    }
+    if (found !== dropIdx) setDropIdx(found);
+  }
+
+  function handlePointerUp() {
+    if (
+      dragging.current &&
+      dragIdx !== null &&
+      dropIdx !== null &&
+      dragIdx !== dropIdx
+    ) {
+      onReorder(dragIdx, dropIdx);
+    }
+    dragging.current = false;
+    setDragIdx(null);
+    setDropIdx(null);
+  }
+
+  return (
+    <>
+      <div>
+        <h2 className="text-lg font-semibold">Workspace</h2>
+        <p className="text-sm text-muted">
+          Manage popup panels. Drag to reorder, toggle to show/hide.
+        </p>
+      </div>
+
+      {/* Preview — popup panel tabs */}
+      <div className="flex justify-center py-2">
+        <div className="inline-flex items-center gap-0.5 rounded-md bg-surface p-0.5">
+          {enabledPanels.map((panel) => (
+            <div
+              key={panel.id}
+              className="flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium text-strong bg-accent/20"
+            >
+              <FeatureIcon icon={panel.icon} size={12} />
+              {panel.name}
+            </div>
+          ))}
+          {enabledPanels.length === 0 && (
+            <p className="px-3 py-1 text-xs text-muted">No panels enabled</p>
+          )}
+        </div>
+      </div>
+
+      {/* Draggable panel list */}
+      <div
+        className="grid gap-1"
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      >
+        {sorted.map((panel, idx) => (
+          <div
+            key={panel.id}
+            ref={(el) => {
+              rowRefs.current[idx] = el;
+            }}
+            className={`flex items-center gap-2 rounded-md border px-2.5 py-2 transition select-none ${
+              dragIdx === idx
+                ? "border-accent bg-accent/10 opacity-50"
+                : dropIdx === idx
+                  ? "border-accent bg-accent/5"
+                  : "border-border bg-surface hover:bg-surfaceHover"
+            }`}
+          >
+            <div
+              className="cursor-grab text-muted active:cursor-grabbing"
+              onPointerDown={(e) => handlePointerDown(idx, e)}
+            >
+              <svg
+                width="10"
+                height="16"
+                viewBox="0 0 10 16"
+                fill="currentColor"
+              >
+                <circle cx="3" cy="2" r="1.5" />
+                <circle cx="7" cy="2" r="1.5" />
+                <circle cx="3" cy="8" r="1.5" />
+                <circle cx="7" cy="8" r="1.5" />
+                <circle cx="3" cy="14" r="1.5" />
+                <circle cx="7" cy="14" r="1.5" />
+              </svg>
+            </div>
+            <FeatureIcon icon={panel.icon} size={15} />
+            <span className="min-w-0 flex-1 truncate text-sm text-strong">
+              {panel.name}
+            </span>
+            <ToggleSwitch
+              checked={panel.enabled}
+              onChange={() => onToggle(panel.id)}
+            />
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 

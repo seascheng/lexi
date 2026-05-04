@@ -2,6 +2,7 @@ import type { MouseEvent, ReactNode } from "react";
 import { Pin, PinOff, X } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Button } from "../ui/Button";
+import { FeatureIcon } from "../../lib/featureIcons";
 import type { Panel } from "../../types";
 
 export type PopupResizeDirection =
@@ -129,12 +130,13 @@ export function FloatingFrame({
               key={panel.id}
               onClick={() => onPanelChange?.(panel.id)}
               className={cn(
-                "relative rounded px-3 py-0.5 text-xs font-medium transition-colors",
+                "flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium transition-colors",
                 activePanelId === panel.id
                   ? "bg-accent/20 text-strong"
                   : "text-muted hover:text-strong",
               )}
             >
+              <FeatureIcon icon={panel.icon} size={12} />
               {panel.name}
             </button>
           ))}
