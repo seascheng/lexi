@@ -62,11 +62,6 @@ export function FloatingFrame({
         className,
       )}
     >
-      <div
-        aria-hidden="true"
-        className="absolute left-11 right-11 top-2 z-20 h-6 cursor-grab active:cursor-grabbing"
-        data-tauri-drag-region
-      />
       {onStartResize ? (
         <>
           <div
@@ -111,8 +106,8 @@ export function FloatingFrame({
           />
         </>
       ) : null}
-      {/* Header row */}
-      <div className="relative z-20 flex items-center px-2 pt-2 pb-1">
+      {/* Header row — entire row is drag region, buttons inside still work */}
+      <div className="relative z-20 flex items-center px-2 pt-2 pb-1" data-tauri-drag-region>
         {onClose ? (
           <Button
             aria-label="Hide popup"

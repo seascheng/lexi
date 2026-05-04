@@ -831,7 +831,7 @@ function RunTabs({
       </div>
       <button
         aria-label="Close all results"
-        className="shrink-0 px-1.5 py-[3px] text-[9px] text-muted/40 hover:text-strong"
+        className="shrink-0 rounded px-1.5 py-[3px] text-[9px] text-muted/40 hover:bg-surface/30 hover:text-strong transition-colors"
         onClick={onClearRuns}
         title="Close all results"
         type="button"
@@ -979,7 +979,7 @@ function WorkspaceRunCard({
             <div className="flex gap-1">
               <button
                 aria-label="Copy result"
-                className="px-1.5 py-0.5 text-[9px] text-muted hover:text-strong"
+                className="rounded px-1.5 py-0.5 text-[9px] text-muted hover:bg-surface/30 hover:text-strong transition-colors"
                 onClick={() => copyText(run.result?.outputText ?? "")}
                 title="Copy result"
                 type="button"
