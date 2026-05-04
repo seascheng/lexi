@@ -1,4 +1,4 @@
-import { BookOpen, BookPlus, Clipboard, FileText, Highlighter, Languages, MessageSquare, NotebookPen, PenLine, Search, Sparkles, Volume2, Wand2 } from "lucide-react";
+import { BookOpen, BookPlus, Clipboard, Copy, FileText, Highlighter, Languages, MessageSquare, NotebookPen, PenLine, Search, Sparkles, Volume2, Wand2 } from "lucide-react";
 import type { AiFeatureIcon } from "../types";
 
 export const FEATURE_ICON_OPTIONS: Array<{ value: AiFeatureIcon; label: string }> = [
@@ -12,6 +12,7 @@ export const FEATURE_ICON_OPTIONS: Array<{ value: AiFeatureIcon; label: string }
   { value: "file-text", label: "File text" },
   { value: "message", label: "Message" },
   { value: "clipboard", label: "Clipboard" },
+  { value: "copy", label: "Copy" },
   { value: "search", label: "Search" },
   { value: "volume", label: "Volume" },
   { value: "notebook-pen", label: "Notebook" },
@@ -27,6 +28,7 @@ export function FeatureIcon({ icon, size = 16 }: { icon: AiFeatureIcon; size?: n
   if (icon === "file-text") return <FileText size={size} />;
   if (icon === "message") return <MessageSquare size={size} />;
   if (icon === "clipboard") return <Clipboard size={size} />;
+  if (icon === "copy") return <Copy size={size} />;
   if (icon === "search") return <Search size={size} />;
   if (icon === "volume") return <Volume2 size={size} />;
   if (icon === "notebook-pen") return <NotebookPen size={size} />;

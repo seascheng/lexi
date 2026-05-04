@@ -674,7 +674,7 @@ fn spawn_selection_monitor(app: tauri::AppHandle, toolbar_port: u16) {
 
         if result.is_err() {
             log_native("event tap install failed");
-            eprintln!("Could not install Lexicon system event tap. Grant Input Monitoring to Lexicon.app and restart.");
+            eprintln!("Could not install Lexi system event tap. Grant Input Monitoring to Lexi.app and restart.");
             open_privacy_settings("Privacy_ListenEvent");
         } else {
             log_native("event tap stopped");
@@ -1344,13 +1344,13 @@ fn launch_helper(app: &tauri::App, action_port: u16, toolbar_port: u16) -> anyho
 
 fn helper_app_path(app: &tauri::App) -> anyhow::Result<PathBuf> {
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let bundled = resource_dir.join("native/LexiconSelectionHelper.app");
+        let bundled = resource_dir.join("native/LexiSelectionHelper.app");
         if bundled.exists() {
             return Ok(bundled);
         }
     }
 
-    Ok(env::current_dir()?.join("native/LexiconSelectionHelper.app"))
+    Ok(env::current_dir()?.join("native/LexiSelectionHelper.app"))
 }
 
 fn request_system_permissions() {

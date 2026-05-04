@@ -74,6 +74,10 @@ private func lucideMarkup(for icon: String) -> String {
         return """
         <rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>
         """
+    case "copy":
+        return """
+        <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+        """
     case "search":
         return """
         <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
@@ -294,8 +298,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
     private var listener: NWListener?
-    private let listenerQueue = DispatchQueue(label: "englist.toolbar.display")
-    private let connectionQueue = DispatchQueue(label: "englist.toolbar.connection")
+    private let listenerQueue = DispatchQueue(label: "lexi.toolbar.display")
+    private let connectionQueue = DispatchQueue(label: "lexi.toolbar.connection")
     private let actionPort: String
     private let toolbarPort: UInt16
 

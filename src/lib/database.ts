@@ -127,7 +127,7 @@ export async function saveToolbarTools(tools: ToolbarTool[]): Promise<void> {
   const data = tools.map((tool) => ({ id: tool.id, enabled: tool.enabled, sortOrder: tool.sortOrder, panelEnabled: tool.panelEnabled, panelSortOrder: tool.panelSortOrder, config: tool.config }));
 
   if (!isTauriRuntime()) {
-    localStorage.setItem("englist.toolbarTools", JSON.stringify(data));
+    localStorage.setItem("lexi.toolbarTools", JSON.stringify(data));
     return;
   }
 
@@ -170,7 +170,7 @@ export async function savePanel(panel: Panel): Promise<void> {
 }
 
 function loadBrowserToolbarTools(): ToolbarTool[] {
-  const saved = localStorage.getItem("englist.toolbarTools");
+  const saved = localStorage.getItem("lexi.toolbarTools");
   if (!saved) return DEFAULT_TOOLS.map((tool) => ({ ...tool }));
 
   try {

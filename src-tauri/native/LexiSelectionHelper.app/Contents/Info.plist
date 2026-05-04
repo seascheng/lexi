@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>LexiconSelectionHelper</string>
+  <string>LexiSelectionHelper</string>
   <key>CFBundleIdentifier</key>
-  <string>com.lexicon.selection-helper</string>
+  <string>com.lexi.selection-helper</string>
   <key>CFBundleName</key>
-  <string>Lexicon Selection Helper</string>
+  <string>Lexi Selection Helper</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>

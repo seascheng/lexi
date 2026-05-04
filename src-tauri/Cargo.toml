@@ -1,12 +1,12 @@
 [package]
-name = "englist-tool"
+name = "lexi"
 version = "0.1.0"
 description = "Mac English learning app with translation, vocabulary, and review."
-authors = ["Lexicon"]
+authors = ["Lexi"]
 edition = "2021"
 
 [lib]
-name = "englist_tool_lib"
+name = "lexi_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

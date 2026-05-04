@@ -10,10 +10,10 @@ fn build_native_selection_toolbar() {
     use std::fs;
     use std::process::Command;
 
-    // Must match bundle.macOS.signingIdentity in tauri.conf.json for stable TCC permissions.
-    const SIGNING_IDENTITY: &str = "Lexicon Stable Signing";
+    // Ad-hoc signing for development. For production, use a stable identity via Keychain Access.
+    const SIGNING_IDENTITY: &str = "-";
 
-    let app_dir = "native/LexiconSelectionHelper.app";
+    let app_dir = "native/LexiSelectionHelper.app";
     let contents_dir = format!("{app_dir}/Contents");
     let macos_dir = format!("{contents_dir}/MacOS");
     fs::create_dir_all(&macos_dir).expect("failed to create native helper app bundle");
@@ -24,11 +24,11 @@ fn build_native_selection_toolbar() {
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>LexiconSelectionHelper</string>
+  <string>LexiSelectionHelper</string>
   <key>CFBundleIdentifier</key>
-  <string>com.lexicon.selection-helper</string>
+  <string>com.lexi.selection-helper</string>
   <key>CFBundleName</key>
-  <string>Lexicon Selection Helper</string>
+  <string>Lexi Selection Helper</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>
@@ -48,7 +48,7 @@ fn build_native_selection_toolbar() {
             "swiftc",
             "native/SelectionToolbarHelper.swift",
             "-o",
-            "native/LexiconSelectionHelper.app/Contents/MacOS/LexiconSelectionHelper",
+            "native/LexiSelectionHelper.app/Contents/MacOS/LexiSelectionHelper",
             "-framework",
             "AppKit",
             "-framework",

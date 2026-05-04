@@ -53,7 +53,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("failed to build Lexicon")
+        .expect("failed to build Lexi")
         .run(|app, event| {
             if let tauri::RunEvent::Reopen { .. } = event {
                 show_main_window(app);
@@ -115,9 +115,9 @@ fn migrations() -> Vec<Migration> {
 }
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open Lexicon", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open Lexi", true, None::<&str>)?;
     let open_panel = MenuItem::with_id(app, "open_panel", "Open Panel", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Lexicon", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Lexi", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &open_panel, &quit])?;
 
     TrayIconBuilder::new()
@@ -125,7 +125,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("icons/tray_icon_template.png"),
         ).expect("failed to load tray icon"))
         .icon_as_template(true)
-        .tooltip("Lexicon")
+        .tooltip("Lexi")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {

@@ -137,8 +137,8 @@ function MainWindow() {
         <aside className="md:sticky md:top-0 md:h-screen">
           <div className="flex h-full flex-col border-b border-border/50 p-4 md:border-b-0 md:border-r">
             <div className="flex items-center gap-2.5 px-1">
-              <img src={logoUrl} alt="Lexicon" className="app-logo h-8 w-8" />
-              <h1 className="truncate text-base font-semibold">Lexicon</h1>
+              <img src={logoUrl} alt="Lexi" className="app-logo h-8 w-8" />
+              <h1 className="truncate text-base font-semibold">Lexi</h1>
             </div>
 
             <nav className="mt-5 grid gap-1.5">

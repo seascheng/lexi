@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Lexicon",
+  "productName": "Lexi",
   "version": "0.1.0",
-  "identifier": "com.englist.tool",
+  "identifier": "com.lexi.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:1420",
@@ -17,7 +17,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Lexicon",
+        "title": "Lexi",
         "url": "index.html",
         "width": 1180,
         "height": 820,
@@ -28,7 +28,7 @@
       },
       {
         "label": "float_bar",
-        "title": "Lexicon",
+        "title": "Lexi",
         "url": "index.html?window=float_bar",
         "width": 980,
         "height": 260,
@@ -44,7 +44,7 @@
       },
       {
         "label": "popup_card",
-        "title": "Lexicon",
+        "title": "Lexi",
         "url": "index.html?window=popup_card",
         "width": 420,
         "height": 420,
@@ -64,9 +64,9 @@
     "active": true,
     "targets": ["app"],
     "macOS": {
-      "signingIdentity": "Lexicon Stable Signing"
+      "signingIdentity": "-"
     },
-    "resources": ["native/LexiconSelectionHelper.app"],
+    "resources": ["native/LexiSelectionHelper.app"],
     "icon": ["icons/icon.png"]
   }
 }

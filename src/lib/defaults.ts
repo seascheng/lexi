@@ -63,7 +63,7 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
 };
 
 export const DEFAULT_TOOLS: ToolbarTool[] = [
-  { id: "copy", name: "Copy", description: TOOL_DESCRIPTIONS.copy, icon: "clipboard", enabled: true, sortOrder: 100, panelEnabled: true, panelSortOrder: 100, config: {} },
+  { id: "copy", name: "Copy", description: TOOL_DESCRIPTIONS.copy, icon: "copy", enabled: true, sortOrder: 100, panelEnabled: true, panelSortOrder: 100, config: {} },
   { id: "search", name: "Search", description: TOOL_DESCRIPTIONS.search, icon: "search", enabled: true, sortOrder: 110, panelEnabled: true, panelSortOrder: 110, config: { engine: "google" } },
   { id: "read", name: "Read", description: TOOL_DESCRIPTIONS.read, icon: "volume", enabled: true, sortOrder: 120, panelEnabled: true, panelSortOrder: 120, config: { engine: "system" } },
   { id: "note", name: "Note", description: TOOL_DESCRIPTIONS.note, icon: "notebook-pen", enabled: true, sortOrder: 130, panelEnabled: true, panelSortOrder: 130, config: {} },

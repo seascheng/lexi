@@ -1,3 +1,3 @@
 fn main() {
-    englist_tool_lib::run();
+    lexi_lib::run();
 }
