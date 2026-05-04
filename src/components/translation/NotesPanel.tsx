@@ -206,7 +206,7 @@ export function NotesPanel({ isPinned }: PanelProps) {
                 {note.name && (
                   <span className="font-medium text-strong">{note.name}: </span>
                 )}
-                <span className="text-sm">{note.content}</span>
+                <span className="text-sm text-content">{note.content}</span>
               </div>
               <Button
                 aria-label="Delete note"
