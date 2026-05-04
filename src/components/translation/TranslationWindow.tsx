@@ -802,7 +802,7 @@ function RunTabs({
       <div className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto">
         {runs.map((run) => (
           <button
-            className={`group flex shrink-0 items-center gap-1 px-2 py-[3px] text-[10px] transition ${
+            className={`group flex shrink-0 items-center gap-1 px-2 py-[3px] text-[11px] transition ${
               run.id === activeRunId
                 ? "text-strong border-b-[1.5px] border-strong/25"
                 : "text-muted/50 hover:text-strong"
@@ -831,7 +831,7 @@ function RunTabs({
       </div>
       <button
         aria-label="Close all results"
-        className="shrink-0 rounded px-2 py-1 text-[10px] text-muted/50 hover:bg-surface/30 hover:text-strong transition-colors"
+        className="shrink-0 rounded px-2 py-1 text-[11px] text-muted/50 hover:bg-surface/30 hover:text-strong transition-colors"
         onClick={onClearRuns}
         title="Close all results"
         type="button"
@@ -975,7 +975,7 @@ function WorkspaceRunCard({
       {run.status === "error" ? <ErrorRun title={run.title} message={run.message ?? "Action failed."} /> : null}
       {run.status === "ready" && run.result ? (
         <>
-          <div className="text-xs leading-[1.65] tracking-[-0.01em] text-content">
+          <div className="leading-[1.65] tracking-[-0.01em] text-content">
             <MarkdownRenderer content={run.result.outputText} />
           </div>
           <div className="flex items-center justify-between">
@@ -985,7 +985,7 @@ function WorkspaceRunCard({
             <div className="flex gap-1">
               <button
                 aria-label="Copy result"
-                className="rounded px-2 py-1 text-[10px] text-muted hover:bg-surface/30 hover:text-strong transition-colors"
+                className="rounded px-2 py-1 text-[11px] text-muted hover:bg-surface/30 hover:text-strong transition-colors"
                 onClick={() => copyText(run.result?.outputText ?? "")}
                 title="Copy result"
                 type="button"
@@ -995,7 +995,7 @@ function WorkspaceRunCard({
               {run.learningEntry ? (
                 <button
                   disabled={run.saved}
-                  className="rounded-[3px] px-2 py-0.5 text-[9px] font-medium text-accentFg bg-accent hover:bg-accentHover disabled:opacity-50"
+                  className="rounded-[3px] px-2 py-0.5 text-[10px] font-medium text-accentFg bg-accent hover:bg-accentHover disabled:opacity-50"
                   onClick={onSave}
                   type="button"
                 >
@@ -1046,7 +1046,7 @@ function EntryTypeTags({
     <div className="flex gap-0.5">
       {(["word", "phrase", "pattern"] as LearningEntryType[]).map((type) => (
         <button
-          className={`rounded-[3px] px-1.5 py-0.5 text-[8px] font-medium transition ${
+          className={`rounded-[3px] px-1.5 py-0.5 text-[9px] font-medium transition ${
             entryType === type
               ? "bg-surface text-strong"
               : "text-muted/60 hover:text-strong"
