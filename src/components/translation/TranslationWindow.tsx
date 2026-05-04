@@ -62,7 +62,7 @@ export function TranslationWindow() {
   const [inputText, setInputText] = useState("");
   const [runs, setRuns] = useState<WorkspaceRun[]>([]);
   const [activeRunId, setActiveRunId] = useState("");
-  const [isPinned, setIsPinned] = useState(true);
+  const [isPinned, setIsPinned] = useState(false);
   const [panels, setPanels] = useState<Panel[]>([]);
   const [activePanelId, setActivePanelId] = useState<string>("translate");
   const [words, setWords] = useState<WordEntry[]>([]);
@@ -72,7 +72,7 @@ export function TranslationWindow() {
   const featuresRef = useRef<AiFeature[]>([]);
   const inputTextRef = useRef("");
   const runsRef = useRef<WorkspaceRun[]>([]);
-  const isPinnedRef = useRef(true);
+  const isPinnedRef = useRef(false);
   const activePanelIdRef = useRef(activePanelId);
 
   useEffect(() => { activePanelIdRef.current = activePanelId; }, [activePanelId]);
@@ -805,7 +805,7 @@ function RunTabs({
             className={`group flex shrink-0 items-center gap-1 px-2 py-[3px] text-[11px] transition ${
               run.id === activeRunId
                 ? "text-strong border-b-[1.5px] border-strong/25"
-                : "text-muted/50 hover:text-strong"
+                : "text-muted hover:text-strong"
             }`}
             key={run.id}
             onClick={() => onSelectRun(run.id)}
@@ -818,7 +818,7 @@ function RunTabs({
             <span className="max-w-[80px] truncate">{run.title}</span>
             <span
               aria-label="Close result"
-              className="grid h-3 w-3 shrink-0 place-items-center rounded text-muted/40 hover:text-strong"
+              className="grid h-3 w-3 shrink-0 place-items-center rounded text-muted hover:text-strong"
               onClick={(event) => { event.preventDefault(); event.stopPropagation(); onDismissRun(run.id); }}
               role="button"
               tabIndex={0}
@@ -831,7 +831,7 @@ function RunTabs({
       </div>
       <button
         aria-label="Close all results"
-        className="shrink-0 rounded px-2 py-1 text-[11px] text-muted/50 hover:bg-surfaceHover hover:text-strong transition-colors"
+        className="shrink-0 rounded px-2 py-1 text-[11px] text-muted hover:bg-surfaceHover hover:text-strong transition-colors"
         onClick={onClearRuns}
         title="Close all results"
         type="button"
@@ -1049,7 +1049,7 @@ function EntryTypeTags({
           className={`rounded-[3px] px-1.5 py-0.5 text-[9px] font-medium transition ${
             entryType === type
               ? "bg-surface text-strong"
-              : "text-muted/60 hover:text-strong"
+              : "text-muted hover:text-strong"
           } disabled:cursor-not-allowed disabled:opacity-40`}
           disabled={disabled}
           key={type}

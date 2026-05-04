@@ -50,7 +50,7 @@
         "height": 360,
         "decorations": false,
         "transparent": true,
-        "shadow": false,
+        "shadow": true,
         "alwaysOnTop": true,
         "resizable": true,
         "minWidth": 360,

@@ -116,8 +116,9 @@ fn migrations() -> Vec<Migration> {
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Lexicon", true, None::<&str>)?;
+    let open_panel = MenuItem::with_id(app, "open_panel", "Open Panel", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Lexicon", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &open_panel, &quit])?;
 
     TrayIconBuilder::new()
         .icon(tauri::image::Image::from_path(
@@ -129,6 +130,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
+            "open_panel" => show_popup_from_tray(app),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -142,4 +144,17 @@ fn show_main_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+fn show_popup_from_tray(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("popup_card") else {
+        return;
+    };
+    if window.is_visible().unwrap_or(false) {
+        let _ = window.set_focus();
+        return;
+    }
+    let _ = window.center();
+    let _ = window.show();
+    let _ = window.set_focus();
 }

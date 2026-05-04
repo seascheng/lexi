@@ -36,7 +36,7 @@ interface FloatingFrameProps {
 export function FloatingFrame({
   children,
   className,
-  isPinned = true,
+  isPinned = false,
   panels,
   activePanelId,
   onPanelChange,
@@ -58,7 +58,7 @@ export function FloatingFrame({
   return (
     <section
       className={cn(
-        "translation-frame relative flex h-full min-h-full flex-col overflow-hidden rounded-2xl bg-floating text-sm text-muted",
+        "translation-frame relative flex h-full min-h-full flex-col overflow-hidden rounded-2xl text-sm text-muted",
         className,
       )}
     >
@@ -116,7 +116,7 @@ export function FloatingFrame({
       {onClose ? (
         <Button
           aria-label="Hide popup"
-          className="absolute left-2 top-2 z-20 h-[22px] min-h-0 w-[22px] rounded-full bg-transparent p-0 text-muted hover:bg-surface hover:text-strong"
+          className="absolute left-2 top-2 z-20 h-[22px] min-h-0 w-[22px] rounded-full bg-transparent p-0 text-muted hover:bg-surfaceHover hover:text-strong"
           icon={<X size={13} />}
           onClick={() => void onClose()}
           title="Hide popup"

@@ -191,8 +191,8 @@ export function NotesPanel({ isPinned }: PanelProps) {
               className={cn(
                 "flex items-center gap-2 rounded px-2 py-1.5 cursor-pointer outline-none transition-colors",
                 selectedIdx === index
-                  ? "bg-surface text-accent"
-                  : "hover:bg-surfaceHover",
+                  ? "bg-surface text-strong"
+                  : "text-muted hover:bg-surfaceHover hover:text-strong",
               )}
               onClick={() => {
                 setSelectedIdx(index);
@@ -204,16 +204,16 @@ export function NotesPanel({ isPinned }: PanelProps) {
             >
               <div className="min-w-0 flex-1 truncate">
                 {note.name && (
-                  <span className="font-medium text-strong">{note.name}: </span>
+                  <span className="font-medium">{note.name}: </span>
                 )}
-                <span className="text-sm text-content">{note.content}</span>
+                <span className="text-sm">{note.content}</span>
               </div>
               <Button
                 aria-label="Delete note"
                 onClick={(e) => { e.stopPropagation(); void removeNote(note.id); }}
                 variant="ghost"
                 icon={<Trash2 size={13} />}
-                className="h-6 min-h-6 w-6 shrink-0 px-0 text-muted/50 hover:text-danger"
+                className="h-6 min-h-6 w-6 shrink-0 px-0 text-muted hover:text-danger"
               />
             </div>
           ))
