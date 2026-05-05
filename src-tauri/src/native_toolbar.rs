@@ -592,6 +592,11 @@ fn default_toolbar_actions() -> Vec<ToolbarActionItem> {
             title: "Read".into(),
             icon: "volume".into(),
         },
+        ToolbarActionItem {
+            id: "extract".into(),
+            title: "Extract".into(),
+            icon: "sparkles".into(),
+        },
     ]
 }
 
@@ -1179,6 +1184,7 @@ fn dispatch_toolbar_action(
         "read" | "speak" => speak_text(text),
         "note" => save_note_from_toolbar(app, text),
         "handoff" => handoff_to_app(text),
+        "extract" => open_popup_with_feature(app, text, "extract"),
         "translate" | "translation" => open_popup_with_feature(app, text, "translation"),
         feature_id => open_popup_with_feature(app, text, feature_id),
     }

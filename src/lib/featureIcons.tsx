@@ -1,7 +1,19 @@
-import { BookOpen, BookPlus, Clipboard, Copy, FileText, Highlighter, Languages, MessageSquare, NotebookPen, PenLine, Search, Send, Sparkles, Volume2, Wand2 } from "lucide-react";
+import {
+  // Existing
+  BookOpen, BookPlus, Clipboard, Copy, FileText, Highlighter, Languages,
+  MessageSquare, NotebookPen, PenLine, Search, Send, Sparkles, Volume2, Wand2,
+  // New
+  AtSign, Bold, Bookmark, Brain, Calendar, CheckCircle, Clock, Code,
+  Compass, Diamond, Download, Eye, File as FileIcon, Filter, Flag, Flame, Folder,
+  Globe, GraduationCap, Hash, Heading, Heart, Image, Info, Italic, Lightbulb,
+  Link, Mail, Mic, Moon, Palette, Pencil, Plus, RefreshCw, Rocket, Settings,
+  Share2, Shield, Star, Sun, Tag, Target, Terminal, Trophy, Type,
+  Upload, User, Wrench, Zap,
+} from "lucide-react";
 import type { AiFeatureIcon } from "../types";
 
 export const FEATURE_ICON_OPTIONS: Array<{ value: AiFeatureIcon; label: string }> = [
+  // Existing
   { value: "languages", label: "Languages" },
   { value: "wand", label: "Wand" },
   { value: "pen", label: "Pen" },
@@ -17,24 +29,131 @@ export const FEATURE_ICON_OPTIONS: Array<{ value: AiFeatureIcon; label: string }
   { value: "volume", label: "Volume" },
   { value: "notebook-pen", label: "Notebook" },
   { value: "send", label: "Send" },
+  // New
+  { value: "type", label: "Type" },
+  { value: "heading", label: "Heading" },
+  { value: "bookmark", label: "Bookmark" },
+  { value: "star", label: "Star" },
+  { value: "heart", label: "Heart" },
+  { value: "flag", label: "Flag" },
+  { value: "tag", label: "Tag" },
+  { value: "hash", label: "Hash" },
+  { value: "check-circle", label: "Check" },
+  { value: "info", label: "Info" },
+  { value: "help-circle", label: "Help" },
+  { value: "shield", label: "Shield" },
+  { value: "globe", label: "Globe" },
+  { value: "compass", label: "Compass" },
+  { value: "mail", label: "Mail" },
+  { value: "at-sign", label: "At sign" },
+  { value: "share-2", label: "Share" },
+  { value: "image", label: "Image" },
+  { value: "mic", label: "Mic" },
+  { value: "sun", label: "Sun" },
+  { value: "moon", label: "Moon" },
+  { value: "zap", label: "Zap" },
+  { value: "flame", label: "Flame" },
+  { value: "user", label: "User" },
+  { value: "clock", label: "Clock" },
+  { value: "calendar", label: "Calendar" },
+  { value: "code", label: "Code" },
+  { value: "terminal", label: "Terminal" },
+  { value: "graduation-cap", label: "Graduation" },
+  { value: "brain", label: "Brain" },
+  { value: "lightbulb", label: "Lightbulb" },
+  { value: "target", label: "Target" },
+  { value: "trophy", label: "Trophy" },
+  { value: "rocket", label: "Rocket" },
+  { value: "palette", label: "Palette" },
+  { value: "pencil", label: "Pencil" },
+  { value: "refresh-cw", label: "Refresh" },
+  { value: "download", label: "Download" },
+  { value: "upload", label: "Upload" },
+  { value: "link", label: "Link" },
+  { value: "eye", label: "Eye" },
+  { value: "settings", label: "Settings" },
+  { value: "wrench", label: "Wrench" },
+  { value: "plus", label: "Plus" },
+  { value: "filter", label: "Filter" },
+  { value: "folder", label: "Folder" },
+  { value: "file", label: "File" },
+  { value: "bold", label: "Bold" },
+  { value: "italic", label: "Italic" },
+  { value: "diamond", label: "Diamond" },
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const iconMap: Record<string, React.ComponentType<any>> = {
+  languages: Languages,
+  wand: Wand2,
+  pen: PenLine,
+  sparkles: Sparkles,
+  "book-plus": BookPlus,
+  "book-open": BookOpen,
+  highlighter: Highlighter,
+  "file-text": FileText,
+  message: MessageSquare,
+  clipboard: Clipboard,
+  copy: Copy,
+  search: Search,
+  volume: Volume2,
+  "notebook-pen": NotebookPen,
+  send: Send,
+  type: Type,
+  heading: Heading,
+  bookmark: Bookmark,
+  star: Star,
+  heart: Heart,
+  flag: Flag,
+  tag: Tag,
+  hash: Hash,
+  "check-circle": CheckCircle,
+  info: Info,
+  "help-circle": Info,
+  shield: Shield,
+  globe: Globe,
+  compass: Compass,
+  mail: Mail,
+  "at-sign": AtSign,
+  "share-2": Share2,
+  image: Image,
+  mic: Mic,
+  sun: Sun,
+  moon: Moon,
+  zap: Zap,
+  flame: Flame,
+  user: User,
+  clock: Clock,
+  calendar: Calendar,
+  code: Code,
+  terminal: Terminal,
+  "graduation-cap": GraduationCap,
+  brain: Brain,
+  lightbulb: Lightbulb,
+  target: Target,
+  trophy: Trophy,
+  rocket: Rocket,
+  palette: Palette,
+  pencil: Pencil,
+  "refresh-cw": RefreshCw,
+  download: Download,
+  upload: Upload,
+  link: Link,
+  eye: Eye,
+  settings: Settings,
+  wrench: Wrench,
+  plus: Plus,
+  filter: Filter,
+  folder: Folder,
+  file: FileIcon,
+  bold: Bold,
+  italic: Italic,
+  diamond: Diamond,
+};
+
 export function FeatureIcon({ icon, size = 16 }: { icon: AiFeatureIcon; size?: number }) {
-  if (icon === "languages") return <Languages size={size} />;
-  if (icon === "pen") return <PenLine size={size} />;
-  if (icon === "sparkles") return <Sparkles size={size} />;
-  if (icon === "book-plus") return <BookPlus size={size} />;
-  if (icon === "book-open") return <BookOpen size={size} />;
-  if (icon === "highlighter") return <Highlighter size={size} />;
-  if (icon === "file-text") return <FileText size={size} />;
-  if (icon === "message") return <MessageSquare size={size} />;
-  if (icon === "clipboard") return <Clipboard size={size} />;
-  if (icon === "copy") return <Copy size={size} />;
-  if (icon === "search") return <Search size={size} />;
-  if (icon === "volume") return <Volume2 size={size} />;
-  if (icon === "notebook-pen") return <NotebookPen size={size} />;
-  if (icon === "send") return <Send size={size} />;
-  return <Wand2 size={size} />;
+  const Comp = iconMap[icon];
+  return Comp ? <Comp size={size} /> : <Wand2 size={size} />;
 }
 
 export function isFeatureIcon(value: string): value is AiFeatureIcon {

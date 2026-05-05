@@ -34,8 +34,45 @@ export const DEFAULT_TRANSLATION_FEATURE: AiFeature = {
   icon: "languages",
 };
 
+const EXTRACT_PROMPT_TEMPLATE = `Analyze the exact selected or entered English text as a learning point.
+
+Text:
+{{text}}
+
+Rules:
+- Treat the whole selected text as the learning point.
+- Do not replace it with one word from inside the selected text.
+- If the selected text is a sentence, analyze the sentence meaning, structure, and reusable pattern.
+- If the selected text is a phrase, analyze the phrase as a complete expression.
+- If the selected text is a single word, analyze the word.
+
+Return concise Markdown only. Keep this exact label style when possible:
+
+### Learning point
+- **Type:** word / phrase / pattern
+- **Meaning:** concise meaning in Chinese
+- **Usage:** how to use it naturally
+- **Example:** one natural English sentence
+- **Note:** one short learning note`;
+
+export const DEFAULT_EXTRACT_FEATURE: AiFeature = {
+  id: "extract",
+  name: "Extract",
+  kind: "custom",
+  promptTemplate: EXTRACT_PROMPT_TEMPLATE,
+  outputMode: "plain_text",
+  enabled: true,
+  sortOrder: 10,
+  panelEnabled: true,
+  panelSortOrder: 10,
+  autoSaveToVocabulary: false,
+  targetLanguage: "Chinese",
+  speechEnabled: false,
+  icon: "sparkles",
+};
+
 export const DEFAULT_PANELS: Panel[] = [
-  { id: "translate", name: "Actions", icon: "wand", enabled: true, sortOrder: 0 },
+  { id: "translate", name: "Actions", icon: "file-text", enabled: true, sortOrder: 0 },
   { id: "notes", name: "Notes", icon: "notebook-pen", enabled: true, sortOrder: 1 },
   { id: "review", name: "Review", icon: "book-open", enabled: true, sortOrder: 2 },
 ];

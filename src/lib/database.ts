@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import { DEFAULT_CUSTOM_PROMPT_TEMPLATE, DEFAULT_PANELS, DEFAULT_PROMPT_TEMPLATE, DEFAULT_SETTINGS, DEFAULT_TOOLS, DEFAULT_TRANSLATION_FEATURE } from "./defaults";
+import { DEFAULT_CUSTOM_PROMPT_TEMPLATE, DEFAULT_EXTRACT_FEATURE, DEFAULT_PANELS, DEFAULT_PROMPT_TEMPLATE, DEFAULT_SETTINGS, DEFAULT_TOOLS, DEFAULT_TRANSLATION_FEATURE } from "./defaults";
 import { isFeatureIcon } from "./featureIcons";
 import { currentIsoDate, isTauriRuntime } from "./platform";
 import type { AiFeature, AiFeatureIcon, AiFeatureKind, AiOutputMode, AppSettings, LearningEntryInput, LearningEntryType, NoteEntry, NoteInput, Panel, ReviewUpdate, TagEntry, ToolbarTool, WordEntry, WordStatus } from "../types";
@@ -106,11 +106,12 @@ export async function loadToolbarTools(): Promise<ToolbarTool[]> {
   if (!rows[0]?.value) return DEFAULT_TOOLS.map((tool) => ({ ...tool }));
 
   try {
-    const saved = JSON.parse(rows[0].value) as Array<{ id: string; enabled: boolean; sortOrder: number; panelEnabled?: boolean; panelSortOrder?: number; config?: Record<string, unknown> }>;
+    const saved = JSON.parse(rows[0].value) as Array<{ id: string; enabled: boolean; sortOrder: number; panelEnabled?: boolean; panelSortOrder?: number; config?: Record<string, unknown>; icon?: string }>;
     return DEFAULT_TOOLS.map((defaultTool) => {
       const override = saved.find((item) => item.id === defaultTool.id);
       return {
         ...defaultTool,
+        icon: (override?.icon && isFeatureIcon(override.icon)) ? override.icon : defaultTool.icon,
         enabled: override?.enabled ?? defaultTool.enabled,
         sortOrder: override?.sortOrder ?? defaultTool.sortOrder,
         panelEnabled: override?.panelEnabled ?? defaultTool.panelEnabled,
@@ -124,7 +125,7 @@ export async function loadToolbarTools(): Promise<ToolbarTool[]> {
 }
 
 export async function saveToolbarTools(tools: ToolbarTool[]): Promise<void> {
-  const data = tools.map((tool) => ({ id: tool.id, enabled: tool.enabled, sortOrder: tool.sortOrder, panelEnabled: tool.panelEnabled, panelSortOrder: tool.panelSortOrder, config: tool.config }));
+  const data = tools.map((tool) => ({ id: tool.id, enabled: tool.enabled, sortOrder: tool.sortOrder, panelEnabled: tool.panelEnabled, panelSortOrder: tool.panelSortOrder, config: tool.config, icon: tool.icon }));
 
   if (!isTauriRuntime()) {
     localStorage.setItem("lexi.toolbarTools", JSON.stringify(data));
@@ -174,11 +175,12 @@ function loadBrowserToolbarTools(): ToolbarTool[] {
   if (!saved) return DEFAULT_TOOLS.map((tool) => ({ ...tool }));
 
   try {
-    const overrides = JSON.parse(saved) as Array<{ id: string; enabled: boolean; sortOrder: number; config?: Record<string, unknown> }>;
+    const overrides = JSON.parse(saved) as Array<{ id: string; enabled: boolean; sortOrder: number; config?: Record<string, unknown>; icon?: string }>;
     return DEFAULT_TOOLS.map((defaultTool) => {
       const override = overrides.find((item) => item.id === defaultTool.id);
       return {
         ...defaultTool,
+        icon: (override?.icon && isFeatureIcon(override.icon)) ? override.icon : defaultTool.icon,
         enabled: override?.enabled ?? defaultTool.enabled,
         sortOrder: override?.sortOrder ?? defaultTool.sortOrder,
         config: override?.config ?? defaultTool.config,
@@ -616,9 +618,10 @@ function normalizedAiFeature(feature: Partial<AiFeature>): AiFeature {
   const rawPromptTemplate = stringValue(feature.promptTemplate);
   const rawTargetLanguage = stringValue(feature.targetLanguage);
   const isTranslation = feature.kind === "translation" || rawId === DEFAULT_TRANSLATION_FEATURE.id;
+  const isExtract = rawId === DEFAULT_EXTRACT_FEATURE.id;
   return {
-    id: builtInFeatureId(isTranslation) ?? normalizedFeatureId(rawId || rawName),
-    name: rawName.trim() || defaultFeatureName(isTranslation),
+    id: builtInFeatureId(isTranslation) ?? (isExtract ? DEFAULT_EXTRACT_FEATURE.id : normalizedFeatureId(rawId || rawName)),
+    name: rawName.trim() || defaultFeatureName(isTranslation) || (isExtract ? DEFAULT_EXTRACT_FEATURE.name : ""),
     kind: builtInFeatureKind(isTranslation) ?? parseAiFeatureKind(stringValue(feature.kind)),
     promptTemplate: normalizedFeaturePrompt(isTranslation, rawPromptTemplate),
     outputMode: isTranslation ? "plain_text" : parseAiOutputMode(stringValue(feature.outputMode)),
@@ -669,15 +672,28 @@ function sortAiFeatures(a: AiFeature, b: AiFeature) {
 }
 
 function withBuiltInFeatures(features: AiFeature[]) {
+  const builtIn = [DEFAULT_TRANSLATION_FEATURE, DEFAULT_EXTRACT_FEATURE];
   const nextFeatures = [...features];
-  if (!nextFeatures.some((feature) => feature.id === DEFAULT_TRANSLATION_FEATURE.id)) {
-    nextFeatures.push(DEFAULT_TRANSLATION_FEATURE);
+
+  for (const builtInFeature of builtIn) {
+    const byId = nextFeatures.findIndex((f) => f.id === builtInFeature.id);
+    if (byId >= 0) continue;
+
+    const byName = nextFeatures.findIndex(
+      (f) => f.name.toLowerCase() === builtInFeature.name.toLowerCase(),
+    );
+    if (byName >= 0) {
+      nextFeatures[byName] = { ...nextFeatures[byName], id: builtInFeature.id };
+    } else {
+      nextFeatures.push(builtInFeature);
+    }
   }
+
   return nextFeatures;
 }
 
-function isBuiltInFeatureId(id: string) {
-  return id === DEFAULT_TRANSLATION_FEATURE.id;
+export function isBuiltInFeatureId(id: string) {
+  return id === DEFAULT_TRANSLATION_FEATURE.id || id === DEFAULT_EXTRACT_FEATURE.id;
 }
 
 function builtInFeatureId(isTranslation: boolean) {

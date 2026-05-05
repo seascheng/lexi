@@ -2,7 +2,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AlertCircle, Loader2, X } from "lucide-react";
+import { AlertCircle, Copy, Loader2, Trash2, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, LearningEntryInput, LearningEntryType, Panel, ToolbarTool, WordEntry } from "../../types";
 import { copyText, runAiFeatureStream, speakText } from "../../lib/ai";
@@ -427,7 +427,8 @@ export function TranslationWindow() {
             void emit("lexi://words-changed");
             saved = true;
           }
-          updateWorkspaceRun(runId, { status: "ready", result, streamingText: undefined, saved });
+          const learningEntry = feature.id === "extract" ? learningEntryDraft(text, result.outputText) : undefined;
+          updateWorkspaceRun(runId, { status: "ready", result, streamingText: undefined, saved, learningEntry });
         },
         onError: (message) => {
           updateWorkspaceRun(runId, { status: "error", message });
@@ -842,12 +843,12 @@ function RunTabs({
       </div>
       <button
         aria-label="Close all results"
-        className="shrink-0 rounded px-2 py-1 text-[11px] text-muted hover:bg-surfaceHover hover:text-strong transition-colors"
+        className="grid h-5 w-5 shrink-0 place-items-center rounded text-muted hover:bg-surfaceHover hover:text-strong transition-colors"
         onClick={onClearRuns}
         title="Close all results"
         type="button"
       >
-        All
+        <Trash2 size={11} />
       </button>
     </div>
   );
@@ -984,31 +985,29 @@ function WorkspaceRunCard({
           <div className="leading-[1.65] tracking-[-0.01em] text-content">
             <MarkdownRenderer content={run.result.outputText} />
           </div>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-center gap-2">
             {run.learningEntry ? (
               <EntryTypeTags disabled={run.saved} entryType={run.learningEntry.entry_type ?? "phrase"} onEntryTypeChange={onEntryTypeChange} />
-            ) : <span />}
-            <div className="flex gap-1">
+            ) : null}
+            <button
+              aria-label="Copy result"
+              className="grid h-5 w-5 place-items-center rounded text-muted hover:bg-surfaceHover hover:text-strong transition-colors"
+              onClick={() => copyText(run.result?.outputText ?? "")}
+              title="Copy result"
+              type="button"
+            >
+              <Copy size={12} />
+            </button>
+            {run.learningEntry ? (
               <button
-                aria-label="Copy result"
-                className="rounded px-2 py-1 text-[11px] text-muted hover:bg-surfaceHover hover:text-strong transition-colors"
-                onClick={() => copyText(run.result?.outputText ?? "")}
-                title="Copy result"
+                disabled={run.saved}
+                className="rounded-md px-3 py-1 text-[11px] font-medium text-white bg-accent hover:bg-accentHover disabled:opacity-40 transition-colors"
+                onClick={onSave}
                 type="button"
               >
-                Copy
+                {run.saved ? "Saved" : "Save"}
               </button>
-              {run.learningEntry ? (
-                <button
-                  disabled={run.saved}
-                  className="rounded-[3px] px-2 py-0.5 text-[10px] font-medium text-accentFg bg-accent hover:bg-accentHover disabled:opacity-50"
-                  onClick={onSave}
-                  type="button"
-                >
-                  {run.saved ? "Saved" : "Save"}
-                </button>
-              ) : null}
-            </div>
+            ) : null}
           </div>
         </>
       ) : null}
@@ -1049,12 +1048,12 @@ function EntryTypeTags({
   onEntryTypeChange: (type: LearningEntryType) => void;
 }) {
   return (
-    <div className="flex gap-0.5">
+    <div className="flex rounded-md border border-strong/10 p-0.5">
       {(["word", "phrase", "pattern"] as LearningEntryType[]).map((type) => (
         <button
-          className={`rounded-[3px] px-1.5 py-0.5 text-[9px] font-medium transition ${
+          className={`rounded-[5px] px-2 py-0.5 text-[10px] font-medium transition ${
             entryType === type
-              ? "bg-surface text-strong"
+              ? "bg-strong/10 text-strong"
               : "text-muted hover:text-strong"
           } disabled:cursor-not-allowed disabled:opacity-40`}
           disabled={disabled}
@@ -1071,6 +1070,24 @@ function EntryTypeTags({
 
 function newRunId() {
   return `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function learningEntryDraft(selectedText: string, analysis: string): LearningEntryInput {
+  const meaning = markdownLabel(analysis, "Meaning");
+  const usage = markdownLabel(analysis, "Usage");
+  const example = markdownLabel(analysis, "Example");
+  const note = markdownLabel(analysis, "Note");
+
+  return {
+    word: selectedText,
+    translation: meaning || "Learning point extracted from selected text",
+    pos: markdownLabel(analysis, "Type") || inferredEntryType(selectedText),
+    definition: [usage, note].filter(Boolean).join(" "),
+    example,
+    entry_type: parsedEntryType(markdownLabel(analysis, "Type"), selectedText),
+    source_text: selectedText,
+    note: analysis,
+  };
 }
 
 function isSingleWordTranslation(inputText: string, result: AiRunResult) {

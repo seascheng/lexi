@@ -6,7 +6,7 @@ export type WordStatus = "new" | "learning" | "mastered";
 export type ReviewRating = "again" | "hard" | "good" | "easy";
 export type AiFeatureKind = "translation" | "custom";
 export type AiOutputMode = "translation_json" | "plain_text";
-export type AiFeatureIcon = "languages" | "wand" | "pen" | "sparkles" | "book-plus" | "book-open" | "highlighter" | "file-text" | "message" | "clipboard" | "copy" | "search" | "volume" | "notebook-pen" | "send";
+export type AiFeatureIcon = "languages" | "wand" | "pen" | "sparkles" | "book-plus" | "book-open" | "highlighter" | "file-text" | "message" | "clipboard" | "copy" | "search" | "volume" | "notebook-pen" | "send" | "type" | "heading" | "bookmark" | "star" | "heart" | "flag" | "tag" | "hash" | "check-circle" | "info" | "help-circle" | "shield" | "globe" | "compass" | "mail" | "at-sign" | "share-2" | "image" | "mic" | "sun" | "moon" | "zap" | "flame" | "user" | "clock" | "calendar" | "code" | "terminal" | "graduation-cap" | "brain" | "lightbulb" | "target" | "trophy" | "rocket" | "palette" | "pencil" | "refresh-cw" | "download" | "upload" | "link" | "eye" | "settings" | "wrench" | "plus" | "filter" | "folder" | "file" | "bold" | "italic" | "diamond";
 export type ToolbarToolId = "copy" | "search" | "read" | "note" | "handoff";
 export type LearningEntryType = "word" | "phrase" | "pattern";
 

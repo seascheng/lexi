@@ -18,6 +18,7 @@ import {
 import {
   deleteAiFeature,
   deleteTag,
+  isBuiltInFeatureId,
   listAiFeatures,
   listPanels,
   listTags,
@@ -32,13 +33,12 @@ import {
 } from "../lib/database";
 import { errorMessage } from "../lib/errors";
 import {
-  FEATURE_ICON_OPTIONS,
   FeatureIcon,
-  isFeatureIcon,
 } from "../lib/featureIcons";
 import { syncNativeToolbar } from "../lib/nativeToolbar";
 import { isTauriRuntime } from "../lib/platform";
 import { Button } from "../components/ui/Button";
+import { IconPicker } from "../components/ui/IconPicker";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
 
 type DraftItem =
@@ -293,6 +293,20 @@ export function ConfigsPage() {
     });
   }
 
+  async function updateToolIcon(toolId: string, icon: AiFeatureIcon) {
+    const next = tools.map((t) => (t.id === toolId ? { ...t, icon } : t));
+    setTools(next);
+    await saveToolbarTools(next);
+    setDraft((current) => {
+      if (current?.kind === "tool" && current.data.id === toolId) {
+        return { ...current, data: { ...current.data, icon } };
+      }
+      return current;
+    });
+    await syncNativeToolbar(settings, features, next);
+    await notifyChanged();
+  }
+
   // --- Feature CRUD ---
 
   function createFeature() {
@@ -368,6 +382,7 @@ export function ConfigsPage() {
   async function savePanelDraft(panel: Panel) {
     await savePanel(panel);
     setPanels(await listPanels());
+    await notifyChanged();
   }
 
   async function togglePanelEnabled(panelId: string) {
@@ -498,6 +513,7 @@ export function ConfigsPage() {
               const p = panels.find(p => p.id === "translate");
               if (p) void savePanelDraft({ ...p, enabled });
             }}
+            onSave={savePanelDraft}
             onToggle={togglePanelItem}
             onReorder={(from: number, to: number) => void applyPanelReorder(from, to)}
           />
@@ -510,6 +526,7 @@ export function ConfigsPage() {
           <ToolConfigPanel
             tool={draft.data}
             onUpdateConfig={(c) => void updateToolConfig(draft.data.id, c)}
+            onUpdateIcon={(icon) => void updateToolIcon(draft.data.id, icon)}
           />
         ) : draft?.kind === "feature" ? (
           <FeatureConfigPanel
@@ -1128,9 +1145,11 @@ function PanelConfigPanel({
 function ToolConfigPanel({
   tool,
   onUpdateConfig,
+  onUpdateIcon,
 }: {
   tool: ToolbarTool;
   onUpdateConfig: (config: Record<string, unknown>) => void;
+  onUpdateIcon: (icon: AiFeatureIcon) => void;
 }) {
   const config = tool.config;
 
@@ -1142,6 +1161,10 @@ function ToolConfigPanel({
           <p className="text-sm text-muted">{TOOL_DESCRIPTIONS[tool.id]}</p>
         </div>
       </div>
+
+      <Field label="Icon">
+        <IconPicker value={tool.icon} onChange={onUpdateIcon} />
+      </Field>
 
       {tool.id === "copy" && (
         <div className="rounded-md bg-surface/50 px-3 py-2">
@@ -1295,7 +1318,7 @@ function FeatureConfigPanel({
           </p>
         </div>
         <div className="flex gap-2">
-          {draft.kind === "custom" ? (
+          {draft.kind === "custom" && !isBuiltInFeatureId(draft.id) ? (
             <Button
               onClick={onRemove}
               variant="danger"
@@ -1319,18 +1342,10 @@ function FeatureConfigPanel({
           />
         </Field>
         <Field label="Icon">
-          <Select
-            onChange={(e) =>
-              onUpdate({ icon: selectedFeatureIcon(e.target.value) })
-            }
+          <IconPicker
             value={draft.icon}
-          >
-            {FEATURE_ICON_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
+            onChange={(icon) => onUpdate({ icon })}
+          />
         </Field>
         {draft.kind === "translation" ? (
           <Field label="Target language">
@@ -1389,12 +1404,14 @@ function TranslatePanelConfig({
   panel,
   items,
   onTogglePanelEnabled,
+  onSave,
   onToggle,
   onReorder,
 }: {
   panel: Panel | undefined;
   items: { id: string; name: string; icon: AiFeatureIcon; enabled: boolean; sortOrder: number; kind: "tool" | "ai" }[];
   onTogglePanelEnabled: (enabled: boolean) => void;
+  onSave: (panel: Panel) => void;
   onToggle: (item: { id: string; kind: "tool" | "ai" }) => void;
   onReorder: (from: number, to: number) => void;
 }) {
@@ -1408,6 +1425,12 @@ function TranslatePanelConfig({
         </div>
         <ToggleSwitch checked={panel.enabled} onChange={onTogglePanelEnabled} />
       </div>
+      <Field label="Icon">
+        <IconPicker
+          value={panel.icon}
+          onChange={(icon) => onSave({ ...panel, icon })}
+        />
+      </Field>
       <PanelConfigPanel items={items} onToggle={onToggle} onReorder={onReorder} />
     </div>
   );
@@ -1432,7 +1455,12 @@ function GenericPanelConfig({
           onChange={(enabled) => onSave({ ...panel, enabled })}
         />
       </div>
-      <p className="text-xs text-muted">Panel-specific settings coming soon.</p>
+      <Field label="Icon">
+        <IconPicker
+          value={panel.icon}
+          onChange={(icon) => onSave({ ...panel, icon })}
+        />
+      </Field>
     </div>
   );
 }
@@ -1472,10 +1500,6 @@ async function notifyChanged() {
   if (isTauriRuntime()) {
     await emit("lexi://features-changed");
   }
-}
-
-function selectedFeatureIcon(value: string): AiFeatureIcon {
-  return isFeatureIcon(value) ? value : "wand";
 }
 
 // ── Note Tag Config ──────────────────────────────────
