@@ -599,6 +599,11 @@ export function TranslationWindow() {
         await addNote({ content: text });
         await emit("lexi://notes-changed");
         break;
+      case "handoff": {
+        const targetApp = ((tool?.config?.targetApp as string) ?? "ChatGPT");
+        await invoke("handoff_to_app_cmd", { text, targetApp });
+        break;
+      }
     }
   }
 

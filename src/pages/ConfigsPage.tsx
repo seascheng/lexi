@@ -1225,6 +1225,39 @@ function ToolConfigPanel({
       )}
 
       {tool.id === "note" && <NoteTagConfig />}
+
+      {tool.id === "handoff" && (
+        <div className="grid gap-2.5">
+          <Field label="Target app">
+            <Select
+              value={(config._appMode as string) === "custom" ? "custom" : ((config.targetApp as string) || "ChatGPT")}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === "custom") {
+                  onUpdateConfig({ ...config, targetApp: "", _appMode: "custom" });
+                } else {
+                  onUpdateConfig({ ...config, targetApp: val, _appMode: undefined });
+                }
+              }}
+            >
+              <option value="ChatGPT">ChatGPT</option>
+              <option value="Claude">Claude</option>
+              <option value="custom">Custom</option>
+            </Select>
+          </Field>
+          {(config._appMode as string) === "custom" && (
+            <Field label="App name" hint="Application name in /Applications, without .app (e.g. ChatGPT, Claude).">
+              <Input
+                value={(config.targetApp as string) ?? ""}
+                onChange={(e) =>
+                  onUpdateConfig({ ...config, targetApp: e.target.value })
+                }
+                placeholder="e.g. ChatGPT, Claude"
+              />
+            </Field>
+          )}
+        </div>
+      )}
     </>
   );
 }

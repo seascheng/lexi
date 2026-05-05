@@ -83,6 +83,7 @@ static TOOLBAR_PORT: OnceLock<Mutex<Option<u16>>> = OnceLock::new();
 static TOOLBAR_ACTIONS: OnceLock<Mutex<Vec<ToolbarActionItem>>> = OnceLock::new();
 static TOOLBAR_ENABLED: OnceLock<Mutex<bool>> = OnceLock::new();
 static POPUP_SHORTCUT: OnceLock<Mutex<ShortcutConfig>> = OnceLock::new();
+static HANDOFF_TARGET_APP: OnceLock<Mutex<String>> = OnceLock::new();
 
 /// Parsed keyboard shortcut for showing the popup.
 #[derive(Clone, Copy)]
@@ -1170,11 +1171,14 @@ fn dispatch_toolbar_action(
         return Err("empty text".into());
     }
 
+    log_native(&format!("dispatch: action={}", action.action));
+
     match action.action.as_str() {
         "copy" => copy_to_clipboard(text),
         "search" => open_search(text),
         "read" | "speak" => speak_text(text),
         "note" => save_note_from_toolbar(app, text),
+        "handoff" => handoff_to_app(text),
         "translate" | "translation" => open_popup_with_feature(app, text, "translation"),
         feature_id => open_popup_with_feature(app, text, feature_id),
     }
@@ -1244,6 +1248,70 @@ fn speak_text(text: String) -> Result<(), String> {
         .arg(text)
         .spawn()
         .map_err(|error| format!("Could not start speech: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_handoff_target(target_app: String) -> Result<(), String> {
+    log_native(&format!("set_handoff_target: '{}'", target_app));
+    let mut current = HANDOFF_TARGET_APP
+        .get_or_init(|| Mutex::new("ChatGPT".to_string()))
+        .lock()
+        .map_err(|_| "handoff target app state is unavailable".to_string())?;
+    *current = target_app;
+    Ok(())
+}
+
+fn handoff_to_app(text: String) -> Result<(), String> {
+    let target_app = HANDOFF_TARGET_APP
+        .get_or_init(|| Mutex::new("ChatGPT".to_string()))
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_else(|_| "ChatGPT".to_string());
+
+    log_native(&format!("handoff_to_app: target_app='{}'", target_app));
+    do_handoff(&text, &target_app)
+}
+
+#[tauri::command]
+pub fn handoff_to_app_cmd(text: String, target_app: String) -> Result<(), String> {
+    do_handoff(&text, &target_app)
+}
+
+fn do_handoff(text: &str, target_app: &str) -> Result<(), String> {
+    let app = if target_app.is_empty() { "ChatGPT" } else { target_app };
+    log_native(&format!("handoff: target={}, text_len={}", app, text.len()));
+
+    // Write text to clipboard
+    write_clipboard(text)?;
+
+    // AppleScript: activate target app, then paste
+    let script = format!(
+        r#"set the clipboard to "{}"
+tell application "{}" to activate
+delay 1.0
+tell application "System Events"
+    keystroke "v" using command down
+end tell"#,
+        text.replace('\\', "\\\\").replace('"', "\\\""),
+        app.replace('\\', "\\\\").replace('"', "\\\""),
+    );
+
+    log_native(&format!("handoff: script len={}", script.len()));
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|error| format!("Could not run handoff: {error}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log_native(&format!("handoff: osascript failed: {}", stderr));
+        return Err(format!("osascript error: {}", stderr));
+    }
+
+    log_native("handoff: completed successfully");
     Ok(())
 }
 

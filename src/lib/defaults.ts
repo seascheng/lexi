@@ -60,6 +60,7 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
   search: "Search selected text in Google.",
   read: "Read selected text aloud.",
   note: "Save selected text as a note.",
+  handoff: "Send selected text to an external AI app.",
 };
 
 export const DEFAULT_TOOLS: ToolbarTool[] = [
@@ -67,4 +68,5 @@ export const DEFAULT_TOOLS: ToolbarTool[] = [
   { id: "search", name: "Search", description: TOOL_DESCRIPTIONS.search, icon: "search", enabled: true, sortOrder: 110, panelEnabled: true, panelSortOrder: 110, config: { engine: "google" } },
   { id: "read", name: "Read", description: TOOL_DESCRIPTIONS.read, icon: "volume", enabled: true, sortOrder: 120, panelEnabled: true, panelSortOrder: 120, config: { engine: "system" } },
   { id: "note", name: "Note", description: TOOL_DESCRIPTIONS.note, icon: "notebook-pen", enabled: true, sortOrder: 130, panelEnabled: true, panelSortOrder: 130, config: {} },
+  { id: "handoff", name: "Handoff", description: TOOL_DESCRIPTIONS.handoff, icon: "send", enabled: false, sortOrder: 140, panelEnabled: true, panelSortOrder: 140, config: { targetApp: "ChatGPT" } },
 ];

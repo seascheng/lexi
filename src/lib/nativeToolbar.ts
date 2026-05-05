@@ -23,6 +23,13 @@ export async function syncNativeToolbar(
     console.warn("Failed to sync native toolbar", error);
   });
 
+  // Sync handoff target app
+  const handoffTool = tools.find((t) => t.id === "handoff");
+  if (handoffTool) {
+    const targetApp = ((handoffTool.config?.targetApp as string) ?? "ChatGPT");
+    await invoke("set_handoff_target", { targetApp }).catch(() => {});
+  }
+
   if (!settings.toolbarEnabled) {
     return;
   }
