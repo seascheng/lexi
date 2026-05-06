@@ -890,6 +890,17 @@ function AiForm({
     if (textareaRef.current) resizeTextarea(textareaRef.current);
   }, [inputText]);
 
+  // Re-measure when container resizes (window drag, panel resize)
+  useEffect(() => {
+    const container = textareaRef.current?.parentElement;
+    if (!container) return;
+    const observer = new ResizeObserver(() => {
+      if (textareaRef.current) resizeTextarea(textareaRef.current);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [buttonGroupWidth]);
+
   return (
     <form className="px-2 pt-1" onSubmit={onSubmit}>
       <div className={`flex gap-x-1 gap-y-1 rounded-lg border border-strong/10 bg-input p-1 ${isMultiline ? "flex-col" : "items-center"}`}>
