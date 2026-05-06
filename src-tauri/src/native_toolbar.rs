@@ -336,6 +336,7 @@ pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
 
     spawn_action_server(listener, app_handle.clone());
     launch_helper(app, action_port, toolbar_port)?;
+    wait_for_helper(toolbar_port);
     spawn_selection_monitor(app_handle, toolbar_port);
     Ok(())
 }
@@ -398,8 +399,18 @@ pub fn set_native_toolbar_theme(theme: String) -> Result<(), String> {
     })
     .map_err(|error| format!("Could not serialize toolbar theme: {error}"))?;
 
-    post_to_helper(port, "/theme", &body)
-        .map_err(|error| format!("Could not send toolbar theme: {error}"))
+    // Retry a few times — helper may still be launching
+    for attempt in 0..5 {
+        match post_to_helper(port, "/theme", &body) {
+            Ok(()) => return Ok(()),
+            Err(e) if attempt < 4 => {
+                log_native(&format!("theme send attempt {} failed: {e}, retrying...", attempt + 1));
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            Err(e) => return Err(format!("Could not send toolbar theme: {e}")),
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1144,6 +1155,19 @@ fn show_toolbar(toolbar_port: u16, text: String, position: CursorPosition, pendi
     }
 }
 
+fn wait_for_helper(toolbar_port: u16) {
+    for attempt in 0..20 {
+        if TcpStream::connect((IPC_HOST, toolbar_port)).is_ok() {
+            log_native(&format!("helper ready on port {toolbar_port} after {attempt} tries"));
+            eprintln!("[toolbar] helper ready on port {toolbar_port}");
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    log_native(&format!("helper NOT ready on port {toolbar_port} after 5s"));
+    eprintln!("[toolbar] WARNING: helper did not respond on port {toolbar_port} after 5s");
+}
+
 fn post_to_helper(port: u16, path: &str, body: &str) -> std::io::Result<()> {
     let mut stream = TcpStream::connect((IPC_HOST, port))?;
     write!(
@@ -1151,20 +1175,6 @@ fn post_to_helper(port: u16, path: &str, body: &str) -> std::io::Result<()> {
         "POST {path} HTTP/1.1\r\nHost: {IPC_HOST}:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
-}
-
-fn copy_to_clipboard(text: String) -> Result<(), String> {
-    write_clipboard(&text)
-}
-
-fn open_search(text: String) -> Result<(), String> {
-    let query = urlencoding::encode(&text);
-    let url = format!("https://www.google.com/search?q={query}");
-    std::process::Command::new("open")
-        .arg(&url)
-        .spawn()
-        .map_err(|e| format!("failed to open URL: {e}"))?;
-    Ok(())
 }
 
 fn dispatch_toolbar_action(
@@ -1178,24 +1188,23 @@ fn dispatch_toolbar_action(
 
     log_native(&format!("dispatch: action={}", action.action));
 
-    match action.action.as_str() {
-        "copy" => copy_to_clipboard(text),
-        "search" => open_search(text),
-        "read" | "speak" => speak_text(text),
-        "note" => save_note_from_toolbar(app, text),
-        "handoff" => handoff_to_app(text),
-        "extract" => open_popup_with_feature(app, text, "extract"),
-        "translate" | "translation" => open_popup_with_feature(app, text, "translation"),
-        feature_id => open_popup_with_feature(app, text, feature_id),
-    }
-}
+    let action_id = action.action.as_str();
 
-fn save_note_from_toolbar(app: &tauri::AppHandle, text: String) -> Result<(), String> {
-    app.emit(
-        "lexi://save-note",
-        serde_json::json!({ "text": text }),
-    )
-    .map_err(|error| format!("Could not emit save-note event: {error}"))
+    // Built-in tools: fixed backend execution
+    match action_id {
+        "copy" | "search" | "read" | "speak" | "note" | "handoff" => {
+            let app_handle = app.clone();
+            let id = action_id.to_string();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = crate::commands::tools::execute_tool(app_handle, id, text).await {
+                    eprintln!("[toolbar] tool failed: {e}");
+                }
+            });
+            Ok(())
+        }
+        // Features (AI): open popup to run feature
+        _ => open_popup_with_feature(app, text, action_id),
+    }
 }
 
 fn open_popup_with_feature(
@@ -1216,6 +1225,21 @@ fn open_popup_with_feature(
 }
 
 fn show_popup(app: &tauri::AppHandle) -> Result<(), String> {
+    let handle = app.clone();
+    let task_handle = handle.clone();
+
+    handle
+        .run_on_main_thread(move || {
+            if let Err(error) = show_popup_now(&task_handle) {
+                log_native(&format!("Could not show popup: {error}"));
+            }
+        })
+        .map_err(|error| format!("Could not schedule popup show: {error}"))?;
+
+    Ok(())
+}
+
+fn show_popup_now(app: &tauri::AppHandle) -> Result<(), String> {
     let Some(window) = app.get_webview_window("popup_card") else {
         return Err("popup window was not found".into());
     };
@@ -1249,14 +1273,6 @@ fn show_popup(app: &tauri::AppHandle) -> Result<(), String> {
     .map_err(|error| format!("Could not emit popup shown: {error}"))
 }
 
-fn speak_text(text: String) -> Result<(), String> {
-    Command::new("say")
-        .arg(text)
-        .spawn()
-        .map_err(|error| format!("Could not start speech: {error}"))?;
-    Ok(())
-}
-
 #[tauri::command]
 pub fn set_handoff_target(target_app: String) -> Result<(), String> {
     log_native(&format!("set_handoff_target: '{}'", target_app));
@@ -1266,17 +1282,6 @@ pub fn set_handoff_target(target_app: String) -> Result<(), String> {
         .map_err(|_| "handoff target app state is unavailable".to_string())?;
     *current = target_app;
     Ok(())
-}
-
-fn handoff_to_app(text: String) -> Result<(), String> {
-    let target_app = HANDOFF_TARGET_APP
-        .get_or_init(|| Mutex::new("ChatGPT".to_string()))
-        .lock()
-        .map(|g| g.clone())
-        .unwrap_or_else(|_| "ChatGPT".to_string());
-
-    log_native(&format!("handoff_to_app: target_app='{}'", target_app));
-    do_handoff(&text, &target_app)
 }
 
 #[tauri::command]
@@ -1400,19 +1405,22 @@ fn launch_helper(app: &tauri::App, action_port: u16, toolbar_port: u16) -> anyho
             "Native selection toolbar helper app was not found: {}",
             helper_app.display()
         );
+        log_native(&format!("helper not found at {}", helper_app.display()));
         return Ok(());
     }
 
-    Command::new("open")
-        .arg("-n")
-        .arg("-g")
-        .arg(helper_app)
-        .arg("--args")
+    log_native(&format!("launching helper at {}", helper_app.display()));
+
+    let helper_bin = helper_app.join("Contents/MacOS/LexiSelectionHelper");
+    Command::new(&helper_bin)
         .arg("--action-port")
         .arg(action_port.to_string())
         .arg("--toolbar-port")
         .arg(toolbar_port.to_string())
         .spawn()?;
+
+    eprintln!("[toolbar] helper launch attempted: action={action_port}, toolbar={toolbar_port}");
+    log_native(&format!("helper launch attempted, action={action_port}, toolbar={toolbar_port}"));
     Ok(())
 }
 

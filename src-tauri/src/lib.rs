@@ -4,6 +4,7 @@ mod native_toolbar;
 
 use commands::ai::{run_ai_prompt, run_ai_prompt_stream};
 use commands::speech::speak_text;
+use commands::tools::execute_tool;
 use commands::window::{set_popup_height, start_popup_resize};
 use cursor::cursor_position;
 use native_toolbar::{
@@ -30,9 +31,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             cursor_position,
             configure_native_toolbar,
+            execute_tool,
             hide_native_toolbar,
-            set_handoff_target,
             handoff_to_app_cmd,
+            set_handoff_target,
             run_ai_prompt,
             run_ai_prompt_stream,
             set_native_toolbar_actions,

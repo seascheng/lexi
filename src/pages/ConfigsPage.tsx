@@ -282,15 +282,16 @@ export function ConfigsPage() {
     toolId: string,
     config: Record<string, unknown>,
   ) {
-    const next = tools.map((t) => (t.id === toolId ? { ...t, config } : t));
-    setTools(next);
-    await saveToolbarTools(next);
     setDraft((current) => {
       if (current?.kind === "tool" && current.data.id === toolId) {
         return { ...current, data: { ...current.data, config } };
       }
       return current;
     });
+    const next = tools.map((t) => (t.id === toolId ? { ...t, config } : t));
+    setTools(next);
+    await saveToolbarTools(next);
+    await emit("lexi://tools-changed");
   }
 
   async function updateToolIcon(toolId: string, icon: AiFeatureIcon) {
@@ -1216,30 +1217,37 @@ function ToolConfigPanel({
               }
             >
               <option value="system">System built-in (macOS say)</option>
-              <option value="api">API service</option>
+              <option value="volcengine">Volcengine TTS</option>
             </Select>
           </Field>
-          {config.engine === "api" && (
+          {config.engine === "volcengine" && (
             <>
-              <Field
-                label="API URL"
-                hint="TTS service endpoint that accepts POST with text."
-              >
+              <Field label="APP ID" hint="Volcengine speech application ID.">
                 <Input
-                  value={(config.apiUrl as string) ?? ""}
+                  value={(config.volcAppId as string) ?? ""}
                   onChange={(e) =>
-                    onUpdateConfig({ ...config, apiUrl: e.target.value })
+                    onUpdateConfig({ ...config, volcAppId: e.target.value })
                   }
-                  placeholder="https://api.example.com/tts"
+                  placeholder="9989685160"
                 />
               </Field>
-              <Field label="Voice" hint="Voice name or ID for the API service.">
+              <Field label="Access Token" hint="Volcengine speech access token.">
                 <Input
-                  value={(config.voice as string) ?? ""}
+                  type="password"
+                  value={(config.volcAccessToken as string) ?? ""}
                   onChange={(e) =>
-                    onUpdateConfig({ ...config, voice: e.target.value })
+                    onUpdateConfig({ ...config, volcAccessToken: e.target.value })
                   }
-                  placeholder="alloy"
+                  placeholder="Access Token"
+                />
+              </Field>
+              <Field label="Voice" hint="Voice ID, e.g. zh_female_cancan_mars_bigtts">
+                <Input
+                  value={(config.volcVoice as string) ?? ""}
+                  onChange={(e) =>
+                    onUpdateConfig({ ...config, volcVoice: e.target.value })
+                  }
+                  placeholder="zh_female_cancan_mars_bigtts"
                 />
               </Field>
             </>

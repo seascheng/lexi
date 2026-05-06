@@ -5,9 +5,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AlertCircle, Copy, Loader2, Trash2, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, LearningEntryInput, LearningEntryType, Panel, ToolbarTool, WordEntry } from "../../types";
-import { copyText, runAiFeatureStream, speakText } from "../../lib/ai";
+import { copyText, runAiFeatureStream } from "../../lib/ai";
 import { applyAppearanceSettings } from "../../lib/appearance";
-import { addWord, addNote, listAiFeatures, listPanels, listWords, loadSettings, loadToolbarTools, savePopupPosition, savePopupSize, saveSettings } from "../../lib/database";
+import { addWord, listAiFeatures, listPanels, listWords, loadSettings, loadToolbarTools, savePopupPosition, savePopupSize, saveSettings } from "../../lib/database";
 import { errorMessage } from "../../lib/errors";
 import { FeatureIcon } from "../../lib/featureIcons";
 import { syncNativeToolbar } from "../../lib/nativeToolbar";
@@ -71,6 +71,7 @@ export function TranslationWindow() {
   const sizeSaveTimerRef = useRef<number>();
   const shellRef = useRef<HTMLElement>(null);
   const featuresRef = useRef<AiFeature[]>([]);
+  const toolsRef = useRef<ToolbarTool[]>([]);
   const inputTextRef = useRef("");
   const runsRef = useRef<WorkspaceRun[]>([]);
   const isPinnedRef = useRef(false);
@@ -106,6 +107,10 @@ export function TranslationWindow() {
   useEffect(() => {
     featuresRef.current = features;
   }, [features]);
+
+  useEffect(() => {
+    toolsRef.current = tools;
+  }, [tools]);
 
   useEffect(() => {
     inputTextRef.current = inputText;
@@ -175,18 +180,15 @@ export function TranslationWindow() {
       listen("lexi://features-changed", () => {
         void reloadFeatures();
       }),
+      listen("lexi://tools-changed", () => {
+        void loadToolbarTools().then((t) => setTools(t));
+      }),
       listen("lexi://popup-shown", () => {
         resetPopupWorkspace();
       }),
       listen("lexi://words-changed", async () => {
         const refreshed = await listWords();
         setWords(refreshed);
-      }),
-      listen<{ text: string }>("lexi://save-note", async (event) => {
-        const isPopup = new URLSearchParams(window.location.search).get("window") === "popup_card";
-        if (!isPopup) return;
-        await addNote({ content: event.payload.text });
-        await emit("lexi://notes-changed");
       }),
     ];
 
@@ -577,35 +579,7 @@ export function TranslationWindow() {
   async function handleToolAction(toolId: string) {
     const text = inputTextRef.current.trim();
     if (!text) return;
-    const tool = tools.find((t) => t.id === toolId);
-    switch (toolId) {
-      case "copy":
-        await copyText(text);
-        break;
-      case "search": {
-        const encoded = encodeURIComponent(text);
-        let url: string;
-        const engine = (tool?.config?.engine as string) ?? "google";
-        if (engine === "bing") url = `https://www.bing.com/search?q=${encoded}`;
-        else if (engine === "duckduckgo") url = `https://duckduckgo.com/?q=${encoded}`;
-        else if (engine === "custom") url = ((tool?.config?.customUrl as string) || "").replace("{query}", encoded);
-        else url = `https://www.google.com/search?q=${encoded}`;
-        window.open(url, "_blank");
-        break;
-      }
-      case "read":
-        await speakText(text);
-        break;
-      case "note":
-        await addNote({ content: text });
-        await emit("lexi://notes-changed");
-        break;
-      case "handoff": {
-        const targetApp = ((tool?.config?.targetApp as string) ?? "ChatGPT");
-        await invoke("handoff_to_app_cmd", { text, targetApp });
-        break;
-      }
-    }
+    await invoke("execute_tool", { id: toolId, text });
   }
 
   async function saveLearningEntry(runId: string) {
@@ -634,6 +608,7 @@ export function TranslationWindow() {
   return (
     <main className="translation-window-shell h-screen bg-transparent" ref={shellRef}>
       <FloatingFrame
+        className={isBar ? undefined : "translation-frame-popup"}
         isPinned={isPinned}
         panels={panels.filter(p => p.enabled).sort((a, b) => a.sortOrder - b.sortOrder)}
         activePanelId={activePanelId}

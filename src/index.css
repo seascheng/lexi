@@ -127,9 +127,34 @@ body {
   background: rgb(var(--color-floating) / var(--app-surface-opacity));
 }
 
+.translation-frame-popup {
+  border: 1px solid rgb(var(--color-border) / 0.9);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+}
+
+:root[data-theme="dark"] .translation-frame-popup {
+  border-color: rgb(255 255 255 / 0.1);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+:root[data-theme="light"] .translation-frame-popup {
+  border-color: rgb(18 18 24 / 0.1);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.55);
+}
+
 :root[data-background-style="transparent"] .translation-frame,
 :root[data-background-style="macos_glass_clear"] .translation-frame {
   box-shadow: 0 0 0 1px rgb(var(--color-strong) / 0.08);
+}
+
+:root[data-background-style="transparent"] .translation-frame-popup,
+:root[data-background-style="macos_glass_clear"] .translation-frame-popup {
+  border-color: rgb(var(--color-strong) / 0.14);
+}
+
+:root[data-theme="light"][data-background-style="transparent"] .translation-frame-popup,
+:root[data-theme="light"][data-background-style="macos_glass_clear"] .translation-frame-popup {
+  border-color: rgb(20 20 24 / 0.11);
 }
 
 :root[data-background-style="macos_glass_clear"] .translation-frame {

@@ -92,74 +92,74 @@ No router library. URL-param based:
 <claude-mem-context>
 # Memory Context
 
-# [lexi] recent context, 2026-05-04 12:24pm GMT+8
+# [lexi] recent context, 2026-05-06 11:49am GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (16,481t read) | 0t work
+Stats: 50 obs (16,526t read) | 0t work
 
-### May 3, 2026
-685 9:31p 🟣 Settings UI redesign for minimal layout
-689 9:43p ✅ Removed grid gap spacing in ConfigsPage layout
-690 9:47p ✅ Config page layout refined with narrower sidebar and spacing
-691 9:51p 🔴 SettingsPage layout alignment issues with theme buttons and field positioning
-692 9:52p 🔴 Fixed SettingsPage layout alignment issues with theme buttons and field positioning
-693 9:59p 🔄 Changed Review page icon from Languages to Eye and reduced App sidebar width to 180px
-694 10:06p 🔴 Clipboard corruption bug reported
-695 " 🔵 Clipboard implementation files identified
-696 10:07p 🔵 Clipboard code spans frontend and backend
-697 " 🔵 Clipboard probe mechanism identified as corruption source
-698 " 🔵 Clipboard architecture mapped across Rust and TypeScript layers
-699 10:09p 🔵 Complete clipboard architecture mapped by explore agent
-700 10:14p 🔵 DisplayMode setting controls AI translation window presentation behavior
-701 10:25p 🔵 DisplayMode setting investigation completed - three presentation modes for AI translation results
-702 10:26p 🔵 DisplayMode actively used in IPC event payloads and auto-hide logic, but UI shows non-functional options
-703 " 🔵 DisplayMode parameter flows through Tauri IPC events between main window and popup window
-704 " 🔵 Rust backend emits cycle-display-mode event at lib.rs line 127, completing full DisplayMode data flow
-705 10:27p 🔵 System tray menu "Switch Mode" option provides second user access point for DisplayMode cycling
-706 " ⚖️ Decision made to remove DisplayMode legacy code and replace with isBar-based auto-hide logic
-707 " 🔄 Untitled
-708 " 🔄 Untitled
-709 " 🔄 Untitled
-710 " 🔄 Untitled
-S270 Markdown rendering not working for word details in VocabularyPage (May 3 at 10:42 PM)
-711 10:45p 🔴 Markdown rendering not working in VocabularyPage
-S271 Fix Mac application multi-desktop/multi-monitor popup positioning bug (May 3 at 10:46 PM)
-712 10:51p 🔵 Mac popup window positioning issue identified
-713 " 🔵 Popup window positioning uses cursor coordinates without desktop/monitor context
-714 10:52p 🔵 Multi-desktop popup positioning requires NSScreen context awareness
-716 " 🔵 Comprehensive popup architecture analysis reveals complete multi-monitor support gap
-S272 Fix Mac application multi-desktop popup positioning - multi-Spaces support completed (May 3 at 10:52 PM)
-715 10:53p 🔵 Swift toolbar helper implements correct multi-monitor screen detection
-S273 Fix Mac application multi-desktop popup positioning - multi-Spaces support completed with thread-safe implementation (May 3 at 11:03 PM)
-S274 Implemented configurable popup keyboard shortcut in settings (May 3 at 11:03 PM)
-717 11:07p 🔵 Project structure analysis for global shortcut feature
-718 " 🔵 Tauri app architecture analysis for global hotkey implementation
-719 " 🔵 Frontend and backend codebase structure mapped
-720 " 🔵 Existing global hotkey implementation found in native toolbar
-721 " 🔵 Comprehensive popup lifecycle and hotkey architecture documented
-722 11:08p 🟣 Added useCallback import to SettingsPage
-723 11:16p 🟣 Implemented backend infrastructure for popup shortcut configuration
-724 11:17p 🟣 Implemented ShortcutRecorder component for keyboard shortcut capture
-725 " 🟣 Integrated popup shortcut sync with Tauri backend
-726 11:18p 🔄 Refactored keycode enum references to explicit paths in key_name_to_code
-727 " 🔴 Fixed keycode mapping for quote/apostrophe key in key_name_to_code
-S275 Fixed popup keyboard shortcut not appearing when pressed without selected text (May 3 at 11:18 PM)
-728 11:20p 🔴 Popup keyboard shortcut not triggering window display
-729 " 🔴 Investigating popup shortcut failure - examining event tap callback
-730 11:31p 🔴 Found event handler structure - examining KeyDown case
-731 " 🔵 Found the bug - KeyDown handler only shows popup when text is selected
-732 " 🔴 Fixing popup shortcut handler to show window without selected text
-733 11:32p 🔴 Fixed popup shortcut to show window without selected text
-734 " 🔴 Popup shortcut fix successfully applied and compiled
-S278 User inquired whether rewriting popup in Swift+AppUI would improve performance compared to current Tauri implementation (May 3 at 11:33 PM)
-736 11:34p 🟣 Optimized popup shortcut UX - shows popup immediately without delay
-S276 Fixed and optimized popup keyboard shortcut that wasn't working when pressed (May 3 at 11:35 PM)
-S277 User asked whether rewriting popup in Swift+AppUI would improve performance (May 3 at 11:35 PM)
-### May 4, 2026
-S279 User asked whether rewriting popup in Swift+AppUI would improve performance (May 4 at 10:09 AM)
-738 10:20a 🔵 Project structure and technology stack identified
-739 " 🔵 Codebase architecture and patterns analyzed for note feature implementation
+### May 5, 2026
+1148 9:02p 🟣 Switched Volcengine TTS from WebSocket protocol to HTTP REST API
+1149 " 🔄 Removed tokio-tungstenite and futures-util from Cargo.toml, added base64 dependency
+1150 9:03p 🔴 Re-added futures-util dependency after discovering ai.rs still uses it
+1151 " 🟣 Successfully compiled HTTP-based Volcengine TTS implementation
+1152 " 🔄 Removed unused speak_text function from native_toolbar.rs
+1153 9:06p 🔴 Volcengine TTS integration produces no logs during testing
+1154 " 🔴 Toolbar theme inconsistency with global configuration
+1155 9:31p 🔴 Toolbar fails to appear when running release binary with output redirection
+1156 9:42p 🔵 Helper app LexiSelectionHelper.app missing from all expected locations
+1157 " 🔵 Helper app LexiSelectionHelper.app found in both expected locations
+1158 " 🔵 Helper app directory exists but appears empty or incomplete
+1159 " 🔵 LexiSelectionHelper.app is a directory but lacks macOS .app bundle structure
+1160 " 🔵 Helper app executable missing from Contents/MacOS/ directory
+1161 " 🔵 Helper app bundle is complete with executable and signature
+1162 9:43p 🔵 Native toolbar uses dedicated log file at LOG_PATH for helper app debugging
+1163 " ✅ Added comprehensive logging to launch_helper function for toolbar diagnostics
+1164 " ✅ Added comprehensive diagnostic logging to helper app launch sequence
+1165 9:45p 🔵 Helper app not running - TCP connection refused preventing toolbar display
+1166 " 🔵 Launch_helper logging not appearing despite setup_native_toolbar executing
+1167 9:46p 🔵 Newly built diagnostic code not active - application running old binary
+1168 " ✅ Added wait_for_helper function to verify helper app startup before monitoring selections
+1169 9:50p 🔵 Helper app launch fails from command line but works when opening app bundle normally
+S541 Add fallback mechanism for helper app launch to support both app bundle and command-line execution contexts (May 5 at 9:50 PM)
+1170 9:56p 🔴 Added fallback mechanism for helper app launch to handle command-line execution
+1172 " 🔴 Completed full app bundle build with helper fallback mechanism and TTS diagnostic logging
+S539 Add fallback mechanism for helper app launch to support both app bundle and command-line execution contexts (May 5 at 9:56 PM)
+S540 Add fallback mechanism for helper app launch to support both app bundle and command-line execution contexts (May 5 at 9:56 PM)
+S542 Add comprehensive diagnostic logging for toolbar TTS and fix helper app launch failures across different execution contexts (May 5 at 9:57 PM)
+1174 9:59p 🔴 Built release binary with enhanced TTS streaming diagnostics
+1171 " 🔴 Built release binary with helper app launch fallback mechanism
+1173 10:03p 🔴 Enhanced TTS streaming diagnostics with chunk-level and line-level logging
+S543 Fix toolbar helper app launch failures and add comprehensive diagnostic logging for toolbar TTS (May 5 at 10:05 PM)
+1175 10:13p 🔵 Volcengine TTS API returns error code 55000000 - resource ID mismatched with speaker
+1177 " 🔄 Simplified launch_helper to use direct binary execution only
+1176 10:14p 🔴 Fixed Volcengine TTS resource ID mismatch error by changing X-Api-Resource-Id header
+S544 Helper app launch issue - binary spawns but doesn't start HTTP server (May 5 at 11:00 PM)
+### May 6, 2026
+1178 12:15a 🔵 Helper binary launches successfully but fails to listen on toolbar TCP port
+S545 Fixed toolbar-read event being handled in bar window causing system TTS to override downloaded MP3 audio (May 6 at 6:21 AM)
+1179 9:42a 🔴 TTS generates audio successfully but plays system voice instead
+1180 9:49a 🔵 TTS downloads MP3 successfully but plays system voice instead
+S547 Identified architectural coupling issue in TTS system - proposed refactoring to decouple UI from execution logic (May 6 at 9:54 AM)
+1181 9:57a 🔵 TTS architecture has tight UI-execution coupling causing race conditions
+1182 " ⚖️ Entered plan mode for TTS architecture refactoring
+S546 Discovered architectural coupling issue in TTS system - UI layer tightly coupled to execution logic causing race conditions (May 6 at 9:57 AM)
+1183 10:00a 🔵 TTS architecture exploration for refactoring - examined command registration and data flow
+1184 " 🔵 Explored TTS data flow and tool configuration storage for refactoring design
+1185 10:01a 🔵 Examined native toolbar synchronization mechanism for TTS refactoring planning
+1186 10:02a 🔵 Comprehensive architecture mapping of read/speak feature completed by explore agent
+1187 " 🔵 Architecture analysis identified two execution paths for TTS with root cause in event delegation pattern
+1188 11:26a 🟣 Added visual separation to popup modals with borders and shadows
+S548 Add visual separation (border or shadow) to popup modals for light and dark modes (May 6 at 11:27 AM)
+1189 11:27a 🟣 Added border and shadow styling to popup components for visual isolation
+1190 11:28a 🔵 Explored popup component architecture for border and shadow styling implementation
+1191 " 🟣 Added border and shadow styling to FloatingFrame popup component
+1192 " 🟣 Implemented popup visual isolation with theme-aware borders and shadows
+1193 " 🟣 Built application with popup visual isolation styling
+1195 " 🔵 Discovered three regressions after popup shadow implementation
+1196 " 🔵 Investigating three regressions: shadow artifacts, keyboard shortcuts, and toolbar failures
+1194 11:30a 🟣 Successfully built application with popup visual isolation feature
+1197 11:46a 🔵 Root cause identified: Native toolbar helper app launch failure
 </claude-mem-context>

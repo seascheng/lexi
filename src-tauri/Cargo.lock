@@ -2430,6 +2430,7 @@ name = "lexi"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "core-foundation 0.10.1",
  "core-graphics 0.25.0",
  "futures-util",
@@ -2443,6 +2444,7 @@ dependencies = [
  "tauri-plugin-liquid-glass",
  "tauri-plugin-opener",
  "tauri-plugin-sql",
+ "tokio",
  "urlencoding",
 ]
 
