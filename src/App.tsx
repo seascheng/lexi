@@ -145,7 +145,7 @@ function MainWindow() {
             <div className="flex items-center gap-2.5 px-1">
               <img src={logoUrl} alt="Lexi" className="app-logo h-8 w-8 shrink-0" />
               {!sidebarCollapsed && (
-                <h1 className="truncate text-base font-semibold">Lexi</h1>
+                <h1 className="truncate font-mono text-base font-bold tracking-widest">Lexi</h1>
               )}
             </div>
 

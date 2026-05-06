@@ -422,7 +422,7 @@ export function ConfigsPage() {
   return (
     <div className="grid h-full min-h-0 overflow-hidden lg:grid-cols-[180px_1fr]">
       {/* Left Panel */}
-      <div className="grid h-full min-h-0 content-start gap-3 overflow-y-auto border-r border-border/30 px-1 py-3 pr-3 mr-4">
+      <div className="grid h-full min-h-0 content-start gap-1 overflow-y-auto border-r border-border/30 px-1 py-2 pr-3 mr-4">
         {/* Workspace Section */}
         <NavItem
           icon={<PanelIcon />}
@@ -549,7 +549,7 @@ export function ConfigsPage() {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">
+    <h3 className="mt-2 text-xs font-semibold uppercase tracking-wider text-muted">
       {children}
     </h3>
   );
@@ -572,7 +572,7 @@ function NavItem({
 }) {
   return (
     <button
-      className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${
+      className={`flex items-center gap-2 rounded-md px-2 py-1 text-left transition ${
         indent ? "pl-6" : ""
       } ${
         active
