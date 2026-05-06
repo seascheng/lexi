@@ -74,6 +74,7 @@ export interface AiFeature {
   targetLanguage: string;
   speechEnabled: boolean;
   icon: AiFeatureIcon;
+  isBuiltin: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

@@ -18,7 +18,6 @@ import {
 import {
   deleteAiFeature,
   deleteTag,
-  isBuiltInFeatureId,
   listAiFeatures,
   listPanels,
   listTags,
@@ -331,6 +330,7 @@ export function ConfigsPage() {
         targetLanguage: "",
         speechEnabled: false,
         icon: "wand",
+        isBuiltin: false,
       },
     });
   }
@@ -1326,7 +1326,7 @@ function FeatureConfigPanel({
           </p>
         </div>
         <div className="flex gap-2">
-          {draft.kind === "custom" && !isBuiltInFeatureId(draft.id) ? (
+          {!draft.isBuiltin && (
             <Button
               onClick={onRemove}
               variant="danger"
@@ -1334,7 +1334,7 @@ function FeatureConfigPanel({
             >
               Delete
             </Button>
-          ) : null}
+          )}
           <Button onClick={onSave} variant="primary" icon={<Save size={16} />}>
             Save
           </Button>
@@ -1355,33 +1355,11 @@ function FeatureConfigPanel({
             onChange={(icon) => onUpdate({ icon })}
           />
         </Field>
-        {draft.kind === "translation" ? (
-          <Field label="Target language">
-            <Input
-              onChange={(e) => onUpdate({ targetLanguage: e.target.value })}
-              value={draft.targetLanguage}
-            />
-          </Field>
-        ) : null}
       </div>
-
-      {draft.kind === "translation" ? (
-        <label className="flex items-center gap-3 text-sm text-strong">
-          <input
-            checked={draft.autoSaveToVocabulary}
-            className="h-4 w-4 accent-[rgb(var(--color-accent))]"
-            onChange={(e) =>
-              onUpdate({ autoSaveToVocabulary: e.target.checked })
-            }
-            type="checkbox"
-          />
-          Auto-save translations to vocabulary
-        </label>
-      ) : null}
 
       <Field
         label="Prompt"
-        hint="Use {{text}} for selected/input text. Translation also supports {{targetLanguage}}."
+        hint="Use {{text}} for selected/input text."
       >
         <Textarea
           className="min-h-64 font-mono"

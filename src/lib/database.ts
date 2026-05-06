@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import { DEFAULT_CUSTOM_PROMPT_TEMPLATE, DEFAULT_EXTRACT_FEATURE, DEFAULT_PANELS, DEFAULT_PROMPT_TEMPLATE, DEFAULT_SETTINGS, DEFAULT_TOOLS, DEFAULT_TRANSLATION_FEATURE } from "./defaults";
+import { DEFAULT_AI_FEATURE, DEFAULT_CUSTOM_PROMPT_TEMPLATE, DEFAULT_EXTRACT_FEATURE, DEFAULT_PANELS, DEFAULT_PROMPT_TEMPLATE, DEFAULT_REWRITE_FEATURE, DEFAULT_SETTINGS, DEFAULT_TOOLS, DEFAULT_TRANSLATION_FEATURE } from "./defaults";
 import { isFeatureIcon } from "./featureIcons";
 import { currentIsoDate, isTauriRuntime } from "./platform";
 import type { AiFeature, AiFeatureIcon, AiFeatureKind, AiOutputMode, AppSettings, LearningEntryInput, LearningEntryType, NoteEntry, NoteInput, Panel, ReviewUpdate, TagEntry, ToolbarTool, WordEntry, WordStatus } from "../types";
@@ -197,7 +197,7 @@ export async function listAiFeatures(): Promise<AiFeature[]> {
   const db = await getSqlDatabase();
   const rows = await db.select<AiFeatureRow[]>(
     `SELECT id, name, kind, prompt_template, output_mode, enabled, sort_order,
-            auto_save_to_vocabulary, target_language, speech_enabled, icon, created_at, updated_at
+            auto_save_to_vocabulary, target_language, speech_enabled, icon, is_builtin, created_at, updated_at
      FROM ai_features
      ORDER BY sort_order ASC, name ASC`,
   );
@@ -226,8 +226,8 @@ export async function saveAiFeature(feature: AiFeature) {
   await db.execute(
     `INSERT INTO ai_features
       (id, name, kind, prompt_template, output_mode, enabled, sort_order,
-       auto_save_to_vocabulary, target_language, speech_enabled, icon, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
+       auto_save_to_vocabulary, target_language, speech_enabled, icon, is_builtin, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        kind = excluded.kind,
@@ -239,6 +239,7 @@ export async function saveAiFeature(feature: AiFeature) {
        target_language = excluded.target_language,
        speech_enabled = excluded.speech_enabled,
        icon = excluded.icon,
+       is_builtin = excluded.is_builtin,
        updated_at = excluded.updated_at`,
     [
       normalized.id,
@@ -252,21 +253,20 @@ export async function saveAiFeature(feature: AiFeature) {
       normalized.targetLanguage,
       normalized.speechEnabled ? 1 : 0,
       normalized.icon,
+      normalized.isBuiltin ? 1 : 0,
       now,
     ],
   );
 }
 
 export async function deleteAiFeature(id: string) {
-  if (isBuiltInFeatureId(id)) return;
-
   if (!isTauriRuntime()) {
-    saveBrowserAiFeatures(loadBrowserAiFeatures().filter((feature) => feature.id !== id));
+    saveBrowserAiFeatures(loadBrowserAiFeatures().filter((feature) => feature.id !== id && !feature.isBuiltin));
     return;
   }
 
   const db = await getSqlDatabase();
-  await db.execute("DELETE FROM ai_features WHERE id = $1 AND kind NOT IN ('translation')", [id]);
+  await db.execute("DELETE FROM ai_features WHERE id = $1 AND is_builtin = 0", [id]);
 }
 
 export async function listWords(): Promise<WordEntry[]> {
@@ -385,9 +385,9 @@ function loadBrowserSettings(): AppSettings {
 function loadBrowserAiFeatures(): AiFeature[] {
   const saved = localStorage.getItem(AI_FEATURES_KEY);
   if (!saved) {
-    const feature = browserLegacyTranslationFeature();
-    saveBrowserAiFeatures([feature]);
-    return [feature];
+    const features = [DEFAULT_TRANSLATION_FEATURE, DEFAULT_EXTRACT_FEATURE, DEFAULT_REWRITE_FEATURE, DEFAULT_AI_FEATURE];
+    saveBrowserAiFeatures(features);
+    return features;
   }
 
   try {
@@ -395,12 +395,12 @@ function loadBrowserAiFeatures(): AiFeature[] {
     const normalized = withBuiltInFeatures(parsed.map(normalizedAiFeature)).sort(sortAiFeatures);
     if (normalized.length > 0) return normalized;
   } catch {
-    // Fall through to the built-in translation feature.
+    // Fall through to the built-in features.
   }
 
-  const feature = browserLegacyTranslationFeature();
-  saveBrowserAiFeatures([feature]);
-  return [feature];
+  const features = [DEFAULT_TRANSLATION_FEATURE, DEFAULT_EXTRACT_FEATURE, DEFAULT_REWRITE_FEATURE, DEFAULT_AI_FEATURE];
+  saveBrowserAiFeatures(features);
+  return features;
 }
 
 function saveBrowserAiFeatures(features: AiFeature[]) {
@@ -560,6 +560,7 @@ interface AiFeatureRow {
   target_language: string | null;
   speech_enabled?: number | null;
   icon?: string | null;
+  is_builtin?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -577,6 +578,7 @@ function aiFeatureFromRow(row: AiFeatureRow): AiFeature {
     targetLanguage: row.target_language ?? "",
     speechEnabled: row.speech_enabled === 1,
     icon: parseFeatureIcon(row.icon, parseAiFeatureKind(row.kind)),
+    isBuiltin: row.is_builtin === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -592,6 +594,7 @@ async function legacyTranslationFeature(db: SqlDatabase): Promise<AiFeature> {
     promptTemplate: legacy.promptTemplate || DEFAULT_TRANSLATION_FEATURE.promptTemplate,
     targetLanguage: legacy.targetLanguage || DEFAULT_TRANSLATION_FEATURE.targetLanguage,
     autoSaveToVocabulary: legacy.autoSave ? legacy.autoSave === "true" : DEFAULT_TRANSLATION_FEATURE.autoSaveToVocabulary,
+    isBuiltin: true,
   });
 }
 
@@ -606,6 +609,7 @@ function browserLegacyTranslationFeature(): AiFeature {
       promptTemplate: typeof legacy.promptTemplate === "string" ? legacy.promptTemplate : DEFAULT_TRANSLATION_FEATURE.promptTemplate,
       targetLanguage: typeof legacy.targetLanguage === "string" ? legacy.targetLanguage : DEFAULT_TRANSLATION_FEATURE.targetLanguage,
       autoSaveToVocabulary: typeof legacy.autoSave === "boolean" ? legacy.autoSave : DEFAULT_TRANSLATION_FEATURE.autoSaveToVocabulary,
+      isBuiltin: true,
     });
   } catch {
     return DEFAULT_TRANSLATION_FEATURE;
@@ -616,7 +620,6 @@ function normalizedAiFeature(feature: Partial<AiFeature>): AiFeature {
   const rawId = stringValue(feature.id);
   const rawName = stringValue(feature.name);
   const rawPromptTemplate = stringValue(feature.promptTemplate);
-  const rawTargetLanguage = stringValue(feature.targetLanguage);
   const isTranslation = feature.kind === "translation" || rawId === DEFAULT_TRANSLATION_FEATURE.id;
   const isExtract = rawId === DEFAULT_EXTRACT_FEATURE.id;
   return {
@@ -629,10 +632,11 @@ function normalizedAiFeature(feature: Partial<AiFeature>): AiFeature {
     sortOrder: Number.isFinite(feature.sortOrder) ? Math.round(Number(feature.sortOrder)) : defaultFeatureSortOrder(isTranslation),
     panelEnabled: feature.panelEnabled !== false,
     panelSortOrder: Number.isFinite(feature.panelSortOrder) ? Math.round(Number(feature.panelSortOrder)) : defaultPanelSortOrder(isTranslation),
-    autoSaveToVocabulary: isTranslation && feature.autoSaveToVocabulary !== false,
-    targetLanguage: isTranslation ? rawTargetLanguage.trim() || DEFAULT_TRANSLATION_FEATURE.targetLanguage : "",
-    speechEnabled: normalizedSpeechEnabled(feature.speechEnabled, isTranslation),
+    autoSaveToVocabulary: isTranslation ? (feature.autoSaveToVocabulary !== false) : (feature.autoSaveToVocabulary === true),
+    targetLanguage: isTranslation ? stringValue(feature.targetLanguage).trim() || DEFAULT_TRANSLATION_FEATURE.targetLanguage : "",
+    speechEnabled: typeof feature.speechEnabled === "boolean" ? feature.speechEnabled : isTranslation,
     icon: parseFeatureIcon(stringValue(feature.icon), builtInFeatureKind(isTranslation) ?? parseAiFeatureKind(stringValue(feature.kind))),
+    isBuiltin: feature.isBuiltin === true,
     createdAt: stringValue(feature.createdAt),
     updatedAt: stringValue(feature.updatedAt),
   };
@@ -672,7 +676,7 @@ function sortAiFeatures(a: AiFeature, b: AiFeature) {
 }
 
 function withBuiltInFeatures(features: AiFeature[]) {
-  const builtIn = [DEFAULT_TRANSLATION_FEATURE, DEFAULT_EXTRACT_FEATURE];
+  const builtIn = [DEFAULT_TRANSLATION_FEATURE, DEFAULT_EXTRACT_FEATURE, DEFAULT_REWRITE_FEATURE, DEFAULT_AI_FEATURE];
   const nextFeatures = [...features];
 
   for (const builtInFeature of builtIn) {
@@ -693,7 +697,7 @@ function withBuiltInFeatures(features: AiFeature[]) {
 }
 
 export function isBuiltInFeatureId(id: string) {
-  return id === DEFAULT_TRANSLATION_FEATURE.id || id === DEFAULT_EXTRACT_FEATURE.id;
+  return id === DEFAULT_TRANSLATION_FEATURE.id || id === DEFAULT_EXTRACT_FEATURE.id || id === DEFAULT_REWRITE_FEATURE.id || id === DEFAULT_AI_FEATURE.id;
 }
 
 function builtInFeatureId(isTranslation: boolean) {
@@ -721,11 +725,6 @@ function defaultPanelSortOrder(isTranslation: boolean) {
   return 0;
 }
 
-function normalizedSpeechEnabled(value: unknown, isTranslation: boolean) {
-  if (typeof value === "boolean") return value;
-  if (isTranslation) return DEFAULT_TRANSLATION_FEATURE.speechEnabled;
-  return false;
-}
 
 function parseFeatureIcon(value: string | null | undefined, kind: AiFeatureKind): AiFeatureIcon {
   if (value && isFeatureIcon(value)) return value;

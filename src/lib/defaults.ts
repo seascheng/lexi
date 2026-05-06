@@ -42,6 +42,7 @@ export const DEFAULT_TRANSLATION_FEATURE: AiFeature = {
   targetLanguage: "Chinese",
   speechEnabled: true,
   icon: "languages",
+  isBuiltin: true,
 };
 
 const EXTRACT_PROMPT_TEMPLATE = `Analyze text as ONE learning point.Use Chinese.
@@ -79,7 +80,67 @@ export const DEFAULT_EXTRACT_FEATURE: AiFeature = {
   autoSaveToVocabulary: false,
   targetLanguage: "Chinese",
   speechEnabled: false,
+  icon: "highlighter",
+  isBuiltin: true,
+};
+
+const REWRITE_PROMPT_TEMPLATE = `Rewrite sentences into idiomatic English and flag issues.Use Chinese.
+
+<<<TEXT>>>
+{{text}}
+<<<END>>>
+
+For each sentence:
+- rewrite naturally
+- list unidiomatic parts
+- brief reason
+
+Return Markdown list:
+
+- Improved: ...
+- Issues:
+  - ...
+- Explanation:
+  - ...`;
+
+export const DEFAULT_REWRITE_FEATURE: AiFeature = {
+  id: "rewrite",
+  name: "Rewrite",
+  kind: "custom",
+  promptTemplate: REWRITE_PROMPT_TEMPLATE,
+  outputMode: "plain_text",
+  enabled: true,
+  sortOrder: 40,
+  panelEnabled: true,
+  panelSortOrder: 40,
+  autoSaveToVocabulary: false,
+  targetLanguage: "Chinese",
+  speechEnabled: false,
+  icon: "wand",
+  isBuiltin: true,
+};
+
+const AI_PROMPT_TEMPLATE = `Answer the questions in the following text or explain this concept in a popular, detailed, and organized manner.Use Chinese.
+
+<<<TEXT>>>
+{{text}}
+<<<END>>>`;
+
+export const DEFAULT_AI_FEATURE: AiFeature = {
+  id: "ai",
+  name: "AI",
+  kind: "custom",
+  promptTemplate: AI_PROMPT_TEMPLATE,
+  outputMode: "plain_text",
+  enabled: true,
+  sortOrder: 60,
+  panelEnabled: true,
+  panelSortOrder: 60,
+  autoSaveToVocabulary: false,
+  targetLanguage: "Chinese",
+  speechEnabled: false,
   icon: "sparkles",
+  isBuiltin: true,
 };
 
 export const DEFAULT_PANELS: Panel[] = [

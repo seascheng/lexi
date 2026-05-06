@@ -117,6 +117,18 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/008_notes.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 9,
+            description: "add builtin features flag and seed rewrite/ai",
+            sql: include_str!("../migrations/009_builtin_features.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 10,
+            description: "cleanup duplicate rewrite/ai features",
+            sql: include_str!("../migrations/010_cleanup_duplicate_features.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

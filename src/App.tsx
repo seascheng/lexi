@@ -1,6 +1,6 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { BookOpen, Eye, NotebookPen, Settings, Sparkles } from "lucide-react";
+import { BookOpen, Eye, NotebookPen, PanelLeft, PanelLeftClose, Settings, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppSettings, WordEntry } from "./types";
 import logoUrl from "../logo.svg";
@@ -45,6 +45,7 @@ export default function App() {
 
 function MainWindow() {
   const [page, setPage] = useState<Page>("vocabulary");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [words, setWords] = useState<WordEntry[]>([]);
   const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS);
@@ -131,14 +132,21 @@ function MainWindow() {
       </div>
     );
 
+  const sidebarWidth = sidebarCollapsed ? "52px" : "180px";
+
   return (
     <main className="app-shell">
-      <div className="mx-auto grid min-h-screen max-w-7xl items-stretch bg-panel md:h-screen md:grid-cols-[180px_1fr]">
+      <div
+        className="mx-auto grid min-h-screen max-w-7xl items-stretch bg-panel md:h-screen"
+        style={{ gridTemplateColumns: `${sidebarWidth} 1fr` }}
+      >
         <aside className="md:sticky md:top-0 md:h-screen">
-          <div className="flex h-full flex-col border-b border-border/50 p-4 md:border-b-0 md:border-r">
+          <div className="flex h-full flex-col border-b border-border/50 p-4 transition-all duration-200 md:border-b-0 md:border-r">
             <div className="flex items-center gap-2.5 px-1">
-              <img src={logoUrl} alt="Lexi" className="app-logo h-8 w-8" />
-              <h1 className="truncate text-base font-semibold">Lexi</h1>
+              <img src={logoUrl} alt="Lexi" className="app-logo h-8 w-8 shrink-0" />
+              {!sidebarCollapsed && (
+                <h1 className="truncate text-base font-semibold">Lexi</h1>
+              )}
             </div>
 
             <nav className="mt-5 grid gap-1.5">
@@ -149,11 +157,23 @@ function MainWindow() {
                   key={item.page}
                   onClick={() => setPage(item.page)}
                   variant={page === item.page ? "primary" : "ghost"}
+                  title={sidebarCollapsed ? item.label : undefined}
                 >
-                  {item.label}
+                  {!sidebarCollapsed && item.label}
                 </Button>
               ))}
             </nav>
+
+            <div className="mt-auto pt-2">
+              <Button
+                className={sidebarCollapsed ? "justify-center" : "justify-start"}
+                icon={sidebarCollapsed ? <PanelLeft size={17} /> : <PanelLeftClose size={17} />}
+                variant="ghost"
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              >
+                {!sidebarCollapsed && "Collapse"}
+              </Button>
+            </div>
           </div>
         </aside>
 
