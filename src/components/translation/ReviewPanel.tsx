@@ -205,7 +205,7 @@ export function ReviewPanel({ words, onWordsChanged }: ReviewPanelProps) {
               {current.translation && (
                 <div>
                   <p className="text-xs text-muted">Translation</p>
-                  <p className="mt-0.5 text-base font-medium text-strong">{current.translation}</p>
+                  <MarkdownRenderer content={current.translation} className="mt-0.5 text-strong [&_*]:text-strong" />
                 </div>
               )}
               <MarkdownRenderer content={[current.definition, current.example, current.note].filter(Boolean).join("\n\n")} />

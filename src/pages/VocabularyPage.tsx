@@ -38,10 +38,13 @@ const entryTypes: Array<"all" | LearningEntryType> = [
 function buildDetailMarkdown(word: WordEntry): string {
   const parts: string[] = [];
   if (word.pos) parts.push(`*${word.pos}*`);
-  if (word.translation) parts.push(`**${word.translation}**`);
-  if (word.definition) parts.push(word.definition);
-  if (word.example) parts.push(`> "${word.example}"`);
-  if (word.note) parts.push(`---\n${word.note}`);
+  if (word.note) {
+    parts.push(word.note);
+  } else {
+    if (word.translation) parts.push(word.translation);
+    if (word.definition) parts.push(word.definition);
+    if (word.example) parts.push(`> "${word.example}"`);
+  }
   return parts.join("\n\n");
 }
 
@@ -196,9 +199,14 @@ export function VocabularyPage({ words, onWordsChanged }: VocabularyPageProps) {
                     <span className="truncate font-medium text-strong">
                       {word.word}
                     </span>
-                    <span className="truncate text-sm text-content/70">
-                      {word.translation}
-                    </span>
+                    {word.translation ? (
+                      <MarkdownRenderer
+                        compact
+                        inline
+                        content={word.translation}
+                        className="min-w-0 truncate text-left text-content/70"
+                      />
+                    ) : null}
                   </button>
                   <span className="w-20 flex justify-center">
                     <StatusBadge status={word.status} />

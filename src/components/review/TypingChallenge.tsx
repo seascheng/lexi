@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReviewRating, WordEntry } from "../../types";
 import { Card } from "../ui/Card";
+import { MarkdownRenderer } from "../ui/MarkdownRenderer";
 
 export interface TypingStats {
   accuracy: number;
@@ -236,7 +237,7 @@ export function TypingChallenge({ word, onComplete, onSkip }: TypingChallengePro
 
       {/* Translation prompt */}
       <div className="grid place-items-center gap-2 rounded-lg border border-border bg-surface/60 px-4 py-6">
-        <p className="text-2xl font-semibold text-accent sm:text-3xl">{word.translation}</p>
+        <MarkdownRenderer content={word.translation} compact className="text-center text-xl font-semibold text-accent sm:text-2xl [&_*]:text-accent" />
         {word.pos && <p className="text-sm text-muted">{word.pos}</p>}
       </div>
 

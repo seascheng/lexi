@@ -126,7 +126,7 @@ export function ReviewPage({ words, onWordsChanged }: ReviewPageProps) {
                   <div className="grid gap-2.5 rounded-lg border border-border bg-example p-3 text-left">
                     <div>
                       <p className="text-sm text-muted">Translation</p>
-                      <p className="mt-1 text-xl font-medium text-accent">{currentWord.translation}</p>
+                      <MarkdownRenderer content={currentWord.translation} className="mt-1 text-accent [&_*]:text-accent" />
                     </div>
                     <MarkdownRenderer content={[currentWord.definition, currentWord.example, currentWord.note].filter(Boolean).join("\n\n")} />
                   </div>

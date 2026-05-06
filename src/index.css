@@ -182,3 +182,72 @@ textarea {
 [data-theme="dark"] .app-logo {
   filter: invert(1);
 }
+
+.markdown-renderer-normal > * + * {
+  margin-top: 0.5rem;
+}
+
+.markdown-renderer-compact > * + * {
+  margin-top: 0.125rem;
+}
+
+.markdown-renderer-inline,
+.markdown-renderer-inline p {
+  display: inline;
+}
+
+.markdown-renderer-inline > *:not(:first-child) {
+  display: none;
+}
+
+.markdown-renderer h1 {
+  color: rgb(var(--color-strong));
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.5rem;
+}
+
+.markdown-renderer h2,
+.markdown-renderer h3 {
+  color: rgb(var(--color-strong));
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+}
+
+.markdown-renderer p {
+  overflow-wrap: anywhere;
+}
+
+.markdown-renderer ul,
+.markdown-renderer ol {
+  padding-left: 1.25rem;
+}
+
+.markdown-renderer ul {
+  list-style: disc;
+}
+
+.markdown-renderer ol {
+  list-style: decimal;
+}
+
+.markdown-renderer li {
+  margin-top: 0.25rem;
+  padding-left: 0.125rem;
+  overflow-wrap: anywhere;
+}
+
+.markdown-renderer li > ul,
+.markdown-renderer li > ol {
+  margin-top: 0.25rem;
+}
+
+.markdown-renderer hr {
+  border-color: rgb(var(--color-border) / 0.5);
+}
+
+.markdown-renderer strong {
+  color: rgb(var(--color-strong));
+  font-weight: 600;
+}

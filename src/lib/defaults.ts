@@ -1,18 +1,28 @@
 import type { AiFeature, AppSettings, Panel, ToolbarTool } from "../types";
 
-export const DEFAULT_PROMPT_TEMPLATE = `You are a concise bilingual dictionary.
-Translate the selected text to {{targetLanguage}} and return Markdown only.
-Use this exact structure:
+export const DEFAULT_PROMPT_TEMPLATE = `You are a concise bilingual (English ↔ Chinese) dictionary.
+Translate the selected text and return Markdown only.
 
-### {{text}}
+Input:
+<<<TEXT>>>
+{{text}}
+<<<END>>>
 
-- **Word:** original word or phrase
-- **Translation:** target language translation
-- **Part of speech:** part of speech
-- **Definition:** brief English definition
-- **Example:** natural English example sentence
+1. If the input is an English word:
+- Translate it into Chinese
+- If helpful, analyze it using prefix/suffix
+- Provide English example sentences for common usage
 
-Selected text: {{text}}`;
+2. If the input is a sentence:
+- Translate it into Chinese
+- Analyze its sentence structure
+- Identify common English patterns in it
+- If helpful, use additional English examples to explain the pattern
+
+Output:
+- Return as a Markdown bullet list
+- Keep it multi-line
+- Do not add extra sections or labels beyond the above`;
 
 export const DEFAULT_CUSTOM_PROMPT_TEMPLATE = `Process the following text according to the feature name.
 
@@ -34,26 +44,27 @@ export const DEFAULT_TRANSLATION_FEATURE: AiFeature = {
   icon: "languages",
 };
 
-const EXTRACT_PROMPT_TEMPLATE = `Analyze the exact selected or entered English text as a learning point.
+const EXTRACT_PROMPT_TEMPLATE = `Analyze text as ONE learning point.Use Chinese.
 
-Text:
+<<<TEXT>>>
 {{text}}
+<<<END>>>
 
-Rules:
-- Treat the whole selected text as the learning point.
-- Do not replace it with one word from inside the selected text.
-- If the selected text is a sentence, analyze the sentence meaning, structure, and reusable pattern.
-- If the selected text is a phrase, analyze the phrase as a complete expression.
-- If the selected text is a single word, analyze the word.
+Classify: word / phrase / sentence
 
-Return concise Markdown only. Keep this exact label style when possible:
+- word/phrase: meaning + usage
+- sentence: meaning + structure + pattern
+
+Give 1 example. Keep concise.
+
+Return Markdown:
 
 ### Learning point
-- **Type:** word / phrase / pattern
-- **Meaning:** concise meaning in Chinese
-- **Usage:** how to use it naturally
-- **Example:** one natural English sentence
-- **Note:** one short learning note`;
+- **Type:**
+- **Meaning:**
+- **Usage:**
+- **Example:**
+- **Note:**`;
 
 export const DEFAULT_EXTRACT_FEATURE: AiFeature = {
   id: "extract",

@@ -92,36 +92,15 @@ No router library. URL-param based:
 <claude-mem-context>
 # Memory Context
 
-# [lexi] recent context, 2026-05-06 11:49am GMT+8
+# [lexi] recent context, 2026-05-06 2:14pm GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (16,526t read) | 0t work
+Stats: 50 obs (18,008t read) | 0t work
 
 ### May 5, 2026
-1148 9:02p 🟣 Switched Volcengine TTS from WebSocket protocol to HTTP REST API
-1149 " 🔄 Removed tokio-tungstenite and futures-util from Cargo.toml, added base64 dependency
-1150 9:03p 🔴 Re-added futures-util dependency after discovering ai.rs still uses it
-1151 " 🟣 Successfully compiled HTTP-based Volcengine TTS implementation
-1152 " 🔄 Removed unused speak_text function from native_toolbar.rs
-1153 9:06p 🔴 Volcengine TTS integration produces no logs during testing
-1154 " 🔴 Toolbar theme inconsistency with global configuration
-1155 9:31p 🔴 Toolbar fails to appear when running release binary with output redirection
-1156 9:42p 🔵 Helper app LexiSelectionHelper.app missing from all expected locations
-1157 " 🔵 Helper app LexiSelectionHelper.app found in both expected locations
-1158 " 🔵 Helper app directory exists but appears empty or incomplete
-1159 " 🔵 LexiSelectionHelper.app is a directory but lacks macOS .app bundle structure
-1160 " 🔵 Helper app executable missing from Contents/MacOS/ directory
-1161 " 🔵 Helper app bundle is complete with executable and signature
-1162 9:43p 🔵 Native toolbar uses dedicated log file at LOG_PATH for helper app debugging
-1163 " ✅ Added comprehensive logging to launch_helper function for toolbar diagnostics
-1164 " ✅ Added comprehensive diagnostic logging to helper app launch sequence
-1165 9:45p 🔵 Helper app not running - TCP connection refused preventing toolbar display
-1166 " 🔵 Launch_helper logging not appearing despite setup_native_toolbar executing
-1167 9:46p 🔵 Newly built diagnostic code not active - application running old binary
-1168 " ✅ Added wait_for_helper function to verify helper app startup before monitoring selections
 1169 9:50p 🔵 Helper app launch fails from command line but works when opening app bundle normally
 S541 Add fallback mechanism for helper app launch to support both app bundle and command-line execution contexts (May 5 at 9:50 PM)
 1170 9:56p 🔴 Added fallback mechanism for helper app launch to handle command-line execution
@@ -162,4 +141,25 @@ S548 Add visual separation (border or shadow) to popup modals for light and dark
 1196 " 🔵 Investigating three regressions: shadow artifacts, keyboard shortcuts, and toolbar failures
 1194 11:30a 🟣 Successfully built application with popup visual isolation feature
 1197 11:46a 🔵 Root cause identified: Native toolbar helper app launch failure
+1198 " 🔴 Translate feature vocabulary saving broken by format parsing
+1199 1:23p 🔴 Translate feature vocabulary saving requires specific AI response format
+1200 " 🔵 Vocabulary auto-save architecture couples user prompts to parsing logic
+1201 1:24p 🔴 Decoupled vocabulary auto-save from AI response format parsing
+1202 " 🔴 Implemented format-agnostic vocabulary auto-save for translate feature
+1204 " 🔵 Inconsistent markdown rendering across AI output displays
+1203 1:25p 🔴 Completed format-agnostic vocabulary auto-save implementation
+1205 1:32p 🔵 Inconsistent markdown rendering across vocabulary and notes display components
+1206 " 🔵 VocabularyPage component structure and pagination identified
+1207 " 🔵 Current markdown rendering patterns across vocabulary and notes components
+1209 " 🔄 Deleted custom MarkdownRenderer component to prepare for unified markdown solution
+1210 " 🔄 Implemented improved MarkdownRenderer with nested list support and compact mode
+1208 1:33p 🔄 Removed custom MarkdownRenderer component to replace with unified markdown solution
+1211 1:34p ⚖️ Replaced custom MarkdownRenderer with react-markdown library for unified markdown rendering
+1212 " 🔄 Implemented react-markdown-based MarkdownRenderer with custom styling
+1213 1:35p 🔴 Unified markdown rendering implementation completed
+1214 2:10p 🔴 Added inline prop to MarkdownRenderer for vocabulary row display
+1215 " 🔴 Added inline CSS styling for MarkdownRenderer
+1216 2:11p 🔴 Fixed vocabulary item duplicate display and centering issues
+1217 " 🔴 Fixed vocabulary display duplication and centering
+1218 " 🔴 Completed vocabulary display fixes with successful build
 </claude-mem-context>

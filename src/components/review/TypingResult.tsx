@@ -2,6 +2,7 @@ import { ChevronRight } from "lucide-react";
 import type { ReviewRating, WordEntry } from "../../types";
 import type { TypingStats } from "./TypingChallenge";
 import { Card } from "../ui/Card";
+import { MarkdownRenderer } from "../ui/MarkdownRenderer";
 
 interface TypingResultProps {
   word: WordEntry;
@@ -37,7 +38,7 @@ export function TypingResult({ word, stats, rating, onNext }: TypingResultProps)
       {/* Correct answer */}
       <div className="grid place-items-center gap-3 rounded-lg border border-border bg-surface/60 px-4 py-6">
         <p className="text-2xl font-semibold text-strong sm:text-3xl">{word.word}</p>
-        <p className="text-sm text-muted">{word.translation}</p>
+        <MarkdownRenderer content={word.translation} compact className="text-center text-muted [&_*]:text-muted" />
       </div>
 
       {/* Stats */}
@@ -62,9 +63,7 @@ export function TypingResult({ word, stats, rating, onNext }: TypingResultProps)
       )}
 
       {/* Definition / Example if available */}
-      {word.definition && (
-        <p className="text-center text-sm text-muted">{word.definition}</p>
-      )}
+      {word.definition && <MarkdownRenderer content={word.definition} compact className="text-center text-muted [&_*]:text-muted" />}
 
       {/* Next button */}
       <div className="flex justify-center">

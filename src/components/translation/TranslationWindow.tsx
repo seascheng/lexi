@@ -132,6 +132,7 @@ export function TranslationWindow() {
 
     const cleanups = [
       listen<RequestPayload>("lexi://ai-request", (event) => {
+        if (isBar) return;
         void runActiveFeature(event.payload.text, event.payload.featureId);
       }),
       listen<RequestPayload>("lexi://ai-loading", (event) => {
@@ -424,7 +425,7 @@ export function TranslationWindow() {
         },
         onDone: (result) => {
           let saved = false;
-          if (feature.kind === "translation" && feature.autoSaveToVocabulary && isSingleWordTranslation(text, result)) {
+          if (feature.kind === "translation" && feature.autoSaveToVocabulary && isSingleWordInput(text)) {
             void addWord(wordLearningEntry(text, result));
             void emit("lexi://words-changed");
             saved = true;
@@ -1065,23 +1066,35 @@ function learningEntryDraft(selectedText: string, analysis: string): LearningEnt
   };
 }
 
-function isSingleWordTranslation(inputText: string, result: AiRunResult) {
-  return Boolean(result.translation && singleWordText(inputText));
+function isSingleWordInput(inputText: string) {
+  return Boolean(normalizedWordText(inputText) && singleWordText(inputText));
 }
 
 function wordLearningEntry(inputText: string, result: AiRunResult): LearningEntryInput {
   const translation = result.translation;
-  if (!translation) {
-    throw new Error("Translation result was empty.");
-  }
+  const word = normalizedWordText(inputText);
 
   return {
-    ...translation,
-    word: translation.word.trim() || normalizedWordText(inputText),
+    word,
+    translation: translation?.translation.trim() || translationSummary(result.outputText),
+    pos: translation?.pos.trim() || "",
+    definition: translation?.definition.trim() || "",
+    example: translation?.example.trim() || "",
     entry_type: "word",
     source_text: inputText,
     note: result.outputText,
   };
+}
+
+function translationSummary(outputText: string) {
+  return firstContentLine(outputText) || outputText.trim() || "Translation saved from AI output";
+}
+
+function firstContentLine(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^#{1,6}\s+/, "").replace(/^[-*]\s+/, "").trim())
+    .find(Boolean) ?? "";
 }
 
 function singleWordText(text: string) {
