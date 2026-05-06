@@ -848,10 +848,42 @@ function AiForm({
   onSubmit: (event: FormEvent) => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [isMultiline, setIsMultiline] = useState(false);
+
+  // Button group width: each button 30px + 2px gap between, plus 4px gap before group
+  const buttonGroupWidth = panelItems.length > 0
+    ? panelItems.length * 30 + (panelItems.length - 1) * 2 + 4
+    : 0;
 
   function resizeTextarea(element: HTMLTextAreaElement) {
+    const prevHeight = element.style.height;
+
+    // Measure at row-layout width (full width minus buttons) — this value is
+    // the same regardless of current layout, so no oscillation when switching.
+    const container = element.parentElement!;
+    const cs = getComputedStyle(container);
+    const contentWidth = container.clientWidth
+      - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const rowWidth = Math.max(50, contentWidth - buttonGroupWidth);
+
+    element.style.flex = "none";
+    element.style.width = `${rowWidth}px`;
     element.style.height = "auto";
-    element.style.height = `${Math.min(140, element.scrollHeight)}px`;
+    void element.offsetHeight;
+    const rowScrollHeight = element.scrollHeight;
+
+    // Restore to current layout width
+    element.style.flex = "";
+    element.style.width = "";
+
+    // Set height at current layout width with smooth transition
+    element.style.height = "auto";
+    const newHeight = Math.min(140, element.scrollHeight);
+    element.style.height = prevHeight || `${newHeight}px`;
+    void element.offsetHeight;
+    element.style.height = `${newHeight}px`;
+
+    setIsMultiline(rowScrollHeight > 30);
   }
 
   useEffect(() => {
@@ -860,9 +892,9 @@ function AiForm({
 
   return (
     <form className="px-2 pt-1" onSubmit={onSubmit}>
-      <div className="flex flex-wrap items-center gap-x-1 gap-y-0 rounded-lg border border-strong/10 bg-input p-1">
+      <div className={`flex gap-x-1 gap-y-1 rounded-lg border border-strong/10 bg-input p-1 ${isMultiline ? "flex-col" : "items-center"}`}>
         <textarea
-          className="max-h-[140px] min-h-[24px] min-w-0 flex-1 resize-none border-0 bg-transparent px-1.5 py-1 text-sm leading-[1.3] text-strong outline-none placeholder:text-muted"
+          className={`max-h-[140px] min-h-[24px] min-w-0 resize-none border-0 bg-transparent px-1.5 py-1 text-sm leading-[1.3] text-strong outline-none placeholder:text-muted transition-[height] duration-150 ease-out ${isMultiline ? "" : "flex-1"}`}
           onChange={(event) => { onInputChange(event.target.value); resizeTextarea(event.currentTarget); }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
