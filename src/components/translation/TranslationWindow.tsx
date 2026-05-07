@@ -1,6 +1,5 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AlertCircle, Copy, Loader2, Trash2, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -16,8 +15,6 @@ import { MarkdownRenderer } from "../ui/MarkdownRenderer";
 import { registerPanel, getPanelComponent } from "../../lib/panelRegistry";
 import { ReviewPanel } from "./ReviewPanel";
 import { NotesPanel } from "./NotesPanel";
-
-const DEFAULT_POPUP_SIZE = 420;
 
 registerPanel("review", ReviewPanel);
 registerPanel("notes", NotesPanel);
@@ -512,11 +509,6 @@ export function TranslationWindow() {
   function resetPopupWorkspace() {
     clearWorkspaceRuns();
     setActivePanelId("translate");
-    if (isBar) return;
-
-    void getCurrentWindow().setSize(new LogicalSize(DEFAULT_POPUP_SIZE, DEFAULT_POPUP_SIZE)).catch((error) => {
-      console.warn("Failed to reset popup size", error);
-    });
   }
 
   function handlePanelChange(id: string) {
@@ -1146,7 +1138,7 @@ function singleWordText(text: string) {
 }
 
 function normalizedWordText(text: string) {
-  return text.trim().replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, "");
+  return text.trim().replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, "").toLowerCase();
 }
 
 function markdownLabel(markdown: string, label: string) {

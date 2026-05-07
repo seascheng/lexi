@@ -1,7 +1,7 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { BookOpen, Eye, NotebookPen, PanelLeft, PanelLeftClose, Settings, Sparkles } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BookOpen, Brain, NotebookPen, PanelLeft, PanelLeftClose, Settings, Sparkles } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppSettings, WordEntry } from "./types";
 import logoUrl from "../logo.svg";
 import { applyAppearanceSettings } from "./lib/appearance";
@@ -24,11 +24,11 @@ import { NotebookPage } from "./pages/NotebookPage";
 
 type Page = "vocabulary" | "review" | "notebook" | "configs" | "settings";
 
-const navItems: Array<{ page: Page; label: string; icon: JSX.Element }> = [
+const navItems: Array<{ page: Page; label: string; icon: JSX.Element; dividerBefore?: boolean }> = [
   { page: "vocabulary", label: "Vocabulary", icon: <BookOpen size={17} /> },
-  { page: "review", label: "Review", icon: <Eye size={17} /> },
+  { page: "review", label: "Review", icon: <Brain size={17} /> },
   { page: "notebook", label: "Notebook", icon: <NotebookPen size={17} /> },
-  { page: "configs", label: "Configs", icon: <Sparkles size={17} /> },
+  { page: "configs", label: "Configs", icon: <Sparkles size={17} />, dividerBefore: true },
   { page: "settings", label: "Settings", icon: <Settings size={17} /> },
 ];
 
@@ -141,7 +141,7 @@ function MainWindow() {
         style={{ gridTemplateColumns: `${sidebarWidth} 1fr` }}
       >
         <aside className="md:sticky md:top-0 md:h-screen">
-          <div className="flex h-full flex-col border-b border-border/50 p-4 transition-all duration-200 md:border-b-0 md:border-r">
+          <div className={`flex h-full flex-col border-b border-border/50 transition-all duration-200 md:border-b-0 md:border-r ${sidebarCollapsed ? "py-4 px-2.5" : "p-4"}`}>
             <div className="flex items-center gap-2.5 px-1">
               <img src={logoUrl} alt="Lexi" className="app-logo h-8 w-8 shrink-0" />
               {!sidebarCollapsed && (
@@ -151,16 +151,20 @@ function MainWindow() {
 
             <nav className="mt-5 grid gap-1.5">
               {navItems.map((item) => (
-                <Button
-                  className="justify-start"
-                  icon={item.icon}
-                  key={item.page}
-                  onClick={() => setPage(item.page)}
-                  variant={page === item.page ? "primary" : "ghost"}
-                  title={sidebarCollapsed ? item.label : undefined}
-                >
-                  {!sidebarCollapsed && item.label}
-                </Button>
+                <Fragment key={item.page}>
+                  {item.dividerBefore && (
+                    <div className="my-1 border-t border-border/50" />
+                  )}
+                  <Button
+                    className="justify-start"
+                    icon={item.icon}
+                    onClick={() => setPage(item.page)}
+                    variant={page === item.page ? "primary" : "ghost"}
+                    title={sidebarCollapsed ? item.label : undefined}
+                  >
+                    {!sidebarCollapsed && item.label}
+                  </Button>
+                </Fragment>
               ))}
             </nav>
 

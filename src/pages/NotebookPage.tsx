@@ -184,7 +184,7 @@ export function NotebookPage() {
                 ) : (
                   <div className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-2 px-3 py-2">
                     <div className="min-w-0 truncate">
-                      {note.name && <span className="font-medium text-strong">{note.name}: </span>}
+                      {note.name && <span className="text-sm font-bold text-strong">{note.name}: </span>}
                       <span className="text-sm text-content/80">{note.content}</span>
                     </div>
                     <Select

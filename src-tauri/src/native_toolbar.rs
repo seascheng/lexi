@@ -8,6 +8,7 @@ use core_graphics::event::{
     CGEvent, CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
     CGEventType, CallbackResult, EventField, KeyCode,
 };
+use core_graphics::display::CGDisplay;
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGRect;
 use core_graphics::window::{create_description_from_array, kCGWindowBounds, CGWindowID};
@@ -1257,20 +1258,81 @@ fn show_popup_now(app: &tauri::AppHandle) -> Result<(), String> {
     window
         .set_size(LogicalSize::new(DEFAULT_POPUP_SIZE, DEFAULT_POPUP_SIZE))
         .map_err(|error| format!("Could not reset popup size: {error}"))?;
+
+    let pos = smart_popup_position(cursor.x, cursor.y, DEFAULT_POPUP_SIZE as i32);
     window
-        .set_position(LogicalPosition::new(cursor.x + 16, cursor.y + 18))
+        .set_position(LogicalPosition::new(pos.0, pos.1))
         .map_err(|error| format!("Could not position popup: {error}"))?;
+
+    // Emit before show so content clears while window is still hidden
+    app.emit(
+        "lexi://popup-shown",
+        PopupShownPayload { mode: "popup_card" },
+    )
+    .map_err(|error| format!("Could not emit popup shown: {error}"))?;
+
     window
         .show()
         .map_err(|error| format!("Could not show popup: {error}"))?;
     window
         .set_focus()
         .map_err(|error| format!("Could not focus popup: {error}"))?;
-    app.emit(
-        "lexi://popup-shown",
-        PopupShownPayload { mode: "popup_card" },
-    )
-    .map_err(|error| format!("Could not emit popup shown: {error}"))
+
+    Ok(())
+}
+
+/// Compute smart popup position: default is below-right of cursor,
+/// but if not enough space below on the current screen, place above instead.
+fn smart_popup_position(cursor_x: i32, cursor_y: i32, popup_height: i32) -> (f64, f64) {
+    let offset_x = 16;
+    let offset_y = 18;
+    let x = (cursor_x + offset_x) as f64;
+
+    // Find which screen the cursor is on and get its bottom edge
+    let screen_bottom = screen_bottom_at(cursor_x, cursor_y);
+
+    let below_y = (cursor_y + offset_y) as f64;
+    if below_y + popup_height as f64 <= screen_bottom {
+        // Enough space below: place below-right
+        (x, below_y)
+    } else {
+        // Not enough space below: place above-right
+        (x, (cursor_y - popup_height - offset_y) as f64)
+    }
+}
+
+/// Find the bottom edge (in tao top-left-origin coords) of the screen containing the cursor.
+fn screen_bottom_at(cursor_x: i32, cursor_y: i32) -> f64 {
+    let Ok(displays) = CGDisplay::active_displays() else {
+        return f64::MAX;
+    };
+
+    for display_id in displays {
+        let display = CGDisplay::new(display_id);
+        let bounds = display.bounds();
+        let x_min = bounds.origin.x as i32;
+        let y_min = bounds.origin.y as i32;
+        let x_max = x_min + bounds.size.width as i32;
+        let y_max = y_min + bounds.size.height as i32;
+
+        if cursor_x >= x_min && cursor_x < x_max && cursor_y >= y_min && cursor_y < y_max {
+            return y_max as f64;
+        }
+    }
+
+    // Fallback: use main display
+    CGDisplay::main().bounds().origin.y as f64
+        + CGDisplay::main().bounds().size.height as f64
+}
+
+#[tauri::command]
+pub fn popup_position(popup_height: i32) -> CursorPosition {
+    let cursor = cursor_position();
+    let pos = smart_popup_position(cursor.x, cursor.y, popup_height);
+    CursorPosition {
+        x: pos.0.round() as i32,
+        y: pos.1.round() as i32,
+    }
 }
 
 #[tauri::command]

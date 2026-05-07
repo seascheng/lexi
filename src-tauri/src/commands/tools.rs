@@ -142,6 +142,7 @@ end tell"#,
 fn write_clipboard(text: &str) -> Result<(), String> {
     use std::io::Write;
     let mut child = Command::new("pbcopy")
+        .env("LANG", "en_US.UTF-8")
         .stdin(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("pbcopy failed: {e}"))?;

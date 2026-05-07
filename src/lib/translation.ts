@@ -1,9 +1,8 @@
 import { emit } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { LogicalPosition, LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
+import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { AiFeature, AiRunResult } from "../types";
-import { loadPopupPosition } from "./database";
 import { isTauriRuntime } from "./platform";
 
 const DEFAULT_POPUP_SIZE = 360;
@@ -35,18 +34,15 @@ async function showAiWindow() {
 
   if (!targetWindow) return;
 
-  const savedPosition = await loadPopupPosition();
+  // Skip if native code already positioned and showed the window
+  if (await targetWindow.isVisible()) return;
+
   await targetWindow.setSize(new LogicalSize(DEFAULT_POPUP_SIZE, DEFAULT_POPUP_SIZE));
 
-  if (savedPosition) {
-    await targetWindow.setPosition(new PhysicalPosition(savedPosition.x, savedPosition.y));
-  } else {
-    const position = await invoke<{ x: number; y: number }>("cursor_position");
-    await targetWindow.setPosition(new LogicalPosition(position.x + 16, position.y + 18));
-  }
+  const position = await invoke<{ x: number; y: number }>("popup_position", { popupHeight: DEFAULT_POPUP_SIZE });
+  await targetWindow.setPosition(new LogicalPosition(position.x, position.y));
 
   await targetWindow.show();
-  await targetWindow.setSize(new LogicalSize(DEFAULT_POPUP_SIZE, DEFAULT_POPUP_SIZE));
   await targetWindow.setFocus();
   await emit("lexi://popup-shown", {});
 }
