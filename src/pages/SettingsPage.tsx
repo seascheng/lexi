@@ -238,20 +238,50 @@ interface ShortcutRecorderProps {
 
 function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
   const [recording, setRecording] = useState(false);
+  const lastModifierRef = useRef<{ key: string; time: number } | null>(null);
 
   useEffect(() => {
-    if (!recording) return;
+    if (!recording) {
+      lastModifierRef.current = null;
+      return;
+    }
 
     function handleKeyDown(event: KeyboardEvent) {
       event.preventDefault();
       event.stopPropagation();
 
-      // Ignore bare modifier presses
-      if (["Meta", "Control", "Shift", "Alt"].includes(event.key)) return;
+      // Escape stops recording
+      if (event.key === "Escape") {
+        setRecording(false);
+        return;
+      }
 
-      // Require at least one modifier
+      // Detect bare modifier press — the key itself IS a modifier
+      const isBareModifier = ["Meta", "Control", "Shift", "Alt"].includes(event.key);
+
+      if (isBareModifier) {
+        // Check for double-press of the same modifier within 500ms
+        const modifierName = event.key === "Control" ? "Ctrl"
+          : event.key === "Meta" ? "Cmd"
+          : event.key === "Shift" ? "Shift"
+          : "Alt";
+        const now = Date.now();
+        const last = lastModifierRef.current;
+
+        if (last && last.key === modifierName && now - last.time < 500) {
+          // Double-press detected
+          onChange(`${modifierName}+${modifierName}`);
+          lastModifierRef.current = null;
+          setRecording(false);
+          return;
+        }
+
+        lastModifierRef.current = { key: modifierName, time: now };
+        return;
+      }
+
+      // Require at least one modifier for key combos
       if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
-        if (event.key === "Escape") setRecording(false);
         return;
       }
 

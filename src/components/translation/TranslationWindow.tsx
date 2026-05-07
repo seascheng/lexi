@@ -7,6 +7,7 @@ import type { AiFeature, AiFeatureIcon, AiRunResult, AppSettings, LearningEntryI
 import { copyText, runAiFeatureStream } from "../../lib/ai";
 import { applyAppearanceSettings } from "../../lib/appearance";
 import { addWord, listAiFeatures, listPanels, listWords, loadSettings, loadToolbarTools, savePopupPosition, savePopupSize, saveSettings } from "../../lib/database";
+import { DEFAULT_PANELS } from "../../lib/defaults";
 import { errorMessage } from "../../lib/errors";
 import { FeatureIcon } from "../../lib/featureIcons";
 import { syncNativeToolbar } from "../../lib/nativeToolbar";
@@ -61,7 +62,7 @@ export function TranslationWindow() {
   const [runs, setRuns] = useState<WorkspaceRun[]>([]);
   const [activeRunId, setActiveRunId] = useState("");
   const [isPinned, setIsPinned] = useState(false);
-  const [panels, setPanels] = useState<Panel[]>([]);
+  const [panels, setPanels] = useState<Panel[]>(DEFAULT_PANELS);
   const [activePanelId, setActivePanelId] = useState<string>("translate");
   const [words, setWords] = useState<WordEntry[]>([]);
   const positionSaveTimerRef = useRef<number>();

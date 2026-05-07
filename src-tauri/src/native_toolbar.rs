@@ -83,22 +83,28 @@ type AXUIElementRef = *const std::ffi::c_void;
 static TOOLBAR_PORT: OnceLock<Mutex<Option<u16>>> = OnceLock::new();
 static TOOLBAR_ACTIONS: OnceLock<Mutex<Vec<ToolbarActionItem>>> = OnceLock::new();
 static TOOLBAR_ENABLED: OnceLock<Mutex<bool>> = OnceLock::new();
-static POPUP_SHORTCUT: OnceLock<Mutex<ShortcutConfig>> = OnceLock::new();
+static POPUP_SHORTCUT: OnceLock<Mutex<ShortcutMode>> = OnceLock::new();
+static LAST_CTRL_PRESS: Mutex<Option<Instant>> = Mutex::new(None);
 static HANDOFF_TARGET_APP: OnceLock<Mutex<String>> = OnceLock::new();
 
 /// Parsed keyboard shortcut for showing the popup.
 #[derive(Clone, Copy)]
-struct ShortcutConfig {
-    cmd: bool,
-    shift: bool,
-    ctrl: bool,
-    alt: bool,
-    key_code: u16,
+enum ShortcutMode {
+    /// Traditional modifier+key combo, e.g. Cmd+Shift+T
+    KeyCombo {
+        cmd: bool,
+        shift: bool,
+        ctrl: bool,
+        alt: bool,
+        key_code: u16,
+    },
+    /// Double-press a modifier key within a time window
+    DoubleCtrl,
 }
 
-impl ShortcutConfig {
+impl ShortcutMode {
     fn default_shortcut() -> Self {
-        Self {
+        Self::KeyCombo {
             cmd: true,
             shift: true,
             ctrl: false,
@@ -108,17 +114,23 @@ impl ShortcutConfig {
     }
 
     fn parse(shortcut: &str) -> Option<Self> {
+        let lower = shortcut.trim().to_lowercase();
+
+        // Double-modifier patterns: "Ctrl+Ctrl", "Control+Control"
+        if lower == "ctrl+ctrl" || lower == "control+control" {
+            return Some(Self::DoubleCtrl);
+        }
+
         let parts: Vec<&str> = shortcut.split('+').collect();
         if parts.len() < 2 {
             return None;
         }
 
-        let mut config = Self {
+        let mut config = KeyComboBuilder {
             cmd: false,
             shift: false,
             ctrl: false,
             alt: false,
-            key_code: 0,
         };
 
         for part in &parts[..parts.len() - 1] {
@@ -136,9 +148,22 @@ impl ShortcutConfig {
             return None;
         }
 
-        config.key_code = key_name_to_code(parts.last()?.trim())?;
-        Some(config)
+        let key_code = key_name_to_code(parts.last()?.trim())?;
+        Some(Self::KeyCombo {
+            cmd: config.cmd,
+            shift: config.shift,
+            ctrl: config.ctrl,
+            alt: config.alt,
+            key_code,
+        })
     }
+}
+
+struct KeyComboBuilder {
+    cmd: bool,
+    shift: bool,
+    ctrl: bool,
+    alt: bool,
 }
 
 fn key_name_to_code(name: &str) -> Option<u16> {
@@ -211,12 +236,12 @@ fn key_name_to_code(name: &str) -> Option<u16> {
     } as u16)
 }
 
-fn current_popup_shortcut() -> ShortcutConfig {
+fn current_popup_shortcut() -> ShortcutMode {
     POPUP_SHORTCUT
-        .get_or_init(|| Mutex::new(ShortcutConfig::default_shortcut()))
+        .get_or_init(|| Mutex::new(ShortcutMode::default_shortcut()))
         .lock()
         .map(|config| *config)
-        .unwrap_or_else(|_| ShortcutConfig::default_shortcut())
+        .unwrap_or_else(|_| ShortcutMode::default_shortcut())
 }
 
 fn initialize_popup_shortcut(app: &tauri::App) {
@@ -231,12 +256,17 @@ fn initialize_popup_shortcut(app: &tauri::App) {
         .and_then(|p| read_popup_shortcut_from_sqlite(p))
         .unwrap_or_else(|| "Cmd+Shift+T".to_string());
 
-    if let Some(config) = ShortcutConfig::parse(&shortcut) {
-        if let Ok(mut current) = POPUP_SHORTCUT.get_or_init(|| Mutex::new(ShortcutConfig::default_shortcut())).lock() {
-            *current = config;
+    if let Some(mode) = ShortcutMode::parse(&shortcut) {
+        // Block *+C shortcuts — conflicts with copy
+        let is_blocked = matches!(mode, ShortcutMode::KeyCombo { key_code, shift: false, .. }
+            if key_code == KeyCode::ANSI_C as u16);
+        if is_blocked {
+            log_native("initial popup shortcut rejected (conflicts with copy), falling back to default");
+        } else if let Ok(mut current) = POPUP_SHORTCUT.get_or_init(|| Mutex::new(ShortcutMode::default_shortcut())).lock() {
+            *current = mode;
+            log_native(&format!("initial popup shortcut={shortcut}"));
         }
     }
-    log_native(&format!("initial popup shortcut={shortcut}"));
 }
 
 fn read_popup_shortcut_from_sqlite(path: &Path) -> Option<String> {
@@ -455,13 +485,21 @@ pub fn set_native_toolbar_enabled(enabled: bool) -> Result<(), String> {
 
 #[tauri::command]
 pub fn set_popup_shortcut(shortcut: String) -> Result<(), String> {
-    let config = ShortcutConfig::parse(&shortcut)
+    let mode = ShortcutMode::parse(&shortcut)
         .ok_or_else(|| format!("Invalid shortcut format: {shortcut}"))?;
+
+    // Block *+C shortcuts (Cmd+C, Ctrl+C, etc.) — conflicts with copy.
+    if let ShortcutMode::KeyCombo { key_code, shift: false, .. } = mode {
+        if key_code == KeyCode::ANSI_C as u16 {
+            return Err("Cannot use *+C as popup shortcut (conflicts with copy)".into());
+        }
+    }
+
     let mut current = POPUP_SHORTCUT
-        .get_or_init(|| Mutex::new(ShortcutConfig::default_shortcut()))
+        .get_or_init(|| Mutex::new(ShortcutMode::default_shortcut()))
         .lock()
         .map_err(|_| "popup shortcut state is unavailable".to_string())?;
-    *current = config;
+    *current = mode;
     log_native(&format!("set popup shortcut={shortcut}"));
     Ok(())
 }
@@ -676,6 +714,7 @@ fn spawn_selection_monitor(app: tauri::AppHandle, toolbar_port: u16) {
             CGEventType::LeftMouseDragged,
             CGEventType::LeftMouseUp,
             CGEventType::KeyDown,
+            CGEventType::FlagsChanged,
         ];
 
         let result = CGEventTap::with_enabled(
@@ -746,30 +785,11 @@ fn handle_system_event(
             log_native("shortcut key detected");
             let app = app.clone();
             thread::spawn(move || {
-                // Show popup immediately — no delay
-                let _ = show_popup(&app);
-                // Then read selected text and send to popup
-                thread::sleep(Duration::from_millis(35));
-                match read_selected_text() {
-                    Ok(Some(text)) => {
-                        log_native(&format!("shortcut text length={}", text.len()));
-                        let _ = app.emit(
-                            "lexi://ai-request",
-                            AiRequestPayload {
-                                text,
-                                mode: "popup_card",
-                                feature_id: "translation".to_string(),
-                            },
-                        );
-                    }
-                    Ok(None) => {
-                        log_native("shortcut no selected text");
-                    }
-                    Err(error) => {
-                        log_native(&format!("shortcut read text error: {error}"));
-                    }
-                }
+                trigger_popup_with_selection(&app);
             });
+        }
+        CGEventType::FlagsChanged => {
+            handle_flags_changed(app, event);
         }
         _ => {}
     }
@@ -966,14 +986,83 @@ fn is_window_chrome_role(role: Option<&str>, subrole: Option<&str>) -> bool {
 }
 
 fn is_translate_shortcut(event: &CGEvent) -> bool {
-    let config = current_popup_shortcut();
-    let key_code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
+    let mode = current_popup_shortcut();
+    let ShortcutMode::KeyCombo { cmd, shift, ctrl, alt, key_code } = mode else {
+        return false; // DoubleCtrl is handled via FlagsChanged, not KeyDown
+    };
+    let event_key_code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
     let flags = event.get_flags();
-    key_code == config.key_code
-        && (!config.cmd || flags.contains(CGEventFlags::CGEventFlagCommand))
-        && (!config.shift || flags.contains(CGEventFlags::CGEventFlagShift))
-        && (!config.ctrl || flags.contains(CGEventFlags::CGEventFlagControl))
-        && (!config.alt || flags.contains(CGEventFlags::CGEventFlagAlternate))
+    event_key_code == key_code
+        && (!cmd || flags.contains(CGEventFlags::CGEventFlagCommand))
+        && (!shift || flags.contains(CGEventFlags::CGEventFlagShift))
+        && (!ctrl || flags.contains(CGEventFlags::CGEventFlagControl))
+        && (!alt || flags.contains(CGEventFlags::CGEventFlagAlternate))
+}
+
+/// Maximum time between two Ctrl presses to count as a double-press (ms).
+const DOUBLE_CTRL_INTERVAL_MS: u64 = 300;
+
+/// Handle modifier key state changes for double-Ctrl detection.
+fn handle_flags_changed(app: &tauri::AppHandle, event: &CGEvent) {
+    if !matches!(current_popup_shortcut(), ShortcutMode::DoubleCtrl) {
+        return;
+    }
+
+    let flags = event.get_flags();
+    let ctrl_pressed = flags.contains(CGEventFlags::CGEventFlagControl);
+
+    if !ctrl_pressed {
+        return; // Only act on Ctrl press, not release
+    }
+
+    let now = Instant::now();
+    let triggered = if let Ok(mut last) = LAST_CTRL_PRESS.lock() {
+        match *last {
+            Some(prev) if now.duration_since(prev).as_millis() as u64 <= DOUBLE_CTRL_INTERVAL_MS => {
+                *last = None; // Reset to prevent triple-press
+                true
+            }
+            _ => {
+                *last = Some(now);
+                false
+            }
+        }
+    } else {
+        false
+    };
+
+    if triggered {
+        log_native("double-ctrl shortcut detected");
+        let app = app.clone();
+        thread::spawn(move || {
+            trigger_popup_with_selection(&app);
+        });
+    }
+}
+
+/// Show popup and read selected text — shared by KeyDown and FlagsChanged shortcut handlers.
+fn trigger_popup_with_selection(app: &tauri::AppHandle) {
+    let _ = show_popup(app);
+    thread::sleep(Duration::from_millis(35));
+    match read_selected_text() {
+        Ok(Some(text)) => {
+            log_native(&format!("shortcut text length={}", text.len()));
+            let _ = app.emit(
+                "lexi://ai-request",
+                AiRequestPayload {
+                    text,
+                    mode: "popup_card",
+                    feature_id: "translation".to_string(),
+                },
+            );
+        }
+        Ok(None) => {
+            log_native("shortcut no selected text");
+        }
+        Err(error) => {
+            log_native(&format!("shortcut read text error: {error}"));
+        }
+    }
 }
 
 /// Read selected text via Accessibility API (no clipboard pollution).
