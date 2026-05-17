@@ -734,7 +734,7 @@ function ToolbarConfigPanel({
           </div>
           {enabledItems.map((item) => (
             <div
-              className="flex cursor-pointer items-center justify-center rounded-md"
+              className="flex items-center justify-center rounded-md"
               key={item.id}
               style={{ width: 34, height: 30, color: previewStyle.icon }}
               title={item.name}

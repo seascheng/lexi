@@ -55,6 +55,13 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            #[cfg(desktop)]
+            {
+                app.handle().plugin(tauri_plugin_autostart::init(
+                    tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                    None,
+                ))?;
+            }
             setup_tray(app)?;
             native_toolbar::setup_native_toolbar(app)?;
             Ok(())

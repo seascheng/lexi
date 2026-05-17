@@ -184,6 +184,14 @@ export function TranslationWindow() {
       }),
       listen("lexi://popup-shown", () => {
         resetPopupWorkspace();
+        // Ensure the popup enters Tauri's focused state so that
+        // onFocusChanged(false) fires when clicking outside.
+        // Delay allows text reading (double-ctrl path) to finish first.
+        if (!isBar) {
+          window.setTimeout(() => {
+            getCurrentWindow().setFocus().catch(() => {});
+          }, 200);
+        }
       }),
       listen("lexi://words-changed", async () => {
         const refreshed = await listWords();

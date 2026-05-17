@@ -24,6 +24,9 @@
     "clipboard-manager:allow-write-text",
     "liquid-glass:default",
     "opener:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled",
     "sql:default",
     "sql:allow-execute"
   ]

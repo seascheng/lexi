@@ -50,6 +50,7 @@ export interface AppSettings {
   apiKey: string;
   model: string;
   popupShortcut: string;
+  autoStart: boolean;
 }
 
 export interface ReviewUpdate {

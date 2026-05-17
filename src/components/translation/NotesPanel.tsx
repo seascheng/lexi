@@ -189,7 +189,7 @@ export function NotesPanel({ isPinned }: PanelProps) {
             <div
               key={note.id}
               className={cn(
-                "flex items-center gap-2 rounded px-2 py-1.5 cursor-pointer outline-none transition-colors",
+                "flex items-center gap-2 rounded px-2 py-1.5 outline-none transition-colors",
                 selectedIdx === index
                   ? "bg-surface text-strong"
                   : "text-muted hover:bg-surfaceHover hover:text-strong",

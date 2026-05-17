@@ -6,6 +6,7 @@ import { saveSettings } from "../lib/database";
 import { errorMessage } from "../lib/errors";
 import { isTauriRuntime } from "../lib/platform";
 import { Field, Input, Select } from "../components/ui/Field";
+import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 
 interface SettingsPageProps {
   settings: AppSettings;
@@ -66,6 +67,30 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
     return () => window.clearTimeout(timeoutId);
   }, [draft, onSettingsChanged]);
 
+  // Sync autoStart with system autostart plugin
+  const prevAutoStartRef = useRef(draft.autoStart);
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    if (prevAutoStartRef.current === draft.autoStart) return;
+    prevAutoStartRef.current = draft.autoStart;
+
+    if (draft.autoStart) {
+      void enableAutostart().catch((e: unknown) => console.error("Failed to enable autostart", e));
+    } else {
+      void disableAutostart().catch((e: unknown) => console.error("Failed to disable autostart", e));
+    }
+  }, [draft.autoStart]);
+
+  // On mount, sync autoStart setting with actual system state
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    void isAutostartEnabled().then((enabled: boolean) => {
+      if (enabled !== draft.autoStart) {
+        setDraft((d) => ({ ...d, autoStart: enabled }));
+      }
+    }).catch(() => {});
+  }, []);
+
   const isCustomActive = draft.accentColor === "custom";
 
   return (
@@ -104,7 +129,7 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
                 />
               ))}
               <label
-                className={`relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border-2 transition ${
+                className={`relative flex h-6 w-6 items-center justify-center rounded-full border-2 transition ${
                   isCustomActive ? "border-strong scale-110" : "border-transparent hover:scale-105"
                 }`}
                 style={isCustomActive ? { backgroundColor: draft.customAccentColor } : undefined}
@@ -161,6 +186,14 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
               <option value="dock_and_menu_bar">Dock and menu bar</option>
               <option value="menu_bar_only">Menu bar only</option>
             </Select>
+          </Field>
+          <Field label="Launch at login" hint="Automatically start Lexi when you log in.">
+            <div className="flex items-center">
+              <ToggleSwitch
+                checked={draft.autoStart}
+                onChange={(v) => setDraft({ ...draft, autoStart: v })}
+              />
+            </div>
           </Field>
         </div>
       </div>
@@ -326,6 +359,35 @@ function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
       type="button"
     >
       {recording ? "Press shortcut..." : value || "Not set"}
+    </button>
+  );
+}
+
+function ToggleSwitch({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <button
+      className={`relative inline-flex shrink-0 items-center rounded-full transition-colors ${
+        checked ? "bg-accent" : "bg-border"
+      }`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onChange(!checked);
+      }}
+      style={{ width: 28, height: 16 }}
+      type="button"
+    >
+      <span
+        className={`absolute rounded-full bg-white shadow-sm transition-all ${
+          checked ? "right-0.5" : "left-0.5"
+        }`}
+        style={{ width: 12, height: 12, top: 2 }}
+      />
     </button>
   );
 }

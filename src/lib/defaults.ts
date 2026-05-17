@@ -162,6 +162,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   apiKey: "",
   model: "gpt-4o-mini",
   popupShortcut: "Cmd+Shift+T",
+  autoStart: false,
 };
 
 export const TOOL_DESCRIPTIONS: Record<string, string> = {

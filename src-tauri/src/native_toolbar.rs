@@ -11,7 +11,10 @@ use core_graphics::event::{
 use core_graphics::display::CGDisplay;
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGRect;
-use core_graphics::window::{create_description_from_array, kCGWindowBounds, CGWindowID};
+use core_graphics::window::{
+    create_description_from_array, create_window_list, kCGWindowBounds,
+    kCGWindowListOptionOnScreenOnly, kCGNullWindowID, CGWindowID,
+};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::OpenOptions;
@@ -32,6 +35,87 @@ extern "C" {
         sel: *const std::ffi::c_void,
         ...
     ) -> *mut std::ffi::c_void;
+    fn CFArrayGetValueAtIndex(
+        the_array: *const std::ffi::c_void,
+        idx: isize,
+    ) -> *const std::ffi::c_void;
+}
+
+/// Show the popup window in front of all other windows and make it key (for
+/// focus-lost auto-hide), but without activating the application so the source
+/// app retains key status and its text selections stay highlighted.
+fn show_window_without_focus(window: &tauri::WebviewWindow) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Ok(handle) = window.window_handle() else { return };
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else { return };
+
+    unsafe {
+        let ns_view = appkit.ns_view.as_ptr();
+        let ns_window = objc_msgSend(
+            ns_view,
+            sel_registerName(b"window\0".as_ptr() as *const i8),
+        );
+        if ns_window.is_null() {
+            return;
+        }
+
+        // Force window to front above all other apps' windows
+        objc_msgSend(
+            ns_window,
+            sel_registerName(b"orderFrontRegardless\0".as_ptr() as *const i8),
+        );
+
+        // Make key so Tauri's onFocusChanged fires on focus loss (auto-hide).
+        objc_msgSend(
+            ns_window,
+            sel_registerName(b"makeKeyWindow\0".as_ptr() as *const i8),
+        );
+    }
+}
+
+/// Disable WebKit's occlusion detection so rAF/animations keep running when the
+/// window is hidden. Without this, WebKit throttles rendering for windows it
+/// considers off-screen, causing blank frames on show (Raycast uses the same trick).
+fn disable_occlusion_detection(window: &tauri::WebviewWindow) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Ok(handle) = window.window_handle() else { return };
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else { return };
+
+    unsafe {
+        let ns_view = appkit.ns_view.as_ptr();
+        let ns_window = objc_msgSend(
+            ns_view,
+            sel_registerName(b"window\0".as_ptr() as *const i8),
+        );
+        if ns_window.is_null() {
+            return;
+        }
+
+        // Check if the class responds to setWindowOcclusionDetectionEnabled:
+        let sel = sel_registerName(b"setWindowOcclusionDetectionEnabled:\0".as_ptr() as *const i8);
+        let ns_window_class = objc_msgSend(
+            ns_window,
+            sel_registerName(b"class\0".as_ptr() as *const i8),
+        );
+        let responds: bool = !objc_msgSend(
+            ns_window_class,
+            sel_registerName(b"instancesRespondToSelector:\0".as_ptr() as *const i8),
+            sel,
+        ).is_null();
+
+        if !responds {
+            log_native("windowOcclusionDetectionEnabled not available on this macOS");
+            return;
+        }
+
+        objc_msgSend(
+            ns_window,
+            sel,
+            0 as std::ffi::c_int, // NO
+        );
+    }
 }
 
 /// Set NSWindow.collectionBehavior so the popup appears on ALL macOS Spaces/desktops.
@@ -72,6 +156,7 @@ const IPC_HOST: &str = "127.0.0.1";
 const LOG_PATH: &str = "/tmp/lexi-native-toolbar.log";
 const SELECTION_DRAG_THRESHOLD: f64 = 6.0;
 const WINDOW_MOVE_THRESHOLD: f64 = 4.0;
+const TITLE_BAR_HEIGHT: f64 = 32.0;
 const SELECTION_COPY_ATTEMPTS: usize = 2;
 const AX_ERROR_SUCCESS: i32 = 0;
 
@@ -350,9 +435,14 @@ pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
     initialize_toolbar_enabled(app);
     initialize_popup_shortcut(app);
 
-    // Configure popup to appear on all Spaces (must be on main thread for NSWindow access)
+    // Configure popup to appear on all Spaces and disable occlusion detection
+    // (must be on main thread for NSWindow access)
     if let Some(window) = app.get_webview_window("popup_card") {
         configure_window_all_spaces(&window);
+        disable_occlusion_detection(&window);
+    }
+    if let Some(window) = app.get_webview_window("float_bar") {
+        disable_occlusion_detection(&window);
     }
 
     let app_handle = app.handle().clone();
@@ -797,16 +887,33 @@ fn handle_system_event(
 
 fn remember_mouse_down(mouse_down: &Arc<Mutex<Option<MouseDownState>>>, event: &CGEvent) {
     let location = event.location();
+    // Primary: extract window snapshot from the CGEvent's window ID field.
+    // Fallback: enumerate on-screen windows and find the one at this position.
+    let window = window_snapshot_from_event(event)
+        .or_else(|| window_at_position(location.x, location.y));
+    let window_chrome = pointer_is_on_window_chrome(event)
+        || is_in_title_bar_area(location.x, location.y, window.as_ref());
     if let Ok(mut state) = mouse_down.lock() {
         *state = Some(MouseDownState {
             x: location.x,
             y: location.y,
             dragged: false,
             started_at: Instant::now(),
-            window: window_snapshot_from_event(event),
-            window_chrome: pointer_is_on_window_chrome(event),
+            window,
+            window_chrome,
         });
     }
+}
+
+fn is_in_title_bar_area(x: f64, y: f64, window: Option<&WindowSnapshot>) -> bool {
+    let Some(window) = window else {
+        return false;
+    };
+    let b = window.bounds;
+    x >= b.origin.x
+        && x <= b.origin.x + b.size.width
+        && y >= b.origin.y
+        && y <= b.origin.y + TITLE_BAR_HEIGHT
 }
 
 fn mark_mouse_dragged(mouse_down: &Arc<Mutex<Option<MouseDownState>>>, event: &CGEvent) {
@@ -874,6 +981,52 @@ fn window_snapshot_from_event(event: &CGEvent) -> Option<WindowSnapshot> {
         id: window_id,
         bounds,
     })
+}
+
+/// Fallback window lookup when the CGEvent window ID field returns 0.
+/// Uses CGWindowListCreate to enumerate all on-screen windows and finds
+/// the topmost one whose bounds contain the given point.
+fn window_at_position(x: f64, y: f64) -> Option<WindowSnapshot> {
+    let window_list =
+        create_window_list(kCGWindowListOptionOnScreenOnly, kCGNullWindowID)?;
+    let count = window_list.len() as usize;
+
+    // Extract raw window IDs before the array is consumed
+    let mut ids: Vec<CGWindowID> = Vec::with_capacity(count);
+    for i in 0..count {
+        let id = unsafe {
+            let ptr = CFArrayGetValueAtIndex(
+                window_list.as_concrete_TypeRef() as *const std::ffi::c_void,
+                i as isize,
+            );
+            ptr as u32
+        };
+        ids.push(id);
+    }
+
+    let descriptions = create_description_from_array(window_list)?;
+    let bounds_key = unsafe { CFString::wrap_under_get_rule(kCGWindowBounds) };
+    let desc_count = descriptions.len();
+
+    for i in 0..desc_count {
+        let description = descriptions.get(i)?;
+        let bounds_value = description.find(&bounds_key)?;
+        let bounds_dict = bounds_value.downcast::<CFDictionary>()?;
+        let bounds = CGRect::from_dict_representation(&bounds_dict)?;
+
+        if x >= bounds.origin.x
+            && x <= bounds.origin.x + bounds.size.width
+            && y >= bounds.origin.y
+            && y <= bounds.origin.y + bounds.size.height
+        {
+            return Some(WindowSnapshot {
+                id: ids[i as usize],
+                bounds,
+            });
+        }
+    }
+
+    None
 }
 
 fn event_window_id(event: &CGEvent) -> Option<CGWindowID> {
@@ -1087,9 +1240,62 @@ fn read_selected_text_via_ax() -> Option<String> {
             return None;
         }
 
-        let text = accessibility_string_attribute(focused, "AXSelectedText");
+        // Try AXSelectedText directly
+        if let Some(text) = accessibility_string_attribute(focused, "AXSelectedText") {
+            CFRelease(focused as CFTypeRef);
+            return Some(text);
+        }
+
+        // Fallback: extract selected text from AXValue + AXSelectedTextRange.
+        // Some apps (e.g. terminal emulators) don't support AXSelectedText but do
+        // expose the full text content via AXValue and the selection range via
+        // AXSelectedTextRange. Combining these lets us read the selection without
+        // simulating Cmd+C (which clears the selection in those apps).
+        let text = read_selected_text_via_ax_range(focused);
         CFRelease(focused as CFTypeRef);
         text
+    }
+}
+
+/// Try to extract selected text by reading AXValue and slicing with AXSelectedTextRange.
+fn read_selected_text_via_ax_range(element: AXUIElementRef) -> Option<String> {
+    unsafe {
+        let full_text = accessibility_string_attribute(element, "AXValue")?;
+
+        let range_attr = CFString::from_static_string("AXSelectedTextRange");
+        let mut value: CFTypeRef = ptr::null();
+        let result =
+            AXUIElementCopyAttributeValue(element, range_attr.as_concrete_TypeRef(), &mut value);
+        if result != AX_ERROR_SUCCESS || value.is_null() {
+            return None;
+        }
+
+        // AXSelectedTextRange is stored as an AXValue containing a CFRange.
+        // AXValueType for CFRange is 2 (kAXValueCFRangeType).
+        let range = {
+            let mut cf_range: core_foundation::base::CFRange = core_foundation::base::CFRange {
+                location: 0,
+                length: 0,
+            };
+            let ok = AXValueGetValue(
+                value,
+                2, // kAXValueCFRangeType
+                &mut cf_range as *mut _ as *mut std::ffi::c_void,
+            );
+            CFRelease(value as CFTypeRef);
+            if !ok {
+                return None;
+            }
+            cf_range
+        };
+
+        let start = range.location as usize;
+        let end = start + range.length as usize;
+        if start >= full_text.len() || end > full_text.len() || range.length == 0 {
+            return None;
+        }
+
+        Some(full_text[start..end].to_string())
     }
 }
 
@@ -1337,9 +1543,8 @@ fn show_popup_now(app: &tauri::AppHandle) -> Result<(), String> {
     let already_visible = window.is_visible().unwrap_or(false);
 
     if already_visible {
-        window
-            .set_focus()
-            .map_err(|error| format!("Could not focus popup: {error}"))?;
+        // Bring to front without stealing focus from the source app
+        show_window_without_focus(&window);
         return Ok(());
     }
 
@@ -1360,12 +1565,8 @@ fn show_popup_now(app: &tauri::AppHandle) -> Result<(), String> {
     )
     .map_err(|error| format!("Could not emit popup shown: {error}"))?;
 
-    window
-        .show()
-        .map_err(|error| format!("Could not show popup: {error}"))?;
-    window
-        .set_focus()
-        .map_err(|error| format!("Could not focus popup: {error}"))?;
+    // Show without stealing focus — preserves text selection in the source app
+    show_window_without_focus(&window);
 
     Ok(())
 }
@@ -1651,4 +1852,9 @@ extern "C" {
         attribute: CFStringRef,
         value: *mut CFTypeRef,
     ) -> i32;
+    fn AXValueGetValue(
+        value: CFTypeRef,
+        the_type: u32,
+        range_ptr: *mut std::ffi::c_void,
+    ) -> bool;
 }

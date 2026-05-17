@@ -807,7 +807,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         log("show panel textLength=\(text.count) mouse=\(Int(origin.x)),\(Int(origin.y)) payload=\(payload.x),\(payload.y) frame=\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width)),\(Int(frame.height))")
         selectedText = text
         panel.setFrame(frame, display: true)
-        NSApp.unhide(nil)
         panel.orderFrontRegardless()
     }
 

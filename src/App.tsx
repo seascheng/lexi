@@ -137,7 +137,7 @@ function MainWindow() {
   return (
     <main className="app-shell">
       <div
-        className="mx-auto grid min-h-screen max-w-7xl items-stretch bg-panel md:h-screen"
+        className="grid min-h-screen items-stretch bg-panel md:h-screen"
         style={{ gridTemplateColumns: `${sidebarWidth} 1fr` }}
       >
         <aside className="md:sticky md:top-0 md:h-screen">
