@@ -1,7 +1,5 @@
 use crate::cursor::{cursor_position, CursorPosition};
-use core_foundation::array::CFArray;
 use core_foundation::base::{CFRelease, CFType, CFTypeRef, TCFType};
-use core_foundation::dictionary::CFDictionary;
 use core_foundation::runloop::CFRunLoop;
 use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::{
@@ -10,11 +8,6 @@ use core_graphics::event::{
 };
 use core_graphics::display::CGDisplay;
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-use core_graphics::geometry::CGRect;
-use core_graphics::window::{
-    create_description_from_array, create_window_list, kCGWindowBounds,
-    kCGWindowListOptionOnScreenOnly, kCGNullWindowID, CGWindowID,
-};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::OpenOptions;
@@ -35,10 +28,6 @@ extern "C" {
         sel: *const std::ffi::c_void,
         ...
     ) -> *mut std::ffi::c_void;
-    fn CFArrayGetValueAtIndex(
-        the_array: *const std::ffi::c_void,
-        idx: isize,
-    ) -> *const std::ffi::c_void;
 }
 
 /// Show the popup window in front of all other windows and make it key (for
@@ -154,9 +143,6 @@ fn configure_window_all_spaces(window: &tauri::WebviewWindow) {
 const DEFAULT_POPUP_SIZE: f64 = 420.0;
 const IPC_HOST: &str = "127.0.0.1";
 const LOG_PATH: &str = "/tmp/lexi-native-toolbar.log";
-const SELECTION_DRAG_THRESHOLD: f64 = 6.0;
-const WINDOW_MOVE_THRESHOLD: f64 = 4.0;
-const TITLE_BAR_HEIGHT: f64 = 32.0;
 const SELECTION_COPY_ATTEMPTS: usize = 2;
 const AX_ERROR_SUCCESS: i32 = 0;
 
@@ -411,22 +397,6 @@ pub struct ToolbarActionItem {
 struct ToolbarActionRequest {
     action: String,
     text: String,
-}
-
-#[derive(Clone, Copy)]
-struct MouseDownState {
-    x: f64,
-    y: f64,
-    dragged: bool,
-    started_at: Instant,
-    window: Option<WindowSnapshot>,
-    window_chrome: bool,
-}
-
-#[derive(Clone, Copy)]
-struct WindowSnapshot {
-    id: CGWindowID,
-    bounds: CGRect,
 }
 
 pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
@@ -796,12 +766,18 @@ fn handle_action_connection(mut stream: TcpStream, app: tauri::AppHandle) {
     }
 }
 
+struct ClickState {
+    pre_selection: Option<String>,
+    down_x: f64,
+    down_y: f64,
+    click_count: i64,
+}
+
 fn spawn_selection_monitor(app: tauri::AppHandle, toolbar_port: u16) {
     thread::spawn(move || {
-        let mouse_down = Arc::new(Mutex::new(None::<MouseDownState>));
+        let click_state: Arc<Mutex<Option<ClickState>>> = Arc::new(Mutex::new(None));
         let events = vec![
             CGEventType::LeftMouseDown,
-            CGEventType::LeftMouseDragged,
             CGEventType::LeftMouseUp,
             CGEventType::KeyDown,
             CGEventType::FlagsChanged,
@@ -813,7 +789,7 @@ fn spawn_selection_monitor(app: tauri::AppHandle, toolbar_port: u16) {
             CGEventTapOptions::ListenOnly,
             events,
             move |_proxy, event_type, event| {
-                handle_system_event(&app, toolbar_port, &mouse_down, event_type, event);
+                handle_system_event(&app, toolbar_port, &click_state, event_type, event);
                 CallbackResult::Keep
             },
             CFRunLoop::run_current,
@@ -832,42 +808,95 @@ fn spawn_selection_monitor(app: tauri::AppHandle, toolbar_port: u16) {
 fn handle_system_event(
     app: &tauri::AppHandle,
     toolbar_port: u16,
-    mouse_down: &Arc<Mutex<Option<MouseDownState>>>,
+    click_state: &Arc<Mutex<Option<ClickState>>>,
     event_type: CGEventType,
     event: &CGEvent,
 ) {
     match event_type {
         CGEventType::LeftMouseDown => {
-            remember_mouse_down(mouse_down, event);
-        }
-        CGEventType::LeftMouseDragged => mark_mouse_dragged(mouse_down, event),
-        CGEventType::LeftMouseUp => {
-            if !looks_like_selection(mouse_down, event) {
-                return;
+            let loc = event.location();
+            let click_count = event.get_integer_value_field(1); // kCGMouseEventClickState
+            let snapshot = read_selected_text_via_ax()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            if let Ok(mut state) = click_state.lock() {
+                *state = Some(ClickState {
+                    pre_selection: snapshot,
+                    down_x: loc.x,
+                    down_y: loc.y,
+                    click_count,
+                });
             }
+        }
+        CGEventType::LeftMouseUp => {
+            let state = click_state.lock().ok().and_then(|mut s| s.take());
+            let Some(ClickState { pre_selection: pre, down_x, down_y, click_count }) = state else {
+                return;
+            };
 
             if !toolbar_enabled_for_app(app) {
-                log_native("selection ignored toolbar disabled setting");
                 return;
             }
 
             if active_toolbar_actions().is_none() {
-                log_native("selection ignored toolbar disabled or empty");
                 return;
             }
 
+            // Check if this was just a stationary single-click (no drag, no double-click).
+            // A bare click without movement is unlikely to be a text selection — skip
+            // the clipboard probe to avoid copying the current line (Zed, VS Code)
+            // or interfering with menu bar interactions.
+            let loc = event.location();
+            let dx = loc.x - down_x;
+            let dy = loc.y - down_y;
+            let distance = (dx * dx + dy * dy).sqrt();
+            let stationary_click = click_count < 2 && distance < 5.0;
+
             let position = appkit_position_from_event(event);
-            thread::spawn(move || match read_selected_text() {
-                Ok(Some(text)) => {
-                    log_native(&format!("selected text captured length={}", text.len()));
-                    show_toolbar(toolbar_port, text, position, false);
+            thread::spawn(move || {
+                // Delay to let the app process the mouse up and update its selection.
+                // Our event tap runs BEFORE the app sees the event (HeadInsert),
+                // so without this delay AXSelectedText would still reflect the old state.
+                thread::sleep(Duration::from_millis(80));
+
+                // Try AX first — works for apps that expose AXSelectedText (iTerm, etc.)
+                let ax_result = read_selected_text_via_ax()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+
+                if let Some(post_trimmed) = ax_result {
+                    if let Some(pre_text) = pre {
+                        if pre_text == post_trimmed {
+                            log_native("selection unchanged, skipping toolbar");
+                            return;
+                        }
+                    }
+                    log_native(&format!("AX selection changed length={}", post_trimmed.len()));
+                    show_toolbar(toolbar_port, post_trimmed, position, false);
+                    return;
                 }
-                Ok(None) => {
-                    log_native("selection probe returned empty");
+
+                // AX text not available — skip clipboard probe for bare clicks
+                // (no drag, no double-click) to avoid copying the current line or
+                // interfering with menu bar interactions.
+                if stationary_click {
+                    log_native("stationary single-click, skipping clipboard probe");
+                    return;
                 }
-                Err(error) => {
-                    log_native(&format!("selection probe failed: {error}"));
-                    eprintln!("Could not read selected text: {error}");
+
+                // Mouse moved or double/triple-click — probe clipboard
+                log_native("AX unavailable, falling back to clipboard probe");
+                match read_selected_text_from_clipboard_probe() {
+                    Ok(Some(text)) => {
+                        log_native(&format!("clipboard probe got text length={}", text.len()));
+                        show_toolbar(toolbar_port, text, position, false);
+                    }
+                    Ok(None) => {
+                        log_native("clipboard probe: no text found");
+                    }
+                    Err(e) => {
+                        log_native(&format!("clipboard probe failed: {}", e));
+                    }
                 }
             });
         }
@@ -882,225 +911,6 @@ fn handle_system_event(
             handle_flags_changed(app, event);
         }
         _ => {}
-    }
-}
-
-fn remember_mouse_down(mouse_down: &Arc<Mutex<Option<MouseDownState>>>, event: &CGEvent) {
-    let location = event.location();
-    // Primary: extract window snapshot from the CGEvent's window ID field.
-    // Fallback: enumerate on-screen windows and find the one at this position.
-    let window = window_snapshot_from_event(event)
-        .or_else(|| window_at_position(location.x, location.y));
-    let window_chrome = pointer_is_on_window_chrome(event)
-        || is_in_title_bar_area(location.x, location.y, window.as_ref());
-    if let Ok(mut state) = mouse_down.lock() {
-        *state = Some(MouseDownState {
-            x: location.x,
-            y: location.y,
-            dragged: false,
-            started_at: Instant::now(),
-            window,
-            window_chrome,
-        });
-    }
-}
-
-fn is_in_title_bar_area(x: f64, y: f64, window: Option<&WindowSnapshot>) -> bool {
-    let Some(window) = window else {
-        return false;
-    };
-    let b = window.bounds;
-    x >= b.origin.x
-        && x <= b.origin.x + b.size.width
-        && y >= b.origin.y
-        && y <= b.origin.y + TITLE_BAR_HEIGHT
-}
-
-fn mark_mouse_dragged(mouse_down: &Arc<Mutex<Option<MouseDownState>>>, event: &CGEvent) {
-    let location = event.location();
-    if let Ok(mut state) = mouse_down.lock() {
-        let Some(start) = state.as_mut() else {
-            return;
-        };
-
-        let delta_x = location.x - start.x;
-        let delta_y = location.y - start.y;
-        let distance = (delta_x * delta_x + delta_y * delta_y).sqrt();
-        if distance >= SELECTION_DRAG_THRESHOLD {
-            start.dragged = true;
-        }
-    }
-}
-
-fn looks_like_selection(mouse_down: &Arc<Mutex<Option<MouseDownState>>>, event: &CGEvent) -> bool {
-    let Some(start) = mouse_down.lock().ok().and_then(|mut state| state.take()) else {
-        log_native("mouse up ignored no mouse down state");
-        return false;
-    };
-
-    if start.window_chrome {
-        log_native("mouse up ignored window chrome drag candidate");
-        return false;
-    }
-
-    if window_changed_since_mouse_down(&start) {
-        log_native("mouse up ignored window moved during drag");
-        return false;
-    }
-
-    let click_count = event.get_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE);
-    if click_count >= 2 {
-        log_native(&format!(
-            "selection candidate double click count={click_count}"
-        ));
-        return true;
-    }
-
-    let location = event.location();
-    let delta_x = location.x - start.x;
-    let delta_y = location.y - start.y;
-    let distance = (delta_x * delta_x + delta_y * delta_y).sqrt();
-    let elapsed = start.started_at.elapsed();
-    let is_selection = start.dragged
-        || (distance >= SELECTION_DRAG_THRESHOLD && elapsed >= Duration::from_millis(80));
-    log_native(&format!(
-        "mouse up distance={:.1} elapsed={}ms dragged={} selection={}",
-        distance,
-        elapsed.as_millis(),
-        start.dragged,
-        is_selection
-    ));
-
-    is_selection
-}
-
-fn window_snapshot_from_event(event: &CGEvent) -> Option<WindowSnapshot> {
-    let window_id = event_window_id(event)?;
-    let bounds = window_bounds(window_id)?;
-    Some(WindowSnapshot {
-        id: window_id,
-        bounds,
-    })
-}
-
-/// Fallback window lookup when the CGEvent window ID field returns 0.
-/// Uses CGWindowListCreate to enumerate all on-screen windows and finds
-/// the topmost one whose bounds contain the given point.
-fn window_at_position(x: f64, y: f64) -> Option<WindowSnapshot> {
-    let window_list =
-        create_window_list(kCGWindowListOptionOnScreenOnly, kCGNullWindowID)?;
-    let count = window_list.len() as usize;
-
-    // Extract raw window IDs before the array is consumed
-    let mut ids: Vec<CGWindowID> = Vec::with_capacity(count);
-    for i in 0..count {
-        let id = unsafe {
-            let ptr = CFArrayGetValueAtIndex(
-                window_list.as_concrete_TypeRef() as *const std::ffi::c_void,
-                i as isize,
-            );
-            ptr as u32
-        };
-        ids.push(id);
-    }
-
-    let descriptions = create_description_from_array(window_list)?;
-    let bounds_key = unsafe { CFString::wrap_under_get_rule(kCGWindowBounds) };
-    let desc_count = descriptions.len();
-
-    for i in 0..desc_count {
-        let description = descriptions.get(i)?;
-        let bounds_value = description.find(&bounds_key)?;
-        let bounds_dict = bounds_value.downcast::<CFDictionary>()?;
-        let bounds = CGRect::from_dict_representation(&bounds_dict)?;
-
-        if x >= bounds.origin.x
-            && x <= bounds.origin.x + bounds.size.width
-            && y >= bounds.origin.y
-            && y <= bounds.origin.y + bounds.size.height
-        {
-            return Some(WindowSnapshot {
-                id: ids[i as usize],
-                bounds,
-            });
-        }
-    }
-
-    None
-}
-
-fn event_window_id(event: &CGEvent) -> Option<CGWindowID> {
-    let id = event
-        .get_integer_value_field(
-            EventField::MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER_THAT_CAN_HANDLE_THIS_EVENT,
-        )
-        .max(event.get_integer_value_field(EventField::MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER));
-
-    (id > 0).then_some(id as CGWindowID)
-}
-
-fn window_bounds(window_id: CGWindowID) -> Option<CGRect> {
-    let window_ids = CFArray::from_copyable(&[window_id]);
-    let descriptions = create_description_from_array(window_ids)?;
-    let description = descriptions.get(0)?;
-    let bounds_key = unsafe { CFString::wrap_under_get_rule(kCGWindowBounds) };
-    let bounds_value = description.find(&bounds_key)?;
-    let bounds_dictionary = bounds_value.downcast::<CFDictionary>()?;
-
-    CGRect::from_dict_representation(&bounds_dictionary)
-}
-
-fn window_changed_since_mouse_down(start: &MouseDownState) -> bool {
-    let Some(window) = start.window else {
-        return false;
-    };
-    let Some(current_bounds) = window_bounds(window.id) else {
-        return false;
-    };
-
-    rect_delta(window.bounds, current_bounds) >= WINDOW_MOVE_THRESHOLD
-}
-
-fn rect_delta(start: CGRect, current: CGRect) -> f64 {
-    let origin_delta_x = current.origin.x - start.origin.x;
-    let origin_delta_y = current.origin.y - start.origin.y;
-    let size_delta_width = current.size.width - start.size.width;
-    let size_delta_height = current.size.height - start.size.height;
-
-    origin_delta_x
-        .abs()
-        .max(origin_delta_y.abs())
-        .max(size_delta_width.abs())
-        .max(size_delta_height.abs())
-}
-
-fn pointer_is_on_window_chrome(event: &CGEvent) -> bool {
-    let location = event.location();
-    let Some((role, subrole)) = accessibility_role_at_position(location.x, location.y) else {
-        return false;
-    };
-
-    is_window_chrome_role(role.as_deref(), subrole.as_deref())
-}
-
-fn accessibility_role_at_position(x: f64, y: f64) -> Option<(Option<String>, Option<String>)> {
-    unsafe {
-        let system = AXUIElementCreateSystemWide();
-        if system.is_null() {
-            return None;
-        }
-
-        let mut element: AXUIElementRef = ptr::null();
-        let result = AXUIElementCopyElementAtPosition(system, x as f32, y as f32, &mut element);
-        CFRelease(system as CFTypeRef);
-        if result != AX_ERROR_SUCCESS || element.is_null() {
-            return None;
-        }
-
-        let role = accessibility_string_attribute(element, "AXRole");
-        let subrole = accessibility_string_attribute(element, "AXSubrole");
-        CFRelease(element as CFTypeRef);
-        Some((role, subrole))
     }
 }
 
@@ -1120,22 +930,6 @@ fn accessibility_string_attribute(
         let value = CFType::wrap_under_create_rule(value);
         value.downcast::<CFString>().map(|text| text.to_string())
     }
-}
-
-fn is_window_chrome_role(role: Option<&str>, subrole: Option<&str>) -> bool {
-    matches!(
-        role,
-        Some("AXTitleBar" | "AXToolbar" | "AXMenuBar" | "AXMenuItem" | "AXButton" | "AXWindow")
-    ) || matches!(
-        subrole,
-        Some(
-            "AXCloseButton"
-                | "AXMinimizeButton"
-                | "AXZoomButton"
-                | "AXFullScreenButton"
-                | "AXToolbarButton"
-        )
-    )
 }
 
 fn is_translate_shortcut(event: &CGEvent) -> bool {
@@ -1841,12 +1635,6 @@ extern "C" {
     fn CGPreflightPostEventAccess() -> bool;
     fn CGRequestPostEventAccess() -> bool;
     fn AXUIElementCreateSystemWide() -> AXUIElementRef;
-    fn AXUIElementCopyElementAtPosition(
-        application: AXUIElementRef,
-        x: f32,
-        y: f32,
-        element: *mut AXUIElementRef,
-    ) -> i32;
     fn AXUIElementCopyAttributeValue(
         element: AXUIElementRef,
         attribute: CFStringRef,

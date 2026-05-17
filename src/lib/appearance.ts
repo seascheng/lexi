@@ -33,8 +33,8 @@ export async function applyAppearanceSettings(
   if (appliesToTranslationWindow && currentWindow) {
     await clearTranslationWindowChrome(currentWindow);
     await applyTranslationWindowMaterial(settings);
-  } else {
-    await applyWindowEffects(settings, false, currentWindow);
+  } else if (currentWindow) {
+    await applyMainWindowVibrancy(currentWindow);
   }
 
   if (applySystemControls) {
@@ -110,6 +110,22 @@ async function applyWindowEffects(
     await currentWindow.clearEffects();
   } catch (error) {
     console.warn("Failed to apply window effects", error);
+  }
+}
+
+async function applyMainWindowVibrancy(currentWindow: ReturnType<typeof getCurrentWindow>) {
+  const transparent: [number, number, number, number] = [0, 0, 0, 0];
+
+  try {
+    await currentWindow.setEffects({
+      effects: [Effect.WindowBackground],
+      state: EffectState.Active,
+      radius: 16,
+    });
+    await currentWindow.setBackgroundColor(transparent);
+    await getCurrentWebviewWindow().setBackgroundColor(transparent);
+  } catch (error) {
+    console.warn("Failed to apply main window vibrancy", error);
   }
 }
 

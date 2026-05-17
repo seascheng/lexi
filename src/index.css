@@ -94,10 +94,82 @@ body {
 
 .app-shell {
   min-height: 100vh;
-  background:
-    linear-gradient(180deg, rgb(var(--color-strong) / 0.04), transparent 300px),
-    rgb(var(--color-background) / var(--app-surface-opacity));
+  position: relative;
+  background: rgb(var(--color-background));
   color: rgb(var(--color-strong));
+}
+
+/* Decorative gradient layer — gives backdrop-filter something to blur */
+.app-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 900px 600px at 0% 0%, rgb(100 120 255 / 0.12), transparent 70%),
+    radial-gradient(ellipse 700px 700px at 100% 100%, rgb(168 85 247 / 0.09), transparent 70%),
+    radial-gradient(ellipse 500px 400px at 50% 50%, rgb(59 130 246 / 0.05), transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+:root[data-theme="light"] .app-shell::before {
+  background:
+    radial-gradient(ellipse 900px 600px at 0% 0%, rgb(59 130 246 / 0.1), transparent 70%),
+    radial-gradient(ellipse 700px 700px at 100% 100%, rgb(168 85 247 / 0.07), transparent 70%),
+    radial-gradient(ellipse 500px 400px at 50% 50%, rgb(14 165 233 / 0.04), transparent 60%);
+}
+
+/* Main window sidebar glass */
+.app-sidebar {
+  position: relative;
+  z-index: 1;
+  background: rgb(var(--color-panel) / 0.45);
+  backdrop-filter: blur(50px) saturate(180%);
+  -webkit-backdrop-filter: blur(50px) saturate(180%);
+}
+
+/* Main window content area glass */
+.app-content {
+  position: relative;
+  z-index: 1;
+  background: rgb(var(--color-panel) / 0.5);
+  backdrop-filter: blur(50px) saturate(180%);
+  -webkit-backdrop-filter: blur(50px) saturate(180%);
+}
+
+/* Light theme adjustments for glass */
+:root[data-theme="light"] .app-sidebar {
+  background: rgb(var(--color-panel) / 0.5);
+}
+
+:root[data-theme="light"] .app-content {
+  background: rgb(var(--color-panel) / 0.6);
+}
+
+/* Make page-level panels/surfaces semi-transparent so glass shows through.
+   Use [class*="..."] to also match Tailwind alpha variants like bg-panel/95, bg-surface/50 */
+.app-content [class*="bg-panel"] {
+  background-color: rgb(var(--color-panel) / 0.65);
+}
+.app-content [class*="bg-surface"] {
+  background-color: rgb(var(--color-surface) / 0.55);
+}
+.app-content [class*="bg-input"] {
+  background-color: rgb(var(--color-input) / 0.6);
+}
+
+:root[data-theme="light"] .app-content [class*="bg-panel"] {
+  background-color: rgb(var(--color-panel) / 0.7);
+}
+:root[data-theme="light"] .app-content [class*="bg-surface"] {
+  background-color: rgb(var(--color-surface) / 0.65);
+}
+:root[data-theme="light"] .app-content [class*="bg-input"] {
+  background-color: rgb(var(--color-input) / 0.65);
+}
+
+:root[data-theme="light"] .app-content {
+  background: rgb(var(--color-panel) / 0.7);
 }
 
 .translation-window-root {

@@ -137,11 +137,11 @@ function MainWindow() {
   return (
     <main className="app-shell">
       <div
-        className="grid min-h-screen items-stretch bg-panel md:h-screen"
+        className="grid min-h-screen items-stretch md:h-screen"
         style={{ gridTemplateColumns: `${sidebarWidth} 1fr` }}
       >
-        <aside className="md:sticky md:top-0 md:h-screen">
-          <div className={`flex h-full flex-col border-b border-border/50 transition-all duration-200 md:border-b-0 md:border-r ${sidebarCollapsed ? "py-4 px-2.5" : "p-4"}`}>
+        <aside className="app-sidebar md:sticky md:top-0 md:h-screen">
+          <div className={`flex h-full flex-col border-b border-border/30 transition-all duration-200 md:border-b-0 md:border-r ${sidebarCollapsed ? "py-4 px-2.5" : "p-4"}`}>
             <div className="flex items-center gap-2.5 px-1">
               <img src={logoUrl} alt="Lexi" className="app-logo h-8 w-8 shrink-0" />
               {!sidebarCollapsed && (
@@ -153,7 +153,7 @@ function MainWindow() {
               {navItems.map((item) => (
                 <Fragment key={item.page}>
                   {item.dividerBefore && (
-                    <div className="my-1 border-t border-border/50" />
+                    <div className="my-1 border-t border-border/30" />
                   )}
                   <Button
                     className="justify-start"
@@ -181,7 +181,7 @@ function MainWindow() {
           </div>
         </aside>
 
-        <section className="flex flex-col overflow-hidden md:h-screen">
+        <section className="app-content flex flex-col overflow-hidden md:h-screen">
           <div className="min-h-0 flex-1 overflow-hidden p-4 md:p-5">
             {pageContent}
           </div>
