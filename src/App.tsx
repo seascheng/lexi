@@ -67,6 +67,11 @@ function MainWindow() {
       }).catch((error) => {
         console.warn("Failed to sync popup shortcut", error);
       });
+      void invoke("set_excluded_toolbar_apps", {
+        apps: settings.excludedToolbarApps ?? [],
+      }).catch((error) => {
+        console.warn("Failed to sync excluded toolbar apps", error);
+      });
       void syncNativeToolbarFromSettings(settings);
     }
   }, [settings]);

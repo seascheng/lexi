@@ -157,6 +157,7 @@ static TOOLBAR_ENABLED: OnceLock<Mutex<bool>> = OnceLock::new();
 static POPUP_SHORTCUT: OnceLock<Mutex<ShortcutMode>> = OnceLock::new();
 static LAST_CTRL_PRESS: Mutex<Option<Instant>> = Mutex::new(None);
 static HANDOFF_TARGET_APP: OnceLock<Mutex<String>> = OnceLock::new();
+static EXCLUDED_TOOLBAR_APPS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 
 /// Parsed keyboard shortcut for showing the popup.
 #[derive(Clone, Copy)]
@@ -615,6 +616,29 @@ pub fn hide_native_toolbar() -> Result<(), String> {
         .map_err(|error| format!("Could not hide toolbar: {error}"))
 }
 
+#[tauri::command]
+pub fn set_excluded_toolbar_apps(apps: Vec<String>) -> Result<(), String> {
+    let trimmed: Vec<String> = apps.into_iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    if let Ok(mut current) = EXCLUDED_TOOLBAR_APPS.get_or_init(|| Mutex::new(vec!["com.apple.finder".to_string()])).lock() {
+        *current = trimmed;
+    }
+    Ok(())
+}
+
+/// Get the bundle identifier of the frontmost (active) application.
+fn frontmost_app_bundle_id() -> Option<String> {
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg("id of app (path to frontmost application)")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if id.is_empty() { None } else { Some(id) }
+}
+
 fn remember_toolbar_port(port: u16) {
     if let Ok(mut current) = TOOLBAR_PORT.get_or_init(|| Mutex::new(None)).lock() {
         *current = Some(port);
@@ -655,7 +679,21 @@ fn toolbar_enabled_for_app(app: &tauri::AppHandle) -> bool {
         *current = enabled;
     }
 
-    enabled
+    if !enabled {
+        return false;
+    }
+
+    // Check if the frontmost app is in the exclusion list
+    if let Some(bundle_id) = frontmost_app_bundle_id() {
+        if let Ok(excluded) = EXCLUDED_TOOLBAR_APPS.get_or_init(|| Mutex::new(vec!["com.apple.finder".to_string()])).lock() {
+            if excluded.iter().any(|ex| ex == &bundle_id) {
+                log_native(&format!("toolbar excluded for app: {}", bundle_id));
+                return false;
+            }
+        }
+    }
+
+    true
 }
 
 fn normalized_toolbar_actions(actions: Vec<ToolbarActionItem>) -> Vec<ToolbarActionItem> {
@@ -842,10 +880,6 @@ fn handle_system_event(
                 return;
             }
 
-            // Check if this was just a stationary single-click (no drag, no double-click).
-            // A bare click without movement is unlikely to be a text selection — skip
-            // the clipboard probe to avoid copying the current line (Zed, VS Code)
-            // or interfering with menu bar interactions.
             let loc = event.location();
             let dx = loc.x - down_x;
             let dy = loc.y - down_y;
@@ -859,7 +893,7 @@ fn handle_system_event(
                 // so without this delay AXSelectedText would still reflect the old state.
                 thread::sleep(Duration::from_millis(80));
 
-                // Try AX first — works for apps that expose AXSelectedText (iTerm, etc.)
+                // Try AX first (no clipboard interference)
                 let ax_result = read_selected_text_via_ax()
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty());
@@ -876,16 +910,15 @@ fn handle_system_event(
                     return;
                 }
 
-                // AX text not available — skip clipboard probe for bare clicks
-                // (no drag, no double-click) to avoid copying the current line or
-                // interfering with menu bar interactions.
+                // AX unavailable — skip probe for bare clicks to avoid
+                // copying the current line in editors or triggering on menu bar clicks.
                 if stationary_click {
-                    log_native("stationary single-click, skipping clipboard probe");
                     return;
                 }
 
-                // Mouse moved or double/triple-click — probe clipboard
-                log_native("AX unavailable, falling back to clipboard probe");
+                // Clipboard probe: sends Cmd+C and reads the result.
+                // On success the selected text stays on the clipboard (not restored),
+                // so the user's own Cmd+C is never overwritten by a restore.
                 match read_selected_text_from_clipboard_probe() {
                     Ok(Some(text)) => {
                         log_native(&format!("clipboard probe got text length={}", text.len()));
@@ -1113,7 +1146,9 @@ fn read_selected_text_from_clipboard_probe() -> Result<Option<String>, String> {
     // Save original clipboard as raw bytes (avoids from_utf8_lossy corruption)
     let original_bytes = command_output_raw("pbpaste", &[]).unwrap_or_default();
 
-    // Guard ensures clipboard is restored even if probe errors mid-way
+    // Guard restores clipboard on error/panic — but NOT on success.
+    // On success, the selected text stays on the clipboard so the user can
+    // paste it directly. Restoring would overwrite the user's own Cmd+C.
     struct ClipGuard { bytes: Vec<u8>, restored: bool }
     impl Drop for ClipGuard {
         fn drop(&mut self) {
@@ -1139,13 +1174,13 @@ fn read_selected_text_from_clipboard_probe() -> Result<Option<String>, String> {
         let selected_text = String::from_utf8_lossy(&selected_bytes);
         let trimmed = selected_text.trim().to_string();
         if !trimmed.is_empty() {
-            // Restore original clipboard bytes
-            let _ = write_clipboard_bytes(&guard.bytes);
+            // Don't restore — leave selected text on clipboard for the user.
             guard.restored = true;
             return Ok(Some(trimmed));
         }
     }
 
+    // Probe failed to find text — restore original clipboard.
     let _ = write_clipboard_bytes(&guard.bytes);
     guard.restored = true;
     Ok(None)

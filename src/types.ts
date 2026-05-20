@@ -45,6 +45,7 @@ export interface AppSettings {
   backgroundStyle: BackgroundStyle;
   dockMode: DockMode;
   toolbarEnabled: boolean;
+  excludedToolbarApps: string[];
   activePanelId: string | null;
   apiBaseUrl: string;
   apiKey: string;

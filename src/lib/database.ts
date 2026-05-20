@@ -468,6 +468,9 @@ function seedWords(): WordEntry[] {
 function parseSettingValue(key: string, value: string) {
   if (key === "toolbarEnabled") return value === "true";
   if (key === "windowOpacity") return parseWindowOpacity(value);
+  if (key === "excludedToolbarApps") {
+    try { return JSON.parse(value); } catch { return []; }
+  }
   return value;
 }
 
@@ -499,6 +502,7 @@ function normalizedStoredWord(word: WordEntry): WordEntry {
 }
 
 function serializeSettingValue(value: unknown) {
+  if (Array.isArray(value)) return JSON.stringify(value);
   return typeof value === "boolean" ? String(value) : String(value ?? "");
 }
 

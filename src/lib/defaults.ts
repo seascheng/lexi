@@ -157,6 +157,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   backgroundStyle: "macos_glass_clear",
   dockMode: "dock_and_menu_bar",
   toolbarEnabled: true,
+  excludedToolbarApps: ["com.apple.finder"],
   activePanelId: null,
   apiBaseUrl: "https://api.openai.com/v1",
   apiKey: "",

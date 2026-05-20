@@ -195,6 +195,17 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
               />
             </div>
           </Field>
+          <Field label="Excluded apps" hint="Bundle IDs of apps where the toolbar should not appear (e.g. com.apple.finder). One per line.">
+            <textarea
+              className="h-20 w-full rounded-md border border-border bg-input px-2.5 py-1.5 text-sm text-strong outline-none focus:border-accent"
+              onChange={(event) => {
+                const apps = event.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
+                setDraft({ ...draft, excludedToolbarApps: apps });
+              }}
+              placeholder="com.apple.finder"
+              value={(draft.excludedToolbarApps ?? []).join("\n")}
+            />
+          </Field>
         </div>
       </div>
       <hr className="border-border/30" />
