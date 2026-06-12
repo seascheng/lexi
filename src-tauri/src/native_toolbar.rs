@@ -7,7 +7,6 @@ use core_graphics::event::{
     CGEventType, CallbackResult, EventField, KeyCode,
 };
 use core_graphics::display::CGDisplay;
-use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::OpenOptions;
@@ -22,6 +21,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, LogicalPosition, LogicalSize, Manager};
 
 extern "C" {
+    fn objc_getClass(name: *const i8) -> *const std::ffi::c_void;
     fn sel_registerName(str: *const i8) -> *const std::ffi::c_void;
     fn objc_msgSend(
         obj: *mut std::ffi::c_void,
@@ -143,11 +143,11 @@ fn configure_window_all_spaces(window: &tauri::WebviewWindow) {
 const DEFAULT_POPUP_SIZE: f64 = 420.0;
 const IPC_HOST: &str = "127.0.0.1";
 const LOG_PATH: &str = "/tmp/lexi-native-toolbar.log";
-const SELECTION_COPY_ATTEMPTS: usize = 2;
 const AX_ERROR_SUCCESS: i32 = 0;
-
-/// Mutex to serialize clipboard probe operations and prevent concurrent interference.
-static CLIPBOARD_PROBE_LOCK: Mutex<()> = Mutex::new(());
+/// Fixed port the Chrome extension POSTs selected text to. Hardcoded so the
+/// extension doesn't have to discover a dynamic port. Collisions are unlikely
+/// (nothing else commonly uses 47xxx range).
+const EXTENSION_PORT: u16 = 47291;
 
 type AXUIElementRef = *const std::ffi::c_void;
 
@@ -158,6 +158,18 @@ static POPUP_SHORTCUT: OnceLock<Mutex<ShortcutMode>> = OnceLock::new();
 static LAST_CTRL_PRESS: Mutex<Option<Instant>> = Mutex::new(None);
 static HANDOFF_TARGET_APP: OnceLock<Mutex<String>> = OnceLock::new();
 static EXCLUDED_TOOLBAR_APPS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+/// Last observed NSPasteboard.changeCount. Cmd+C detection compares against
+/// this — only fires the toolbar when the count actually increases.
+static LAST_PASTEBOARD_CHANGE_COUNT: OnceLock<Mutex<isize>> = OnceLock::new();
+
+/// Text captured from the user's most recent Cmd+C, with the time it was
+/// captured. Used as the browser fallback when Ctrl+Ctrl popup shortcut
+/// fires but AX can't read the selection (Chrome/Safari/Edge).
+/// Window is 5s — after that the record is considered stale.
+static LAST_COPIED_TEXT: OnceLock<Mutex<Option<(String, Instant)>>> = OnceLock::new();
+
+/// How long after a Cmd+C the captured text is still considered usable.
+const COPIED_TEXT_FRESH_SECS: u64 = 5;
 
 /// Parsed keyboard shortcut for showing the popup.
 #[derive(Clone, Copy)]
@@ -341,6 +353,17 @@ fn initialize_popup_shortcut(app: &tauri::App) {
     }
 }
 
+fn initialize_pasteboard_change_count() {
+    let current = unsafe { pasteboard_change_count() };
+    if let Ok(mut cell) = LAST_PASTEBOARD_CHANGE_COUNT
+        .get_or_init(|| Mutex::new(current))
+        .lock()
+    {
+        *cell = current;
+    }
+    log_native(&format!("initial pasteboard changeCount={current}"));
+}
+
 fn read_popup_shortcut_from_sqlite(path: &Path) -> Option<String> {
     let output = Command::new("sqlite3")
         .arg(path)
@@ -405,6 +428,7 @@ pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
     request_system_permissions();
     initialize_toolbar_enabled(app);
     initialize_popup_shortcut(app);
+    initialize_pasteboard_change_count();
 
     // Configure popup to appear on all Spaces and disable occlusion detection
     // (must be on main thread for NSWindow access)
@@ -429,7 +453,8 @@ pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
     spawn_action_server(listener, app_handle.clone());
     launch_helper(app, action_port, toolbar_port)?;
     wait_for_helper(toolbar_port);
-    spawn_selection_monitor(app_handle, toolbar_port);
+    spawn_selection_monitor(app_handle.clone(), toolbar_port);
+    spawn_extension_server();
     Ok(())
 }
 
@@ -762,6 +787,125 @@ fn spawn_action_server(listener: TcpListener, app: tauri::AppHandle) {
     });
 }
 
+/// Start the HTTP server the Chrome extension POSTs selected text to.
+/// Bound to 127.0.0.1 only (no external exposure). Fixed port so the
+/// extension can hardcode it — see EXTENSION_PORT.
+fn spawn_extension_server() {
+    thread::spawn(|| {
+        let listener = match TcpListener::bind((IPC_HOST, EXTENSION_PORT)) {
+            Ok(l) => {
+                log_native(&format!(
+                    "extension server listening on http://{IPC_HOST}:{EXTENSION_PORT}"
+                ));
+                l
+            }
+            Err(error) => {
+                log_native(&format!(
+                    "extension server bind failed on port {EXTENSION_PORT}: {error}"
+                ));
+                eprintln!(
+                    "[toolbar] Could not bind extension server on port {EXTENSION_PORT}: {error}"
+                );
+                return;
+            }
+        };
+
+        for stream in listener.incoming().flatten() {
+            thread::spawn(|| handle_extension_connection(stream));
+        }
+    });
+}
+
+#[derive(Deserialize)]
+struct ExtensionSelectionPayload {
+    text: String,
+}
+
+fn handle_extension_connection(mut stream: TcpStream) {
+    let buffer = match read_http_request(&mut stream) {
+        Ok(buffer) => buffer,
+        Err(error) => {
+            let _ = write_response_with_cors(&mut stream, 400, &format!("read failed: {error}"));
+            return;
+        }
+    };
+
+    if buffer.is_empty() {
+        return;
+    }
+
+    let request = String::from_utf8_lossy(&buffer);
+
+    // CORS preflight — Chrome sends OPTIONS before any non-simple POST.
+    if request.starts_with("OPTIONS ") {
+        let _ = write_response_with_cors(&mut stream, 204, "");
+        return;
+    }
+
+    if !request.starts_with("POST /selection ") {
+        let _ = write_response_with_cors(&mut stream, 404, "not found");
+        return;
+    }
+
+    let Some(body) = request.split("\r\n\r\n").nth(1) else {
+        let _ = write_response_with_cors(&mut stream, 400, "missing body");
+        return;
+    };
+
+    let payload: ExtensionSelectionPayload = match serde_json::from_str(body) {
+        Ok(p) => p,
+        Err(error) => {
+            let _ = write_response_with_cors(&mut stream, 400, &format!("invalid json: {error}"));
+            return;
+        }
+    };
+
+    let text = payload.text.trim().to_string();
+    if text.is_empty() {
+        let _ = write_response_with_cors(&mut stream, 400, "empty text");
+        return;
+    }
+
+    // 200 OK back to the extension ASAP — actual toolbar show happens off-thread.
+    let _ = write_response_with_cors(&mut stream, 200, "ok");
+
+    log_native(&format!("extension selection len={}", text.len()));
+
+    thread::spawn(move || {
+        // Respect the global toolbar enabled flag and action list. Skip if
+        // disabled or no actions configured.
+        if active_toolbar_actions().is_none() {
+            log_native("extension: toolbar disabled or no actions, skipping");
+            return;
+        }
+
+        let port = TOOLBAR_PORT
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .ok()
+            .and_then(|cell| *cell);
+        let Some(port) = port else {
+            log_native("extension: toolbar port not set");
+            return;
+        };
+
+        let position = cursor_position();
+        show_toolbar(port, text, position, false);
+    });
+}
+
+fn write_response_with_cors(stream: &mut TcpStream, status: u16, body: &str) -> std::io::Result<()> {
+    let status_text = match status {
+        200 | 204 => "OK",
+        _ => "ERROR",
+    };
+    write!(
+        stream,
+        "HTTP/1.1 {status} {status_text}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
 fn handle_action_connection(mut stream: TcpStream, app: tauri::AppHandle) {
     let buffer = match read_http_request(&mut stream) {
         Ok(buffer) => buffer,
@@ -806,9 +950,7 @@ fn handle_action_connection(mut stream: TcpStream, app: tauri::AppHandle) {
 
 struct ClickState {
     pre_selection: Option<String>,
-    down_x: f64,
-    down_y: f64,
-    click_count: i64,
+    is_text_click: bool,
 }
 
 fn spawn_selection_monitor(app: tauri::AppHandle, toolbar_port: u16) {
@@ -853,24 +995,26 @@ fn handle_system_event(
     match event_type {
         CGEventType::LeftMouseDown => {
             let loc = event.location();
-            let click_count = event.get_integer_value_field(1); // kCGMouseEventClickState
             let snapshot = read_selected_text_via_ax()
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
+            let is_text_click = is_text_area_at_position(loc.x, loc.y);
             if let Ok(mut state) = click_state.lock() {
                 *state = Some(ClickState {
                     pre_selection: snapshot,
-                    down_x: loc.x,
-                    down_y: loc.y,
-                    click_count,
+                    is_text_click,
                 });
             }
         }
         CGEventType::LeftMouseUp => {
             let state = click_state.lock().ok().and_then(|mut s| s.take());
-            let Some(ClickState { pre_selection: pre, down_x, down_y, click_count }) = state else {
+            let Some(ClickState { pre_selection: pre, is_text_click, .. }) = state else {
                 return;
             };
+
+            if !is_text_click {
+                return;
+            }
 
             if !toolbar_enabled_for_app(app) {
                 return;
@@ -879,12 +1023,6 @@ fn handle_system_event(
             if active_toolbar_actions().is_none() {
                 return;
             }
-
-            let loc = event.location();
-            let dx = loc.x - down_x;
-            let dy = loc.y - down_y;
-            let distance = (dx * dx + dy * dy).sqrt();
-            let stationary_click = click_count < 2 && distance < 5.0;
 
             let position = appkit_position_from_event(event);
             thread::spawn(move || {
@@ -907,29 +1045,6 @@ fn handle_system_event(
                     }
                     log_native(&format!("AX selection changed length={}", post_trimmed.len()));
                     show_toolbar(toolbar_port, post_trimmed, position, false);
-                    return;
-                }
-
-                // AX unavailable — skip probe for bare clicks to avoid
-                // copying the current line in editors or triggering on menu bar clicks.
-                if stationary_click {
-                    return;
-                }
-
-                // Clipboard probe: sends Cmd+C and reads the result.
-                // On success the selected text stays on the clipboard (not restored),
-                // so the user's own Cmd+C is never overwritten by a restore.
-                match read_selected_text_from_clipboard_probe() {
-                    Ok(Some(text)) => {
-                        log_native(&format!("clipboard probe got text length={}", text.len()));
-                        show_toolbar(toolbar_port, text, position, false);
-                    }
-                    Ok(None) => {
-                        log_native("clipboard probe: no text found");
-                    }
-                    Err(e) => {
-                        log_native(&format!("clipboard probe failed: {}", e));
-                    }
                 }
             });
         }
@@ -938,6 +1053,16 @@ fn handle_system_event(
             let app = app.clone();
             thread::spawn(move || {
                 trigger_popup_with_selection(&app);
+            });
+        }
+        CGEventType::KeyDown if is_copy_command(event) => {
+            // User pressed Cmd+C. Schedule a check: if the pasteboard actually
+            // changes (i.e. there was a selection to copy), pop the toolbar.
+            // This is the browser fallback — AX can't read Chrome/Safari/Edge
+            // selections, so we rely on the user's explicit copy.
+            let app = app.clone();
+            thread::spawn(move || {
+                handle_copy_for_toolbar(&app);
             });
         }
         CGEventType::FlagsChanged => {
@@ -965,6 +1090,49 @@ fn accessibility_string_attribute(
     }
 }
 
+/// Check if the given screen position is on a text-selectable element.
+/// Returns false for window chrome (title bar, toolbar, buttons, scroll bars, menus).
+fn is_text_area_at_position(x: f64, y: f64) -> bool {
+    unsafe {
+        let system = AXUIElementCreateSystemWide();
+        if system.is_null() {
+            return true;
+        }
+
+        let mut element: AXUIElementRef = ptr::null();
+        let result = AXUIElementCopyElementAtPosition(
+            system,
+            x as f32,
+            y as f32,
+            &mut element,
+        );
+        CFRelease(system as CFTypeRef);
+
+        if result != AX_ERROR_SUCCESS || element.is_null() {
+            return true;
+        }
+
+        let role = accessibility_string_attribute(element, "AXRole");
+        CFRelease(element as CFTypeRef);
+
+        match role.as_deref() {
+            Some("AXWindow") | Some("AXToolbar") | Some("AXButton") |
+            Some("AXPopUpButton") | Some("AXCheckBox") | Some("AXRadioButton") |
+            Some("AXMenuBar") | Some("AXMenuBarItem") | Some("AXMenuItem") |
+            Some("AXScrollBar") | Some("AXSlider") | Some("AXStepper") |
+            Some("AXGrowArea") | Some("AXCloseButton") | Some("AXMinimizeButton") |
+            Some("AXZoomButton") | Some("AXFullScreenButton") => {
+                log_native(&format!(
+                    "non-text click at ({x:.0},{y:.0}) role={}",
+                    role.unwrap_or_default()
+                ));
+                false
+            }
+            _ => true,
+        }
+    }
+}
+
 fn is_translate_shortcut(event: &CGEvent) -> bool {
     let mode = current_popup_shortcut();
     let ShortcutMode::KeyCombo { cmd, shift, ctrl, alt, key_code } = mode else {
@@ -977,6 +1145,23 @@ fn is_translate_shortcut(event: &CGEvent) -> bool {
         && (!shift || flags.contains(CGEventFlags::CGEventFlagShift))
         && (!ctrl || flags.contains(CGEventFlags::CGEventFlagControl))
         && (!alt || flags.contains(CGEventFlags::CGEventFlagAlternate))
+}
+
+/// Detect a plain Cmd+C (no other modifiers). Used to spot the user's own
+/// copy action — we then watch for a resulting pasteboard changeCount bump
+/// and pop the toolbar. This is the browser fallback path: native macOS apps
+/// are handled via AX on mouse-up, but Chrome/Safari/Edge don't expose
+/// AXSelectedText, so we only get the text when the user explicitly copies.
+fn is_copy_command(event: &CGEvent) -> bool {
+    let event_key_code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
+    if event_key_code != KeyCode::ANSI_C as u16 {
+        return false;
+    }
+    let flags = event.get_flags();
+    flags.contains(CGEventFlags::CGEventFlagCommand)
+        && !flags.contains(CGEventFlags::CGEventFlagShift)
+        && !flags.contains(CGEventFlags::CGEventFlagControl)
+        && !flags.contains(CGEventFlags::CGEventFlagAlternate)
 }
 
 /// Maximum time between two Ctrl presses to count as a double-press (ms).
@@ -1024,24 +1209,120 @@ fn handle_flags_changed(app: &tauri::AppHandle, event: &CGEvent) {
 fn trigger_popup_with_selection(app: &tauri::AppHandle) {
     let _ = show_popup(app);
     thread::sleep(Duration::from_millis(35));
-    match read_selected_text() {
-        Ok(Some(text)) => {
-            log_native(&format!("shortcut text length={}", text.len()));
+
+    // AX first — works for native macOS apps (Notes/TextEdit/Mail/Terminal/...).
+    let (text, source) = match read_selected_text_via_ax() {
+        Some(s) => {
+            let trimmed = s.trim().to_string();
+            if trimmed.is_empty() {
+                (None, "ax-empty")
+            } else {
+                (Some(trimmed), "ax")
+            }
+        }
+        None => (None, "none"),
+    };
+
+    // Browser fallback: AX can't read Chrome/Safari/Edge selections, so use
+    // the text the user just Cmd+C'd, if it's still fresh.
+    let (text, source) = match text {
+        Some(t) => (Some(t), source),
+        None => {
+            let fallback = LAST_COPIED_TEXT
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+                .ok()
+                .and_then(|cell| {
+                    cell.as_ref().and_then(|(t, when)| {
+                        if when.elapsed().as_secs() < COPIED_TEXT_FRESH_SECS {
+                            Some(t.clone())
+                        } else {
+                            None
+                        }
+                    })
+                });
+            match fallback {
+                Some(t) => (Some(t), "copied"),
+                None => (None, source),
+            }
+        }
+    };
+
+    match text {
+        Some(t) => {
+            log_native(&format!("shortcut text length={} source={}", t.len(), source));
             let _ = app.emit(
                 "lexi://ai-request",
                 AiRequestPayload {
-                    text,
+                    text: t,
                     mode: "popup_card",
                     feature_id: "translation".to_string(),
                 },
             );
         }
-        Ok(None) => {
-            log_native("shortcut no selected text");
+        None => {
+            log_native(&format!("shortcut no selected text (source={})", source));
         }
-        Err(error) => {
-            log_native(&format!("shortcut read text error: {error}"));
-        }
+    }
+}
+
+/// Called when the user presses Cmd+C. Wait for the system to update the
+/// pasteboard, then check changeCount. If it bumped, the user actually copied
+/// something — pop the toolbar with that text. If it didn't bump, the user
+/// pressed Cmd+C with no selection, do nothing.
+/// User pressed Cmd+C. We don't pop any UI — just record what they copied,
+/// with a timestamp. Later, when the user hits the Ctrl+Ctrl popup shortcut
+/// and AX can't read the selection (browsers), we fall back to this record.
+/// This is the only way to get selected text out of Chrome/Safari/Edge
+/// without synthesizing keys (which prints stray characters).
+fn handle_copy_for_toolbar(_app: &tauri::AppHandle) {
+    // Cmd+C is async — the app processes the shortcut after our KeyDown tap
+    // sees it. 150ms is enough on a quiet machine; bump if testing shows misses.
+    thread::sleep(Duration::from_millis(150));
+
+    log_native("copy-handler: about to read changeCount");
+
+    let new_count = unsafe { pasteboard_change_count() };
+    log_native(&format!("copy-handler: changeCount={new_count}"));
+
+    let bumped = LAST_PASTEBOARD_CHANGE_COUNT
+        .get_or_init(|| Mutex::new(0))
+        .lock()
+        .ok()
+        .map(|mut cell| {
+            let prev = *cell;
+            if new_count > prev {
+                *cell = new_count;
+                true
+            } else {
+                false
+            }
+        })
+        .unwrap_or(false);
+
+    if !bumped {
+        log_native("copy-handler: changeCount not bumped, skipping");
+        return;
+    }
+
+    log_native("copy-handler: about to read pasteboard");
+    let Some(text) = read_pasteboard_string_via_pb() else {
+        log_native("copy-handler: pasteboard had no utf8 text");
+        return;
+    };
+
+    let trimmed = text.trim().to_string();
+    if trimmed.is_empty() {
+        log_native("copy-handler: pasteboard text empty after trim");
+        return;
+    }
+
+    log_native(&format!("copy-handler: recorded text len={}", trimmed.len()));
+    if let Ok(mut cell) = LAST_COPIED_TEXT
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+    {
+        *cell = Some((trimmed, Instant::now()));
     }
 }
 
@@ -1126,80 +1407,47 @@ fn read_selected_text_via_ax_range(element: AXUIElementRef) -> Option<String> {
     }
 }
 
-/// Read selected text: tries AX API first, falls back to clipboard probe.
-fn read_selected_text() -> Result<Option<String>, String> {
-    if let Some(text) = read_selected_text_via_ax() {
-        let trimmed = text.trim().to_string();
-        if !trimmed.is_empty() {
-            log_native(&format!("selected text via AX length={}", trimmed.len()));
-            return Ok(Some(trimmed));
-        }
+/// Returns the general NSPasteboard. Used to detect user-initiated Cmd+C
+/// (via changeCount) and read the resulting text — never to write.
+unsafe fn pasteboard_object() -> *mut std::ffi::c_void {
+    let class = objc_getClass(b"NSPasteboard\0".as_ptr() as *const i8);
+    if class.is_null() {
+        return ptr::null_mut();
     }
-
-    read_selected_text_from_clipboard_probe()
+    let sel = sel_registerName(b"generalPasteboard\0".as_ptr() as *const i8);
+    objc_msgSend(class as *mut std::ffi::c_void, sel)
 }
 
-fn read_selected_text_from_clipboard_probe() -> Result<Option<String>, String> {
-    // Serialize clipboard access to prevent concurrent probes from interfering
-    let _lock = CLIPBOARD_PROBE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
-    // Save original clipboard as raw bytes (avoids from_utf8_lossy corruption)
-    let original_bytes = command_output_raw("pbpaste", &[]).unwrap_or_default();
-
-    // Guard restores clipboard on error/panic — but NOT on success.
-    // On success, the selected text stays on the clipboard so the user can
-    // paste it directly. Restoring would overwrite the user's own Cmd+C.
-    struct ClipGuard { bytes: Vec<u8>, restored: bool }
-    impl Drop for ClipGuard {
-        fn drop(&mut self) {
-            if !self.restored {
-                let _ = write_clipboard_bytes(&self.bytes);
-            }
-        }
+/// NSPasteboard changeCount — increments every time the pasteboard is written.
+/// Used to detect that a real Cmd+C landed (vs. the user just pressing the
+/// shortcut with no selection).
+unsafe fn pasteboard_change_count() -> isize {
+    let pb = pasteboard_object();
+    if pb.is_null() {
+        return 0;
     }
-    let mut guard = ClipGuard { bytes: original_bytes, restored: false };
-
-    for attempt in 0..SELECTION_COPY_ATTEMPTS {
-        let marker = clipboard_marker();
-        write_clipboard(&marker)?;
-        thread::sleep(Duration::from_millis(15));
-        send_copy_shortcut()?;
-        thread::sleep(Duration::from_millis(55 + (attempt as u64 * 65)));
-
-        let selected_bytes = command_output_raw("pbpaste", &[])?;
-        if selected_bytes == marker.as_bytes() {
-            continue;
-        }
-
-        let selected_text = String::from_utf8_lossy(&selected_bytes);
-        let trimmed = selected_text.trim().to_string();
-        if !trimmed.is_empty() {
-            // Don't restore — leave selected text on clipboard for the user.
-            guard.restored = true;
-            return Ok(Some(trimmed));
-        }
-    }
-
-    // Probe failed to find text — restore original clipboard.
-    let _ = write_clipboard_bytes(&guard.bytes);
-    guard.restored = true;
-    Ok(None)
+    let sel = sel_registerName(b"changeCount\0".as_ptr() as *const i8);
+    objc_msgSend(pb, sel) as isize
 }
 
-fn send_copy_shortcut() -> Result<(), String> {
-    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-        .map_err(|_| "Could not create macOS keyboard event source.".to_string())?;
-    let key_down = CGEvent::new_keyboard_event(source.clone(), KeyCode::ANSI_C, true)
-        .map_err(|_| "Could not create Cmd+C key down event.".to_string())?;
-    let key_up = CGEvent::new_keyboard_event(source, KeyCode::ANSI_C, false)
-        .map_err(|_| "Could not create Cmd+C key up event.".to_string())?;
-
-    key_down.set_flags(CGEventFlags::CGEventFlagCommand);
-    key_up.set_flags(CGEventFlags::CGEventFlagCommand);
-    key_down.post(CGEventTapLocation::HID);
-    thread::sleep(Duration::from_millis(15));
-    key_up.post(CGEventTapLocation::HID);
-    Ok(())
+/// Read the current UTF-8 plain-text contents of the pasteboard via `pbpaste`.
+/// Avoids direct ObjC `stringForType:` on background threads — that path was
+/// crashing the process (autoreleased NSString + reference-count subtleties).
+/// pbpaste is ~30-80ms, fine for our 150ms-delayed read.
+fn read_pasteboard_string_via_pb() -> Option<String> {
+    let output = Command::new("pbpaste")
+        .env("LANG", "en_US.UTF-8")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&output.stdout).into_owned();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 fn write_clipboard(text: &str) -> Result<(), String> {
@@ -1228,18 +1476,6 @@ fn write_clipboard_bytes(data: &[u8]) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-fn clipboard_marker() -> String {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    format!(
-        "__LEXI_CLIPBOARD_MARKER_{}_{}__",
-        std::process::id(),
-        timestamp
-    )
 }
 
 fn appkit_position_from_event(event: &CGEvent) -> CursorPosition {
@@ -1564,20 +1800,6 @@ fn write_response(stream: &mut TcpStream, status: u16, body: &str) -> std::io::R
     )
 }
 
-fn command_output_raw(program: &str, args: &[&str]) -> Result<Vec<u8>, String> {
-    let mut cmd = Command::new(program);
-    cmd.args(args);
-    cmd.env("LANG", "en_US.UTF-8");
-    let output = cmd
-        .output()
-        .map_err(|error| format!("Failed to run {program}: {error}"))?;
-
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-
-    Ok(output.stdout)
-}
 
 fn launch_helper(app: &tauri::App, action_port: u16, toolbar_port: u16) -> anyhow::Result<()> {
     let helper_app = helper_app_path(app)?;
@@ -1674,6 +1896,12 @@ extern "C" {
         element: AXUIElementRef,
         attribute: CFStringRef,
         value: *mut CFTypeRef,
+    ) -> i32;
+    fn AXUIElementCopyElementAtPosition(
+        application: AXUIElementRef,
+        x: f32,
+        y: f32,
+        element: *mut AXUIElementRef,
     ) -> i32;
     fn AXValueGetValue(
         value: CFTypeRef,
