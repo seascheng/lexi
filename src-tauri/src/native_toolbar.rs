@@ -1,4 +1,4 @@
-use crate::cursor::{cursor_position, CursorPosition};
+use crate::cursor::{cursor_position, mouse_location, CursorPosition};
 use core_foundation::base::{CFRelease, CFType, CFTypeRef, TCFType};
 use core_foundation::runloop::CFRunLoop;
 use core_foundation::string::{CFString, CFStringRef};
@@ -889,7 +889,12 @@ fn handle_extension_connection(mut stream: TcpStream) {
             return;
         };
 
-        let position = cursor_position();
+        // Toolbar helper positions its NSPanel in Cocoa coordinates (origin at
+        // the bottom-left of the primary display, y up), matching the AX path's
+        // appkit_position_from_event. Use the live HID cursor location — NOT
+        // cursor_position(), whose flipped (top-left origin) value is meant for
+        // Tauri/tao window positioning and would land the toolbar off-screen.
+        let position = mouse_location();
         show_toolbar(port, text, position, false);
     });
 }
@@ -1478,11 +1483,17 @@ fn write_clipboard_bytes(data: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Cursor location at a mouse event, in Cocoa global coordinates (origin at the
+/// bottom-left of the primary display, y up) — the space the toolbar helper's
+/// `NSScreen`/`NSPanel` use. `event.location()` is in Core Graphics space
+/// (top-left origin, y down), so flip y to match `mouse_location()` and keep
+/// both toolbar show paths on the same coordinate system.
 fn appkit_position_from_event(event: &CGEvent) -> CursorPosition {
-    let location = event.location();
+    let loc = event.location();
+    let primary_height = CGDisplay::main().bounds().size.height as f64;
     CursorPosition {
-        x: location.x.round() as i32,
-        y: location.y.round() as i32,
+        x: loc.x.round() as i32,
+        y: (primary_height - loc.y).round() as i32,
     }
 }
 

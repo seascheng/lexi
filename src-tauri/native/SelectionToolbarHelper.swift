@@ -819,12 +819,19 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     }
 
     private func currentMouseLocation(fallback: ShowPayload) -> NSPoint {
-        let mouse = NSEvent.mouseLocation
-        if NSScreen.screens.contains(where: { $0.frame.contains(mouse) }) {
-            return mouse
+        // Rust sends the live cursor location (CoreGraphics HID state) in the
+        // same Cocoa coordinate space NSScreen uses. Prefer it: NSEvent.mouseLocation
+        // only reflects mouse events routed through this helper's own event loop,
+        // so it freezes on the display where the panel last lived whenever the
+        // selection happens in another app on another display — making the panel
+        // pop up on the wrong screen.
+        if fallback.x != 0 || fallback.y != 0 {
+            let payload = NSPoint(x: CGFloat(fallback.x), y: CGFloat(fallback.y))
+            if NSScreen.screens.contains(where: { $0.frame.contains(payload) }) {
+                return payload
+            }
         }
-
-        return NSPoint(x: fallback.x, y: fallback.y)
+        return NSEvent.mouseLocation
     }
 
     private func clampedPanelOrigin(near point: NSPoint, width: CGFloat) -> NSPoint {
