@@ -1,5 +1,5 @@
 use crate::cursor::{cursor_position, mouse_location, CursorPosition};
-use core_foundation::base::{CFRelease, CFType, CFTypeRef, TCFType};
+use core_foundation::base::{CFRetain, CFRelease, CFType, CFTypeRef, TCFType};
 use core_foundation::runloop::CFRunLoop;
 use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::{
@@ -956,6 +956,11 @@ fn handle_action_connection(mut stream: TcpStream, app: tauri::AppHandle) {
 struct ClickState {
     pre_selection: Option<String>,
     is_text_click: bool,
+    /// Mouse-down location (CG global coords), captured to detect drag gestures
+    /// on mouse-up so the clipboard-based menu fallback only runs on real
+    /// selection gestures — never on a bare click.
+    down_x: f64,
+    down_y: f64,
 }
 
 fn spawn_selection_monitor(app: tauri::AppHandle, toolbar_port: u16) {
@@ -1008,12 +1013,14 @@ fn handle_system_event(
                 *state = Some(ClickState {
                     pre_selection: snapshot,
                     is_text_click,
+                    down_x: loc.x,
+                    down_y: loc.y,
                 });
             }
         }
         CGEventType::LeftMouseUp => {
             let state = click_state.lock().ok().and_then(|mut s| s.take());
-            let Some(ClickState { pre_selection: pre, is_text_click, .. }) = state else {
+            let Some(ClickState { pre_selection: pre, is_text_click, down_x, down_y }) = state else {
                 return;
             };
 
@@ -1030,6 +1037,11 @@ fn handle_system_event(
             }
 
             let position = appkit_position_from_event(event);
+            // Selection gesture = drag beyond a few pixels, or a double/triple
+            // click (word/line select). Gates the clipboard-based menu fallback
+            // so a bare click never borrows the pasteboard.
+            let selection_gesture = is_selection_gesture(down_x, down_y, event);
+
             thread::spawn(move || {
                 // Delay to let the app process the mouse up and update its selection.
                 // Our event tap runs BEFORE the app sees the event (HeadInsert),
@@ -1050,6 +1062,18 @@ fn handle_system_event(
                     }
                     log_native(&format!("AX selection changed length={}", post_trimmed.len()));
                     show_toolbar(toolbar_port, post_trimmed, position, false);
+                } else if selection_gesture {
+                    // AX can't read this app (terminals like Ghostty, custom-rendered
+                    // editors like Zed). Drive the app's own Edit → Copy via the menu
+                    // and read the result. The pasteboard is borrowed only when free
+                    // of non-text content and restored exactly afterwards.
+                    if let Some(menu_text) = read_selected_text_via_menu() {
+                        log_native(&format!(
+                            "menu-copy selection length={}",
+                            menu_text.len()
+                        ));
+                        show_toolbar(toolbar_port, menu_text, position, false);
+                    }
                 }
             });
         }
@@ -1253,6 +1277,16 @@ fn trigger_popup_with_selection(app: &tauri::AppHandle) {
         }
     };
 
+    // Last resort: apps that expose neither AX selection nor a fresh user copy
+    // (terminals, custom-rendered editors). Drive the app's own Edit → Copy.
+    let (text, source) = match text {
+        Some(t) => (Some(t), source),
+        None => match read_selected_text_via_menu() {
+            Some(t) => (Some(t), "menu"),
+            None => (None, source),
+        },
+    };
+
     match text {
         Some(t) => {
             log_native(&format!("shortcut text length={} source={}", t.len(), source));
@@ -1410,6 +1444,312 @@ fn read_selected_text_via_ax_range(element: AXUIElementRef) -> Option<String> {
 
         Some(full_text[start..end].to_string())
     }
+}
+
+// ---------------------------------------------------------------------------
+// Menu-action selection fallback — for apps where AX can't read the selection.
+//
+// Terminals (Ghostty), custom-rendered editors (Zed) and some Electron apps
+// don't expose `AXSelectedText`. To still support them we invoke the app's own
+// Edit → Copy menu item via `AXPress` and read the resulting pasteboard.
+//
+// Safety contract — must never disturb the user's system state:
+//   1. Never inject keystrokes (only the app's own menu action) → no stray
+//      characters, unlike a synthesized Cmd+C.
+//   2. Only borrow the pasteboard when it carries no non-text data (images,
+//      files, …), so a user's image/file clipboard can never be clobbered.
+//   3. Always restore the pasteboard to its exact pre-call text, or clear it
+//      back to empty, when done.
+//   4. Guard on pasteboard `changeCount`: if Copy didn't change the pasteboard
+//      (no selection / disabled item) → return None (no popup, clipboard restored).
+//   5. The auto mouse-up path additionally requires a selection gesture (drag
+//      or multi-click), so a bare click never triggers a borrow.
+// ---------------------------------------------------------------------------
+
+/// Read the current selection by invoking the frontmost app's Edit → Copy menu
+/// item. Returns the selected text without leaving it on the clipboard. `None`
+/// if there's no Copy menu, the clipboard is unsafe to borrow, or Copy produced
+/// nothing (no selection).
+fn read_selected_text_via_menu() -> Option<String> {
+    let pre_text = read_pasteboard_string_via_pb();
+
+    if !pasteboard_safe_to_borrow() {
+        log_native("menu-read: pasteboard has non-text content; skipping to avoid clobbering");
+        return None;
+    }
+
+    let app = unsafe { ax_focused_application() };
+    let Some(app) = app else {
+        log_native("menu-read: no focused application");
+        return None;
+    };
+
+    let result = unsafe { find_copy_menu_item(app) }.and_then(|copy_item| {
+        let text = unsafe { perform_menu_copy_and_read(copy_item, pre_text.as_deref()) };
+        unsafe { CFRelease(copy_item as CFTypeRef) };
+        text
+    });
+
+    unsafe { CFRelease(app as CFTypeRef) };
+    result
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+}
+
+/// Press the Copy menu item, wait for the pasteboard to change, read the new
+/// text, then restore the pasteboard. The pasteboard is always restored,
+/// whether or not Copy produced anything.
+unsafe fn perform_menu_copy_and_read(
+    copy_item: AXUIElementRef,
+    pre_text: Option<&str>,
+) -> Option<String> {
+    let count_before = pasteboard_change_count();
+
+    let action = CFString::from_static_string("AXPress");
+    let _ = AXUIElementPerformAction(copy_item, action.as_concrete_TypeRef());
+
+    // Copy is async — poll the pasteboard changeCount (max ~250ms).
+    let mut bumped = false;
+    for _ in 0..25 {
+        thread::sleep(Duration::from_millis(10));
+        if pasteboard_change_count() > count_before {
+            bumped = true;
+            break;
+        }
+    }
+
+    // Read the selection BEFORE restoring (restore overwrites it).
+    let text = if bumped {
+        read_pasteboard_string_via_pb()
+    } else {
+        None
+    };
+
+    restore_pasteboard(pre_text);
+
+    if !bumped {
+        log_native("menu-read: Copy did not change pasteboard (no selection); skipping");
+        return None;
+    }
+    text
+}
+
+/// Restore the pasteboard to what `read_pasteboard_string_via_pb` captured: put
+/// the original text back, or clear it if it was empty/whitespace.
+fn restore_pasteboard(pre_text: Option<&str>) {
+    match pre_text.map(str::trim) {
+        Some(t) if !t.is_empty() => {
+            if let Err(e) = write_clipboard(t) {
+                log_native(&format!("menu-read: failed to restore clipboard: {e}"));
+            }
+        }
+        _ => {
+            // Was empty (non-text is already gated out) → clear what Copy wrote.
+            clear_pasteboard();
+        }
+    }
+}
+
+/// Walk the frontmost app's menu bar; return the (retained) Copy menu item,
+/// matched by localized title. `None` if not found.
+unsafe fn find_copy_menu_item(app: AXUIElementRef) -> Option<AXUIElementRef> {
+    let mut menubar_value: CFTypeRef = ptr::null();
+    let mb_attr = CFString::from_static_string("AXMenuBar");
+    if AXUIElementCopyAttributeValue(app, mb_attr.as_concrete_TypeRef(), &mut menubar_value)
+        != AX_ERROR_SUCCESS
+        || menubar_value.is_null()
+    {
+        return None;
+    }
+    let menubar = menubar_value as AXUIElementRef;
+    let menus = ax_children(menubar);
+    CFRelease(menubar as CFTypeRef);
+
+    let mut found: Option<AXUIElementRef> = None;
+    for menu in menus {
+        if found.is_some() {
+            CFRelease(menu as CFTypeRef);
+            continue;
+        }
+        let items = ax_children(menu);
+        CFRelease(menu as CFTypeRef);
+        for item in items {
+            if found.is_some() {
+                CFRelease(item as CFTypeRef);
+                continue;
+            }
+            let title = accessibility_string_attribute(item, "AXTitle").unwrap_or_default();
+            if is_copy_menu_title(&title) {
+                CFRetain(item);
+                found = Some(item);
+            }
+            CFRelease(item as CFTypeRef);
+        }
+    }
+    found
+}
+
+/// Localized titles for the Copy menu item. Match is exact after trimming a
+/// trailing ellipsis (some apps render "Copy…"). Add locales as needed.
+fn is_copy_menu_title(title: &str) -> bool {
+    let t = title.trim_end_matches('…').trim();
+    matches!(
+        t,
+        "Copy" | "复制" | "拷贝" | "拷貝" | "複製" | "Copier" | "Kopieren"
+            | "Copiar" | "Copia" | "Копировать" | "コピー"
+    )
+}
+
+/// `AXChildren` of an element as retained `AXUIElementRef`s (caller releases).
+unsafe fn ax_children(element: AXUIElementRef) -> Vec<AXUIElementRef> {
+    let mut value: CFTypeRef = ptr::null();
+    let attr = CFString::from_static_string("AXChildren");
+    if AXUIElementCopyAttributeValue(element, attr.as_concrete_TypeRef(), &mut value)
+        != AX_ERROR_SUCCESS
+        || value.is_null()
+    {
+        return Vec::new();
+    }
+    let count = CFArrayGetCount(value as *const std::ffi::c_void);
+    let mut out = Vec::with_capacity(count.max(0) as usize);
+    for i in 0..count {
+        let child =
+            CFArrayGetValueAtIndex(value as *const std::ffi::c_void, i) as AXUIElementRef;
+        if !child.is_null() {
+            CFRetain(child);
+            out.push(child);
+        }
+    }
+    CFRelease(value);
+    out
+}
+
+/// Focused application AXUIElement (retained; caller must `CFRelease`).
+unsafe fn ax_focused_application() -> Option<AXUIElementRef> {
+    let system = AXUIElementCreateSystemWide();
+    if system.is_null() {
+        return None;
+    }
+    let mut app: AXUIElementRef = ptr::null();
+    let attr = CFString::from_static_string("AXFocusedApplication");
+    let r = AXUIElementCopyAttributeValue(system, attr.as_concrete_TypeRef(), &mut app);
+    CFRelease(system as CFTypeRef);
+    if r != AX_ERROR_SUCCESS || app.is_null() {
+        return None;
+    }
+    Some(app)
+}
+
+/// Whether a mouse-up looks like a selection: the pointer dragged more than a
+/// few pixels, or it was a double/triple click (word / line select).
+fn is_selection_gesture(down_x: f64, down_y: f64, up: &CGEvent) -> bool {
+    let click_state = up.get_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE) as i64;
+    if click_state >= 2 {
+        return true;
+    }
+    let loc = up.location();
+    let dx = loc.x - down_x;
+    let dy = loc.y - down_y;
+    (dx * dx + dy * dy) > 25.0 // > ~5px
+}
+
+/// Whether the general pasteboard is safe to temporarily borrow: it must carry
+/// no non-text data (images, files, …) that we couldn't faithfully restore.
+fn pasteboard_safe_to_borrow() -> bool {
+    unsafe {
+        let pool = new_autorelease_pool();
+        let safe = pasteboard_has_only_text_types();
+        drain_autorelease_pool(pool);
+        safe
+    }
+}
+
+unsafe fn pasteboard_has_only_text_types() -> bool {
+    let pb = pasteboard_object();
+    if pb.is_null() {
+        return true;
+    }
+    let sel = sel_registerName(b"types\0".as_ptr() as *const i8);
+    // NSArray* (toll-free-bridged with CFArrayRef); autoreleased → pool required.
+    let types = objc_msgSend(pb, sel) as *const std::ffi::c_void;
+    if types.is_null() {
+        return true;
+    }
+    let count = CFArrayGetCount(types);
+    let mut safe = true;
+    for i in 0..count {
+        let t = CFArrayGetValueAtIndex(types, i) as CFStringRef;
+        if t.is_null() {
+            continue;
+        }
+        let uti = CFString::wrap_under_get_rule(t).to_string();
+        if looks_like_non_text_uti(&uti) {
+            safe = false;
+            break;
+        }
+    }
+    safe
+}
+
+fn looks_like_non_text_uti(uti: &str) -> bool {
+    let u = uti.to_ascii_lowercase();
+    u == "public.tiff"
+        || u == "public.png"
+        || u == "public.jpeg"
+        || u == "public.jpeg-2000"
+        || u == "public.gif"
+        || u == "public.bmp"
+        || u == "public.image"
+        || u == "public.pdf"
+        || u == "com.adobe.pdf"
+        || u == "public.file-url"
+        || u == "public.url"
+        || u == "nsfilenamespboardtype"
+        || u == "com.apple.pasteboard.promised-file-url"
+        || u == "public.audiovisual-content"
+        || u == "public.movie"
+        || u == "public.audio"
+        || u.ends_with(".png")
+        || u.ends_with(".tiff")
+        || u.ends_with(".tif")
+        || u.ends_with(".jpg")
+        || u.ends_with(".jpeg")
+        || u.ends_with(".pdf")
+        || u.ends_with(".gif")
+        || u.ends_with(".mov")
+        || u.ends_with(".mp4")
+}
+
+/// Clear the general pasteboard (used to restore an originally-empty board).
+fn clear_pasteboard() {
+    unsafe {
+        let pool = new_autorelease_pool();
+        let pb = pasteboard_object();
+        if !pb.is_null() {
+            let sel = sel_registerName(b"clearContents\0".as_ptr() as *const i8);
+            objc_msgSend(pb, sel);
+        }
+        drain_autorelease_pool(pool);
+    }
+}
+
+unsafe fn new_autorelease_pool() -> *mut std::ffi::c_void {
+    let cls = objc_getClass(b"NSAutoreleasePool\0".as_ptr() as *const i8);
+    if cls.is_null() {
+        return ptr::null_mut();
+    }
+    let alloc = sel_registerName(b"alloc\0".as_ptr() as *const i8);
+    let obj = objc_msgSend(cls as *mut std::ffi::c_void, alloc);
+    let init = sel_registerName(b"init\0".as_ptr() as *const i8);
+    objc_msgSend(obj, init)
+}
+
+unsafe fn drain_autorelease_pool(pool: *mut std::ffi::c_void) {
+    if pool.is_null() {
+        return;
+    }
+    let drain = sel_registerName(b"drain\0".as_ptr() as *const i8);
+    objc_msgSend(pool, drain);
 }
 
 /// Returns the general NSPasteboard. Used to detect user-initiated Cmd+C
@@ -1919,4 +2259,13 @@ extern "C" {
         the_type: u32,
         range_ptr: *mut std::ffi::c_void,
     ) -> bool;
+    fn AXUIElementPerformAction(element: AXUIElementRef, action: CFStringRef) -> i32;
+}
+
+extern "C" {
+    fn CFArrayGetCount(the_array: *const std::ffi::c_void) -> isize;
+    fn CFArrayGetValueAtIndex(
+        the_array: *const std::ffi::c_void,
+        idx: isize,
+    ) -> *const std::ffi::c_void;
 }
