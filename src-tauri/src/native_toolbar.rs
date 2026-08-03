@@ -1024,10 +1024,6 @@ fn handle_system_event(
                 return;
             };
 
-            if !is_text_click {
-                return;
-            }
-
             if !toolbar_enabled_for_app(app) {
                 return;
             }
@@ -1038,9 +1034,15 @@ fn handle_system_event(
 
             let position = appkit_position_from_event(event);
             // Selection gesture = drag beyond a few pixels, or a double/triple
-            // click (word/line select). Gates the clipboard-based menu fallback
-            // so a bare click never borrows the pasteboard.
+            // click (word/line select).
             let selection_gesture = is_selection_gesture(down_x, down_y, event);
+            // A bare click on non-text chrome does nothing. Text clicks go to the
+            // AX path; any selection gesture also gets a shot at the menu fallback
+            // — needed for custom-rendered apps (Zed, Ghostty) whose content
+            // hit-tests as AXWindow and would otherwise be gated out entirely.
+            if !is_text_click && !selection_gesture {
+                return;
+            }
 
             thread::spawn(move || {
                 // Delay to let the app process the mouse up and update its selection.
@@ -1048,25 +1050,33 @@ fn handle_system_event(
                 // so without this delay AXSelectedText would still reflect the old state.
                 thread::sleep(Duration::from_millis(80));
 
-                // Try AX first (no clipboard interference)
-                let ax_result = read_selected_text_via_ax()
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty());
-
-                if let Some(post_trimmed) = ax_result {
-                    if let Some(pre_text) = pre {
-                        if pre_text == post_trimmed {
+                // AX path — only when the click landed on a text element, so we
+                // don't read a stale focused selection when the user clicks chrome.
+                let mut shown = false;
+                let mut unchanged = false;
+                if is_text_click {
+                    let ax_result = read_selected_text_via_ax()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty());
+                    if let Some(post_trimmed) = ax_result {
+                        if pre.as_deref().is_some_and(|p| p == post_trimmed.as_str()) {
                             log_native("selection unchanged, skipping toolbar");
-                            return;
+                            unchanged = true;
+                        } else {
+                            log_native(&format!(
+                                "AX selection changed length={}",
+                                post_trimmed.len()
+                            ));
+                            show_toolbar(toolbar_port, post_trimmed, position, false);
+                            shown = true;
                         }
                     }
-                    log_native(&format!("AX selection changed length={}", post_trimmed.len()));
-                    show_toolbar(toolbar_port, post_trimmed, position, false);
-                } else if selection_gesture {
-                    // AX can't read this app (terminals like Ghostty, custom-rendered
-                    // editors like Zed). Drive the app's own Edit → Copy via the menu
-                    // and read the result. The pasteboard is borrowed only when free
-                    // of non-text content and restored exactly afterwards.
+                }
+
+                // Menu fallback — apps AX can't read (Ghostty, Zed, ...). Runs on
+                // any selection gesture; the changeCount guard inside means no
+                // selection → no popup and no clipboard disturbance.
+                if !shown && !unchanged && selection_gesture {
                     if let Some(menu_text) = read_selected_text_via_menu() {
                         log_native(&format!(
                             "menu-copy selection length={}",
@@ -1626,18 +1636,49 @@ unsafe fn ax_children(element: AXUIElementRef) -> Vec<AXUIElementRef> {
 
 /// Focused application AXUIElement (retained; caller must `CFRelease`).
 unsafe fn ax_focused_application() -> Option<AXUIElementRef> {
-    let system = AXUIElementCreateSystemWide();
-    if system.is_null() {
-        return None;
-    }
-    let mut app: AXUIElementRef = ptr::null();
-    let attr = CFString::from_static_string("AXFocusedApplication");
-    let r = AXUIElementCopyAttributeValue(system, attr.as_concrete_TypeRef(), &mut app);
-    CFRelease(system as CFTypeRef);
-    if r != AX_ERROR_SUCCESS || app.is_null() {
+    // Use NSWorkspace's frontmost pid → AXUIElementCreateApplication. The
+    // `AXFocusedApplication` attribute on the system-wide element is unreliable:
+    // some apps (certain Tauri/Electron apps) report no focused application at
+    // all, which would silently kill the menu fallback.
+    let pid = frontmost_pid()?;
+    let app = AXUIElementCreateApplication(pid);
+    if app.is_null() {
         return None;
     }
     Some(app)
+}
+
+/// pid of the current frontmost application (via NSWorkspace), wrapped in an
+/// autorelease pool because `frontmostApplication` returns an autoreleased
+/// NSRunningApplication.
+unsafe fn frontmost_pid() -> Option<i32> {
+    let pool = new_autorelease_pool();
+    let pid = frontmost_pid_inner();
+    drain_autorelease_pool(pool);
+    pid
+}
+
+unsafe fn frontmost_pid_inner() -> Option<i32> {
+    let cls = objc_getClass(b"NSWorkspace\0".as_ptr() as *const i8);
+    if cls.is_null() {
+        return None;
+    }
+    let shared_sel = sel_registerName(b"sharedWorkspace\0".as_ptr() as *const i8);
+    let workspace = objc_msgSend(cls as *mut std::ffi::c_void, shared_sel);
+    if workspace.is_null() {
+        return None;
+    }
+    let frontmost_sel = sel_registerName(b"frontmostApplication\0".as_ptr() as *const i8);
+    let running_app = objc_msgSend(workspace, frontmost_sel);
+    if running_app.is_null() {
+        return None;
+    }
+    let pid_sel = sel_registerName(b"processIdentifier\0".as_ptr() as *const i8);
+    let pid = objc_msgSend(running_app, pid_sel) as i32;
+    if pid <= 0 {
+        return None;
+    }
+    Some(pid)
 }
 
 /// Whether a mouse-up looks like a selection: the pointer dragged more than a
@@ -2243,6 +2284,7 @@ extern "C" {
     fn CGPreflightPostEventAccess() -> bool;
     fn CGRequestPostEventAccess() -> bool;
     fn AXUIElementCreateSystemWide() -> AXUIElementRef;
+    fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
     fn AXUIElementCopyAttributeValue(
         element: AXUIElementRef,
         attribute: CFStringRef,
