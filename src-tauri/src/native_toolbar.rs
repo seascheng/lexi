@@ -1493,6 +1493,9 @@ fn read_selected_text_via_menu() -> Option<String> {
         log_native("menu-read: no focused application");
         return None;
     };
+    if let Some(pid) = unsafe { frontmost_pid() } {
+        log_native(&format!("menu-read: focused app pid={pid}"));
+    }
 
     let result = unsafe { find_copy_menu_item(app) }.and_then(|copy_item| {
         let text = unsafe { perform_menu_copy_and_read(copy_item, pre_text.as_deref()) };
@@ -1569,34 +1572,100 @@ unsafe fn find_copy_menu_item(app: AXUIElementRef) -> Option<AXUIElementRef> {
         != AX_ERROR_SUCCESS
         || menubar_value.is_null()
     {
+        log_native("menu-read: app exposes no AXMenuBar");
         return None;
     }
     let menubar = menubar_value as AXUIElementRef;
     let menus = ax_children(menubar);
     CFRelease(menubar as CFTypeRef);
+    log_native(&format!("menu-read: {} top-level menu(s)", menus.len()));
 
-    let mut found: Option<AXUIElementRef> = None;
-    for menu in menus {
-        if found.is_some() {
-            CFRelease(menu as CFTypeRef);
-            continue;
-        }
-        let items = ax_children(menu);
-        CFRelease(menu as CFTypeRef);
-        for item in items {
-            if found.is_some() {
-                CFRelease(item as CFTypeRef);
-                continue;
-            }
-            let title = accessibility_string_attribute(item, "AXTitle").unwrap_or_default();
-            if is_copy_menu_title(&title) {
-                CFRetain(item);
-                found = Some(item);
-            }
-            CFRelease(item as CFTypeRef);
+    let mut seen: Vec<String> = Vec::new();
+    let found = find_copy_in_menus(&menus, &mut seen, 0);
+    for menu in &menus {
+        CFRelease(*menu as CFTypeRef);
+    }
+    match &found {
+        Some(_) => log_native("menu-read: Copy menu item located"),
+        None => {
+            let combined = seen.join(" | ");
+            let clipped: String = combined.chars().take(400).collect();
+            log_native(&format!(
+                "menu-read: Copy not found. item titles seen (truncated): {clipped}"
+            ));
         }
     }
     found
+}
+
+/// Recursive depth-first walk of menu items. Matches an item if its localized
+/// title is a known "Copy", or if its keyboard shortcut is Cmd+C
+/// (`AXMenuItemCmdChar == "c"`, locale-independent). `seen` collects item titles
+/// for diagnostics when nothing matches.
+unsafe fn find_copy_in_menus(
+    menus: &[AXUIElementRef],
+    seen: &mut Vec<String>,
+    depth: u32,
+) -> Option<AXUIElementRef> {
+    if depth > 4 {
+        return None;
+    }
+    for menu in menus {
+        let items = ax_children(*menu);
+
+        // 1. Direct match at this level.
+        let mut found_idx: Option<usize> = None;
+        for (i, item) in items.iter().enumerate() {
+            let title = accessibility_string_attribute(*item, "AXTitle").unwrap_or_default();
+            let clean = title.trim().trim_end_matches('…').trim().to_string();
+            if !clean.is_empty() && seen.len() < 80 {
+                seen.push(clean);
+            }
+            if found_idx.is_none() && (is_copy_menu_title(&title) || is_copy_by_shortcut(*item)) {
+                found_idx = Some(i);
+            }
+        }
+        if let Some(i) = found_idx {
+            let found = items[i];
+            for (j, item) in items.iter().enumerate() {
+                if j != i {
+                    CFRelease(*item as CFTypeRef);
+                }
+            }
+            return Some(found);
+        }
+
+        // 2. Recurse into submenus (an item's children can themselves be a menu).
+        let mut found: Option<AXUIElementRef> = None;
+        for item in &items {
+            let sub = ax_children(*item);
+            if !sub.is_empty() {
+                if let Some(f) = find_copy_in_menus(&sub, seen, depth + 1) {
+                    found = Some(f);
+                }
+                for s in &sub {
+                    CFRelease(*s as CFTypeRef);
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        for item in &items {
+            CFRelease(*item as CFTypeRef);
+        }
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
+}
+
+/// Match a menu item whose shortcut is Cmd+C, regardless of its localized title.
+unsafe fn is_copy_by_shortcut(item: AXUIElementRef) -> bool {
+    accessibility_string_attribute(item, "AXMenuItemCmdChar")
+        .map(|c| c == "c" || c == "C")
+        .unwrap_or(false)
 }
 
 /// Localized titles for the Copy menu item. Match is exact after trimming a
