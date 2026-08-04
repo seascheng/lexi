@@ -7,6 +7,7 @@ use core_graphics::event::{
     CGEventType, CallbackResult, EventField, KeyCode,
 };
 use core_graphics::display::CGDisplay;
+use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::OpenOptions;
@@ -1077,12 +1078,16 @@ fn handle_system_event(
                 // any selection gesture; the changeCount guard inside means no
                 // selection → no popup and no clipboard disturbance.
                 if !shown && !unchanged && selection_gesture {
-                    if let Some(menu_text) = read_selected_text_via_menu() {
-                        log_native(&format!(
-                            "menu-copy selection length={}",
-                            menu_text.len()
-                        ));
-                        show_toolbar(toolbar_port, menu_text, position, false);
+                    // AX can't read this app (terminals, custom-rendered editors).
+                    // Try the app's Edit → Copy menu, then fall back to a synthetic
+                    // Cmd+C delivered to the target pid. Both are clipboard-safe
+                    // (only borrow when non-text-free, restore exactly, skip unless
+                    // the pasteboard actually changed).
+                    let text = read_selected_text_via_menu()
+                        .or_else(read_selected_text_via_cmd_c);
+                    if let Some(t) = text {
+                        log_native(&format!("fallback selection length={}", t.len()));
+                        show_toolbar(toolbar_port, t, position, false);
                     }
                 }
             });
@@ -1291,8 +1296,8 @@ fn trigger_popup_with_selection(app: &tauri::AppHandle) {
     // (terminals, custom-rendered editors). Drive the app's own Edit → Copy.
     let (text, source) = match text {
         Some(t) => (Some(t), source),
-        None => match read_selected_text_via_menu() {
-            Some(t) => (Some(t), "menu"),
+        None => match read_selected_text_via_menu().or_else(read_selected_text_via_cmd_c) {
+            Some(t) => (Some(t), "fallback"),
             None => (None, source),
         },
     };
@@ -1565,6 +1570,97 @@ fn restore_pasteboard(pre_text: Option<&str>) {
 
 /// Walk the frontmost app's menu bar; return the (retained) Copy menu item,
 /// matched by localized title. `None` if not found.
+// ---------------------------------------------------------------------------
+// Cmd+C injection fallback (last resort).
+//
+// Used when neither AX nor the menu-action fallback can read the selection —
+// notably apps whose submenu items aren't exposed via Accessibility until the
+// menu is opened (Zed, Orca, …). We synthesize a Cmd+C delivered directly to
+// the target app and read the result.
+//
+// Why this avoids the old "ghost c" problem:
+//   * `CGEventPostToPid` delivers to the target process's queue only — it does
+//     NOT pass through the system event tap, so there's no modifier-strip race.
+//   * The Cmd flag is set on both the key-down and key-up events, so the app
+//     sees a real Cmd+C, never a bare 'c'.
+//   * Same clipboard safety as the menu path: borrow only when free of
+//     non-text content, restore exactly afterwards, and skip unless the
+//     pasteboard actually changed (no selection → no popup, no disturbance).
+// ---------------------------------------------------------------------------
+
+fn read_selected_text_via_cmd_c() -> Option<String> {
+    let pre_text = read_pasteboard_string_via_pb();
+
+    if !pasteboard_safe_to_borrow() {
+        log_native("cmdc-read: pasteboard has non-text content; skipping to avoid clobbering");
+        return None;
+    }
+
+    let pid = unsafe { frontmost_pid() };
+    let Some(pid) = pid else {
+        log_native("cmdc-read: no frontmost pid");
+        return None;
+    };
+
+    let result = unsafe { post_cmd_c_and_read(pid, pre_text.as_deref()) };
+    result
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+}
+
+/// Post a Cmd+C directly to `pid`, wait for the pasteboard, read it, restore.
+unsafe fn post_cmd_c_and_read(pid: i32, pre_text: Option<&str>) -> Option<String> {
+    let count_before = pasteboard_change_count();
+    let cmd = CGEventFlags::CGEventFlagCommand;
+
+    // Each event carries the Cmd flag itself, so the app receives a well-formed
+    // Cmd+C regardless of the live modifier state.
+    let post_c = |key_down: bool| {
+        let source = match CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        let event = match CGEvent::new_keyboard_event(source, KeyCode::ANSI_C, key_down) {
+            Ok(e) => e,
+            Err(_) => return false,
+        };
+        event.set_flags(cmd);
+        event.post_to_pid(pid);
+        true
+    };
+
+    if !post_c(true) || !post_c(false) {
+        restore_pasteboard(pre_text);
+        log_native("cmdc-read: could not synthesize Cmd+C event");
+        return None;
+    }
+
+    // Cmd+C is async — poll the pasteboard changeCount (max ~300ms).
+    let mut bumped = false;
+    for _ in 0..30 {
+        thread::sleep(Duration::from_millis(10));
+        if pasteboard_change_count() > count_before {
+            bumped = true;
+            break;
+        }
+    }
+
+    let text = if bumped {
+        read_pasteboard_string_via_pb()
+    } else {
+        None
+    };
+
+    restore_pasteboard(pre_text);
+
+    if !bumped {
+        log_native("cmdc-read: Cmd+C did not change pasteboard (no selection); skipping");
+        return None;
+    }
+    text
+}
+
+
 unsafe fn find_copy_menu_item(app: AXUIElementRef) -> Option<AXUIElementRef> {
     let mut menubar_value: CFTypeRef = ptr::null();
     let mb_attr = CFString::from_static_string("AXMenuBar");
