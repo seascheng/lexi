@@ -7,6 +7,7 @@ use core_graphics::event::{
     CGEventType, CallbackResult, EventField, KeyCode,
 };
 use core_graphics::display::CGDisplay;
+use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::OpenOptions;
@@ -1066,9 +1067,11 @@ fn handle_system_event(
                 // Clipboard-safe: only borrow when non-text-free, restore exactly,
                 // and skip unless the pasteboard actually changed (no selection →
                 // no popup, no clipboard disturbance).
-                if let Some(menu_text) = read_selected_text_via_menu() {
-                    log_native(&format!("fallback selection length={}", menu_text.len()));
-                    show_toolbar(toolbar_port, menu_text, position, false);
+                let text = read_selected_text_via_menu()
+                    .or_else(read_selected_text_via_cmd_c);
+                if let Some(t) = text {
+                    log_native(&format!("fallback selection length={}", t.len()));
+                    show_toolbar(toolbar_port, t, position, false);
                 }
             });
         }
@@ -1276,7 +1279,7 @@ fn trigger_popup_with_selection(app: &tauri::AppHandle) {
     // (terminals, custom-rendered editors). Drive the app's own Edit → Copy.
     let (text, source) = match text {
         Some(t) => (Some(t), source),
-        None => match read_selected_text_via_menu() {
+        None => match read_selected_text_via_menu().or_else(read_selected_text_via_cmd_c) {
             Some(t) => (Some(t), "fallback"),
             None => (None, source),
         },
@@ -1546,6 +1549,104 @@ fn restore_pasteboard(pre_text: Option<&str>) {
             clear_pasteboard();
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Cmd+C injection fallback (last resort) — FULL modifier sequence.
+//
+// Used when neither AX nor the menu-action fallback can read the selection
+// (apps whose submenu items aren't exposed until the menu is opened — Zed,
+// Orca, Ghostty). We synthesize a Cmd+C delivered to the target app.
+//
+// Why the FULL four-event sequence (not just c-down/c-up with a flag):
+//   Cmd-FlagsChanged(down) → c-down → c-up → Cmd-FlagsChanged(up)
+// The two FlagsChanged events update the *live* modifier state in the target
+// app. Without them, apps that read modifier state (not the event's flag) see
+// a bare 'c' — the "ghost c" leak. This is the technique Easydict/KeySender use.
+//
+// Clipboard safety (same as the menu path): borrow only when free of non-text
+// content, restore exactly afterwards, skip unless the pasteboard actually
+// changed (no selection → no popup, no disturbance).
+// ---------------------------------------------------------------------------
+
+fn read_selected_text_via_cmd_c() -> Option<String> {
+    let pre_text = read_pasteboard_string_via_pb();
+
+    if !pasteboard_safe_to_borrow() {
+        log_native("cmdc-read: pasteboard has non-text content; skipping to avoid clobbering");
+        return None;
+    }
+
+    let pid = unsafe { frontmost_pid() };
+    let Some(pid) = pid else {
+        log_native("cmdc-read: no frontmost pid");
+        return None;
+    };
+
+    let result = unsafe { post_cmd_c_and_read(pid, pre_text.as_deref()) };
+    result
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+}
+
+const CMD_KEYCODE: u16 = 0x37; // kVK_Command
+
+/// Post the full Cmd+C sequence to `pid`, wait for the pasteboard, read, restore.
+unsafe fn post_cmd_c_and_read(pid: i32, pre_text: Option<&str>) -> Option<String> {
+    let count_before = pasteboard_change_count();
+    let cmd = CGEventFlags::CGEventFlagCommand;
+
+    let cmd_down = flags_changed_event(CMD_KEYCODE, cmd)?;
+    cmd_down.post_to_pid(pid);
+    let c_down = key_event(KeyCode::ANSI_C, true, cmd)?;
+    c_down.post_to_pid(pid);
+    let c_up = key_event(KeyCode::ANSI_C, false, cmd)?;
+    c_up.post_to_pid(pid);
+    let cmd_up = flags_changed_event(CMD_KEYCODE, CGEventFlags::empty())?;
+    cmd_up.post_to_pid(pid);
+
+    // Cmd+C is async — poll the pasteboard changeCount (max ~300ms).
+    let mut bumped = false;
+    for _ in 0..30 {
+        thread::sleep(Duration::from_millis(10));
+        if pasteboard_change_count() > count_before {
+            bumped = true;
+            break;
+        }
+    }
+
+    let text = if bumped {
+        read_pasteboard_string_via_pb()
+    } else {
+        None
+    };
+
+    restore_pasteboard(pre_text);
+
+    if !bumped {
+        log_native("cmdc-read: Cmd+C did not change pasteboard (no selection); skipping");
+        return None;
+    }
+    text
+}
+
+/// A FlagsChanged event — used to press/release a modifier key (here, Cmd) so
+/// the target app's live modifier state actually reflects it.
+unsafe fn flags_changed_event(keycode: u16, flags: CGEventFlags) -> Option<CGEvent> {
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).ok()?;
+    let event = CGEvent::new(source).ok()?;
+    event.set_type(CGEventType::FlagsChanged);
+    event.set_flags(flags);
+    event.set_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE, keycode as i64);
+    Some(event)
+}
+
+/// A regular key-down/up event carrying the given modifier flags.
+unsafe fn key_event(keycode: u16, key_down: bool, flags: CGEventFlags) -> Option<CGEvent> {
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).ok()?;
+    let event = CGEvent::new_keyboard_event(source, keycode, key_down).ok()?;
+    event.set_flags(flags);
+    Some(event)
 }
 
 /// Walk the frontmost app's menu bar; return the (retained) Copy menu item,
