@@ -7,7 +7,6 @@ use core_graphics::event::{
     CGEventType, CallbackResult, EventField, KeyCode,
 };
 use core_graphics::display::CGDisplay;
-use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::OpenOptions;
@@ -955,11 +954,8 @@ fn handle_action_connection(mut stream: TcpStream, app: tauri::AppHandle) {
 }
 
 struct ClickState {
-    pre_selection: Option<String>,
-    is_text_click: bool,
     /// Mouse-down location (CG global coords), captured to detect drag gestures
-    /// on mouse-up so the clipboard-based menu fallback only runs on real
-    /// selection gestures — never on a bare click.
+    /// on mouse-up. Nothing else is captured here on purpose — see LeftMouseDown.
     down_x: f64,
     down_y: f64,
 }
@@ -1005,15 +1001,14 @@ fn handle_system_event(
 ) {
     match event_type {
         CGEventType::LeftMouseDown => {
+            // Record the down position ONLY — no Accessibility calls here. This
+            // tap runs at HeadInsert, so any AX/osascript work in this callback
+            // blocks the tap thread and delays every later event (keystrokes
+            // included), which is what caused the typing/cursor lag. All slow
+            // work is deferred to the mouse-up worker thread.
             let loc = event.location();
-            let snapshot = read_selected_text_via_ax()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
-            let is_text_click = is_text_area_at_position(loc.x, loc.y);
             if let Ok(mut state) = click_state.lock() {
                 *state = Some(ClickState {
-                    pre_selection: snapshot,
-                    is_text_click,
                     down_x: loc.x,
                     down_y: loc.y,
                 });
@@ -1021,74 +1016,59 @@ fn handle_system_event(
         }
         CGEventType::LeftMouseUp => {
             let state = click_state.lock().ok().and_then(|mut s| s.take());
-            let Some(ClickState { pre_selection: pre, is_text_click, down_x, down_y }) = state else {
+            let Some(ClickState { down_x, down_y }) = state else {
                 return;
             };
 
-            if !toolbar_enabled_for_app(app) {
-                return;
-            }
-
-            if active_toolbar_actions().is_none() {
-                return;
-            }
-
+            // Cheap, non-AX work only — see LeftMouseDown. Everything slow runs
+            // on a worker thread so the tap never blocks.
             let position = appkit_position_from_event(event);
-            // Selection gesture = drag beyond a few pixels, or a double/triple
-            // click (word/line select).
             let selection_gesture = is_selection_gesture(down_x, down_y, event);
-            // A bare click on non-text chrome does nothing. Text clicks go to the
-            // AX path; any selection gesture also gets a shot at the menu fallback
-            // — needed for custom-rendered apps (Zed, Ghostty) whose content
-            // hit-tests as AXWindow and would otherwise be gated out entirely.
-            if !is_text_click && !selection_gesture {
+            // A bare click (no drag, single click) never triggers the toolbar.
+            // This gesture gate replaces the old pre/post AX-selection comparison
+            // — it prevents "every click pops a popup" without needing an AX
+            // call in the hot path.
+            if !selection_gesture {
                 return;
             }
 
+            let app = app.clone();
             thread::spawn(move || {
-                // Delay to let the app process the mouse up and update its selection.
-                // Our event tap runs BEFORE the app sees the event (HeadInsert),
-                // so without this delay AXSelectedText would still reflect the old state.
+                // Potentially slow gating + reads happen off the tap thread.
+                if !toolbar_enabled_for_app(&app) {
+                    return;
+                }
+                if active_toolbar_actions().is_none() {
+                    return;
+                }
+
+                // Let the app process the mouse up and update its selection. Our
+                // tap runs BEFORE the app sees the event (HeadInsert).
                 thread::sleep(Duration::from_millis(80));
 
                 // AX path — only when the click landed on a text element, so we
-                // don't read a stale focused selection when the user clicks chrome.
-                let mut shown = false;
-                let mut unchanged = false;
-                if is_text_click {
+                // don't read a stale focused selection when clicking chrome.
+                if is_text_area_at_position(down_x, down_y) {
                     let ax_result = read_selected_text_via_ax()
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty());
                     if let Some(post_trimmed) = ax_result {
-                        if pre.as_deref().is_some_and(|p| p == post_trimmed.as_str()) {
-                            log_native("selection unchanged, skipping toolbar");
-                            unchanged = true;
-                        } else {
-                            log_native(&format!(
-                                "AX selection changed length={}",
-                                post_trimmed.len()
-                            ));
-                            show_toolbar(toolbar_port, post_trimmed, position, false);
-                            shown = true;
-                        }
+                        log_native(&format!(
+                            "AX selection changed length={}",
+                            post_trimmed.len()
+                        ));
+                        show_toolbar(toolbar_port, post_trimmed, position, false);
+                        return;
                     }
                 }
 
-                // Menu fallback — apps AX can't read (Ghostty, Zed, ...). Runs on
-                // any selection gesture; the changeCount guard inside means no
-                // selection → no popup and no clipboard disturbance.
-                if !shown && !unchanged && selection_gesture {
-                    // AX can't read this app (terminals, custom-rendered editors).
-                    // Try the app's Edit → Copy menu, then fall back to a synthetic
-                    // Cmd+C delivered to the target pid. Both are clipboard-safe
-                    // (only borrow when non-text-free, restore exactly, skip unless
-                    // the pasteboard actually changed).
-                    let text = read_selected_text_via_menu()
-                        .or_else(read_selected_text_via_cmd_c);
-                    if let Some(t) = text {
-                        log_native(&format!("fallback selection length={}", t.len()));
-                        show_toolbar(toolbar_port, t, position, false);
-                    }
+                // Menu fallback — apps AX can't read (Ghostty, Zed, ...).
+                // Clipboard-safe: only borrow when non-text-free, restore exactly,
+                // and skip unless the pasteboard actually changed (no selection →
+                // no popup, no clipboard disturbance).
+                if let Some(menu_text) = read_selected_text_via_menu() {
+                    log_native(&format!("fallback selection length={}", menu_text.len()));
+                    show_toolbar(toolbar_port, menu_text, position, false);
                 }
             });
         }
@@ -1296,7 +1276,7 @@ fn trigger_popup_with_selection(app: &tauri::AppHandle) {
     // (terminals, custom-rendered editors). Drive the app's own Edit → Copy.
     let (text, source) = match text {
         Some(t) => (Some(t), source),
-        None => match read_selected_text_via_menu().or_else(read_selected_text_via_cmd_c) {
+        None => match read_selected_text_via_menu() {
             Some(t) => (Some(t), "fallback"),
             None => (None, source),
         },
@@ -1570,97 +1550,6 @@ fn restore_pasteboard(pre_text: Option<&str>) {
 
 /// Walk the frontmost app's menu bar; return the (retained) Copy menu item,
 /// matched by localized title. `None` if not found.
-// ---------------------------------------------------------------------------
-// Cmd+C injection fallback (last resort).
-//
-// Used when neither AX nor the menu-action fallback can read the selection —
-// notably apps whose submenu items aren't exposed via Accessibility until the
-// menu is opened (Zed, Orca, …). We synthesize a Cmd+C delivered directly to
-// the target app and read the result.
-//
-// Why this avoids the old "ghost c" problem:
-//   * `CGEventPostToPid` delivers to the target process's queue only — it does
-//     NOT pass through the system event tap, so there's no modifier-strip race.
-//   * The Cmd flag is set on both the key-down and key-up events, so the app
-//     sees a real Cmd+C, never a bare 'c'.
-//   * Same clipboard safety as the menu path: borrow only when free of
-//     non-text content, restore exactly afterwards, and skip unless the
-//     pasteboard actually changed (no selection → no popup, no disturbance).
-// ---------------------------------------------------------------------------
-
-fn read_selected_text_via_cmd_c() -> Option<String> {
-    let pre_text = read_pasteboard_string_via_pb();
-
-    if !pasteboard_safe_to_borrow() {
-        log_native("cmdc-read: pasteboard has non-text content; skipping to avoid clobbering");
-        return None;
-    }
-
-    let pid = unsafe { frontmost_pid() };
-    let Some(pid) = pid else {
-        log_native("cmdc-read: no frontmost pid");
-        return None;
-    };
-
-    let result = unsafe { post_cmd_c_and_read(pid, pre_text.as_deref()) };
-    result
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| s.trim().to_string())
-}
-
-/// Post a Cmd+C directly to `pid`, wait for the pasteboard, read it, restore.
-unsafe fn post_cmd_c_and_read(pid: i32, pre_text: Option<&str>) -> Option<String> {
-    let count_before = pasteboard_change_count();
-    let cmd = CGEventFlags::CGEventFlagCommand;
-
-    // Each event carries the Cmd flag itself, so the app receives a well-formed
-    // Cmd+C regardless of the live modifier state.
-    let post_c = |key_down: bool| {
-        let source = match CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
-        let event = match CGEvent::new_keyboard_event(source, KeyCode::ANSI_C, key_down) {
-            Ok(e) => e,
-            Err(_) => return false,
-        };
-        event.set_flags(cmd);
-        event.post_to_pid(pid);
-        true
-    };
-
-    if !post_c(true) || !post_c(false) {
-        restore_pasteboard(pre_text);
-        log_native("cmdc-read: could not synthesize Cmd+C event");
-        return None;
-    }
-
-    // Cmd+C is async — poll the pasteboard changeCount (max ~300ms).
-    let mut bumped = false;
-    for _ in 0..30 {
-        thread::sleep(Duration::from_millis(10));
-        if pasteboard_change_count() > count_before {
-            bumped = true;
-            break;
-        }
-    }
-
-    let text = if bumped {
-        read_pasteboard_string_via_pb()
-    } else {
-        None
-    };
-
-    restore_pasteboard(pre_text);
-
-    if !bumped {
-        log_native("cmdc-read: Cmd+C did not change pasteboard (no selection); skipping");
-        return None;
-    }
-    text
-}
-
-
 unsafe fn find_copy_menu_item(app: AXUIElementRef) -> Option<AXUIElementRef> {
     let mut menubar_value: CFTypeRef = ptr::null();
     let mb_attr = CFString::from_static_string("AXMenuBar");
