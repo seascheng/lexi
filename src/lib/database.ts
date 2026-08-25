@@ -274,7 +274,7 @@ export async function listWords(): Promise<WordEntry[]> {
 
   const db = await getSqlDatabase();
   return db.select<WordEntry[]>(
-    "SELECT * FROM words ORDER BY datetime(created_at) DESC, id DESC",
+    "SELECT * FROM words ORDER BY created_at DESC, id DESC",
   );
 }
 

@@ -86,7 +86,10 @@ export async function runAiFeatureStream(
     target_language: feature.targetLanguage || null,
   };
 
-  const runId: string = await invoke("run_ai_prompt_stream", { request });
+  // Generate run_id up front and register the listener BEFORE invoking, so a
+  // fast-failing stream can't emit its terminal event before we're listening
+  // (which left the UI stuck on "Running...").
+  const runId = `stream-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   let accumulated = "";
   const unlisten = await listen<StreamChunkEvent>("lexi://ai-stream-chunk", (event) => {
@@ -111,6 +114,8 @@ export async function runAiFeatureStream(
       callbacks.onDone({ outputText, translation });
     }
   });
+
+  await invoke("run_ai_prompt_stream", { request, runId });
 }
 
 export async function copyText(text: string) {

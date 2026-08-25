@@ -1,6 +1,24 @@
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
+use std::time::{Duration, Instant};
 use tauri::Emitter;
+
+use super::http::http_client;
+
+fn log_ai(message: &str) {
+    use std::io::Write;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/lexi-ai.log")
+    {
+        let _ = writeln!(f, "{ts} {message}");
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct AiRunRequest {
@@ -57,7 +75,6 @@ pub async fn run_ai_prompt(request: AiRunRequest) -> Result<AiRunResult, String>
     }
 
     let content = request_completion(&request, text).await?;
-    let _ = std::fs::write("/tmp/lexi-debug.log", format!("[sync] text='{}'\n", text));
     if request.output_mode == "translation_json" {
         let translation = parse_translation(&content)
             .map_err(|error| format!("Could not parse translation JSON: {error}"))?;
@@ -74,7 +91,7 @@ pub async fn run_ai_prompt(request: AiRunRequest) -> Result<AiRunResult, String>
 }
 
 async fn request_completion(request: &AiRunRequest, text: &str) -> Result<String, String> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let url = format!(
         "{}/chat/completions",
         request.api_base_url.trim_end_matches('/')
@@ -165,10 +182,18 @@ struct StreamChunkEvent {
     translation: Option<TranslationResult>,
 }
 
+/// Minimum spacing between chunk emits. Each emit is an IPC hop plus a full
+/// React re-render (with ResizeObserver teardown) in the translation window —
+/// emitting per SSE token caused 30-100 renders/sec. 40ms caps it at 25/sec,
+/// still visually smooth. // ponytail: fixed interval; make adaptive if a
+/// slow-typing effect is ever wanted.
+const CHUNK_EMIT_INTERVAL: Duration = Duration::from_millis(40);
+
 #[tauri::command]
 pub async fn run_ai_prompt_stream(
     app: tauri::AppHandle,
     request: AiRunRequest,
+    run_id: String,
 ) -> Result<String, String> {
     let text = request.text.trim().to_string();
     if text.is_empty() {
@@ -180,15 +205,20 @@ pub async fn run_ai_prompt_stream(
         );
     }
 
-    let run_id = format!("stream-{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis());
+    // run_id is supplied by the caller so the frontend can register its event
+    // listener BEFORE invoking — closing a race where a fast-failing stream
+    // emitted its terminal event before the listener existed, leaving the UI
+    // stuck on "Running...".
+    log_ai(&format!(
+        "spawn run_id={run_id} model={} mode={} base={}",
+        request.model, request.output_mode, request.api_base_url
+    ));
 
     let app_clone = app.clone();
     let run_id_clone = run_id.clone();
     tauri::async_runtime::spawn(async move {
         if let Err(error) = stream_completion(&app_clone, &run_id_clone, &request).await {
+            log_ai(&format!("run_id={run_id_clone} stream returned error: {error}"));
             let _ = app_clone.emit("lexi://ai-stream-chunk", StreamChunkEvent {
                 run_id: run_id_clone,
                 chunk: None,
@@ -209,16 +239,16 @@ async fn stream_completion(
 ) -> Result<(), String> {
     use futures_util::StreamExt;
 
-    let client = reqwest::Client::new();
+    let client = http_client();
     let url = format!("{}/chat/completions", request.api_base_url.trim_end_matches('/'));
     let prompt = render_prompt(request, request.text.trim());
-    let _ = std::fs::write("/tmp/lexi-debug.log", format!("[stream] text='{}' prompt='{}'\n", request.text, &prompt.chars().take(300).collect::<String>()));
     let system_message = if request.output_mode == "translation_json" {
         "Return compact JSON only. Do not wrap it in markdown."
     } else {
         "Follow the user prompt exactly. Return the answer directly without markdown fences unless requested."
     };
 
+    log_ai(&format!("run_id={run_id} POST {url} model={}", request.model));
     let response = client
         .post(&url)
         .header(CONTENT_TYPE, "application/json")
@@ -234,18 +264,26 @@ async fn stream_completion(
         }))
         .send()
         .await
-        .map_err(|error| format!("AI request failed: {error}"))?;
+        .map_err(|error| {
+            let msg = format!("AI request failed: {error}");
+            log_ai(&format!("run_id={run_id} {msg}"));
+            msg
+        })?;
 
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+        log_ai(&format!("run_id={run_id} non-success {status}: {}", body.chars().take(300).collect::<String>()));
         return Err(format!("AI API returned {status}: {body}"));
     }
+    log_ai(&format!("run_id={run_id} response ok, streaming"));
 
     let is_translation_json = request.output_mode == "translation_json";
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
     let mut accumulated = String::new();
+    let mut pending_emit = String::new();
+    let mut last_emit = Instant::now();
 
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|error| format!("Stream read error: {error}"))?;
@@ -260,6 +298,7 @@ async fn stream_completion(
             }
             let data = &line[6..];
             if data == "[DONE]" {
+                log_ai(&format!("run_id={run_id} [DONE] received"));
                 continue;
             }
 
@@ -269,18 +308,26 @@ async fn stream_completion(
 
                     // For translation_json, don't stream raw JSON — accumulate silently
                     if !is_translation_json {
-                        let _ = app.emit("lexi://ai-stream-chunk", StreamChunkEvent {
-                            run_id: run_id.to_string(),
-                            chunk: Some(content.to_string()),
-                            done: false,
-                            error: None,
-                            translation: None,
-                        });
+                        pending_emit.push_str(content);
+                        if last_emit.elapsed() >= CHUNK_EMIT_INTERVAL {
+                            let _ = app.emit("lexi://ai-stream-chunk", StreamChunkEvent {
+                                run_id: run_id.to_string(),
+                                chunk: Some(std::mem::take(&mut pending_emit)),
+                                done: false,
+                                error: None,
+                                translation: None,
+                            });
+                            last_emit = Instant::now();
+                        }
                     }
                 }
             }
         }
     }
+    log_ai(&format!(
+        "run_id={run_id} stream ended, accumulated_len={}",
+        accumulated.len()
+    ));
 
     // Process any remaining buffer
     let remaining = buffer.trim();
@@ -289,16 +336,21 @@ async fn stream_completion(
             if let Some(content) = parsed["choices"][0]["delta"]["content"].as_str() {
                 accumulated.push_str(content);
                 if !is_translation_json {
-                    let _ = app.emit("lexi://ai-stream-chunk", StreamChunkEvent {
-                        run_id: run_id.to_string(),
-                        chunk: Some(content.to_string()),
-                        done: false,
-                        error: None,
-                        translation: None,
-                    });
+                    pending_emit.push_str(content);
                 }
             }
         }
+    }
+
+    // Flush any coalesced remainder before the terminal event
+    if !is_translation_json && !pending_emit.is_empty() {
+        let _ = app.emit("lexi://ai-stream-chunk", StreamChunkEvent {
+            run_id: run_id.to_string(),
+            chunk: Some(std::mem::take(&mut pending_emit)),
+            done: false,
+            error: None,
+            translation: None,
+        });
     }
 
     // Final done event

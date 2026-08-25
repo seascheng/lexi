@@ -476,15 +476,6 @@ fn saved_toolbar_enabled(app: &tauri::App) -> Option<bool> {
     read_toolbar_enabled_from_sqlite(&path)
 }
 
-fn saved_toolbar_enabled_for_app(app: &tauri::AppHandle) -> Option<bool> {
-    let path = app
-        .path()
-        .app_data_dir()
-        .ok()
-        .map(|dir| dir.join("lexi.db"))?;
-    read_toolbar_enabled_from_sqlite(&path)
-}
-
 fn read_toolbar_enabled_from_sqlite(path: &Path) -> Option<bool> {
     let output = Command::new("sqlite3")
         .arg(path)
@@ -651,18 +642,39 @@ pub fn set_excluded_toolbar_apps(apps: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-/// Get the bundle identifier of the frontmost (active) application.
-fn frontmost_app_bundle_id() -> Option<String> {
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg("id of app (path to frontmost application)")
-        .output()
-        .ok()?;
-    if !output.status.success() {
+/// Bundle identifier of the frontmost application via NSWorkspace — native,
+/// no subprocess. The previous osascript version cost 100-300ms per selection
+/// gesture (spawned on every mouse-up).
+unsafe fn frontmost_bundle_id() -> Option<String> {
+    let pool = new_autorelease_pool();
+    let id = frontmost_bundle_id_inner();
+    drain_autorelease_pool(pool);
+    id
+}
+
+unsafe fn frontmost_bundle_id_inner() -> Option<String> {
+    let cls = objc_getClass(b"NSWorkspace\0".as_ptr() as *const i8);
+    if cls.is_null() {
         return None;
     }
-    let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if id.is_empty() { None } else { Some(id) }
+    let workspace = objc_msgSend(cls as *mut std::ffi::c_void, sel_registerName(b"sharedWorkspace\0".as_ptr() as *const i8));
+    if workspace.is_null() {
+        return None;
+    }
+    let running_app = objc_msgSend(workspace, sel_registerName(b"frontmostApplication\0".as_ptr() as *const i8));
+    if running_app.is_null() {
+        return None;
+    }
+    let ns_string = objc_msgSend(running_app, sel_registerName(b"bundleIdentifier\0".as_ptr() as *const i8));
+    if ns_string.is_null() {
+        return None;
+    }
+    let utf8 = objc_msgSend(ns_string, sel_registerName(b"UTF8String\0".as_ptr() as *const i8))
+        as *const std::ffi::c_char;
+    if utf8.is_null() {
+        return None;
+    }
+    Some(std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned())
 }
 
 fn remember_toolbar_port(port: u16) {
@@ -696,21 +708,17 @@ fn active_toolbar_actions() -> Option<Vec<ToolbarActionItem>> {
     (!actions.is_empty()).then_some(actions)
 }
 
-fn toolbar_enabled_for_app(app: &tauri::AppHandle) -> bool {
-    let Some(enabled) = saved_toolbar_enabled_for_app(app) else {
-        return native_toolbar_enabled();
-    };
-
-    if let Ok(mut current) = TOOLBAR_ENABLED.get_or_init(|| Mutex::new(true)).lock() {
-        *current = enabled;
-    }
-
-    if !enabled {
+fn toolbar_enabled_for_app(_app: &tauri::AppHandle) -> bool {
+    // TOOLBAR_ENABLED / TOOLBAR_ACTIONS / EXCLUDED_TOOLBAR_APPS are pushed by
+    // the frontend via configure_native_toolbar / set_excluded_toolbar_apps on
+    // startup and on every settings change — no need to re-read SQLite or
+    // spawn osascript here on every selection gesture.
+    if !native_toolbar_enabled() {
         return false;
     }
 
     // Check if the frontmost app is in the exclusion list
-    if let Some(bundle_id) = frontmost_app_bundle_id() {
+    if let Some(bundle_id) = unsafe { frontmost_bundle_id() } {
         if let Ok(excluded) = EXCLUDED_TOOLBAR_APPS.get_or_init(|| Mutex::new(vec!["com.apple.finder".to_string()])).lock() {
             if excluded.iter().any(|ex| ex == &bundle_id) {
                 log_native(&format!("toolbar excluded for app: {}", bundle_id));
@@ -1047,6 +1055,11 @@ fn handle_system_event(
                 // tap runs BEFORE the app sees the event (HeadInsert).
                 thread::sleep(Duration::from_millis(80));
 
+                // Selection reading is a system-global critical section: the AX
+                // client library is not thread-safe and the clipboard
+                // borrow/restore must not interleave with another worker.
+                let _selection = selection_read_guard();
+
                 // AX path — only when the click landed on a text element, so we
                 // don't read a stale focused selection when clicking chrome.
                 if is_text_area_at_position(down_x, down_y) {
@@ -1237,6 +1250,9 @@ fn trigger_popup_with_selection(app: &tauri::AppHandle) {
     let _ = show_popup(app);
     thread::sleep(Duration::from_millis(35));
 
+    // Serialize with the mouse-up selection worker — see selection_read_guard.
+    let _selection = selection_read_guard();
+
     // AX first — works for native macOS apps (Notes/TextEdit/Mail/Terminal/...).
     let (text, source) = match read_selected_text_via_ax() {
         Some(s) => {
@@ -1317,6 +1333,11 @@ fn handle_copy_for_toolbar(_app: &tauri::AppHandle) {
     // sees it. 150ms is enough on a quiet machine; bump if testing shows misses.
     thread::sleep(Duration::from_millis(150));
 
+    // Serialize with the selection workers: without this we can snapshot a
+    // borrowed (fallback) clipboard value as "user-copied" text while another
+    // worker's restore is in flight.
+    let _selection = selection_read_guard();
+
     log_native("copy-handler: about to read changeCount");
 
     let new_count = unsafe { pasteboard_change_count() };
@@ -1361,6 +1382,19 @@ fn handle_copy_for_toolbar(_app: &tauri::AppHandle) {
     {
         *cell = Some((trimmed, Instant::now()));
     }
+}
+
+/// Serializes every selection read (AX queries + clipboard borrow/restore).
+/// The macOS AX client keeps per-process CFDictionary caches that are NOT
+/// safe under concurrent calls from multiple threads — two overlapping
+/// selection workers corrupt AppKit's internal state and abort the process
+/// (SIGABRT: "pointer being freed was not allocated" in CFDictionarySetValue,
+/// see crash log lexi-2026-08-25-134724). The clipboard borrow/restore contract
+/// also requires mutual exclusion, or two fallbacks interleave and clobber the
+/// user's clipboard. Inner read fns assume the CALLER holds this lock.
+fn selection_read_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Read selected text via Accessibility API (no clipboard pollution).

@@ -1,3 +1,4 @@
+use super::http::http_client;
 use base64::Engine;
 use futures_util::StreamExt;
 use serde::Deserialize;
@@ -102,7 +103,7 @@ async fn speak_volcengine(text: &str, config: &TtsConfig) -> Result<(), String> 
         &text[..text.len().min(50)]
     );
 
-    let client = reqwest::Client::new();
+    let client = http_client();
     let body = serde_json::json!({
         "user": { "uid": "lexi_user" },
         "req_params": {
