@@ -1958,6 +1958,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resizeCorner.setDark(theme == .dark)
         // Right-anchored chrome must ride the window edge (build-time frames
         // pin to the default 420 width and go stale after a user resize).
+        let segW = panelTabsControl.fittingSize.width
+        panelTabsControl.frame = NSRect(
+            x: max(0, (cardPanelTabsView.bounds.width - segW) / 2),
+            y: 0,
+            width: segW,
+            height: 24
+        )
         resultCloseButton.frame.origin.x = width - 32
         resultTrashButton.frame = NSRect(x: width - 30, y: runsY + 3, width: 22, height: 22)
         resultTrashButton.isHidden = runsH == 0
@@ -2124,6 +2131,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         if request.hasPrefix("POST /card-hide ") {
             DispatchQueue.main.async {
+                guard !self.cardPinned else { return }
                 self.resultPanel.orderOut(nil)
                 self.postAction(action: "card-hidden", text: "-")
             }

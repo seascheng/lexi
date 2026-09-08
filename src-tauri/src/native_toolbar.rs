@@ -1888,6 +1888,7 @@ fn handle_system_event(
                 return CallbackResult::Drop;
             }
             if CARD_NOTES_MODE.load(std::sync::atomic::Ordering::Relaxed) {
+                log_native(&format!("card-notes key keycode={keycode}"));
                 match keycode {
                     125 | 126 => {
                         let delta = if keycode == 125 { 1 } else { -1 };
