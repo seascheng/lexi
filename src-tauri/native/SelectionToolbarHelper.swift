@@ -696,6 +696,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var inputContainer: NSView!
     private var inputTextView: NSTextView!
     private var inputPlaceholder: NSTextField!
+    private var runsSeparator: NSView!
     private var inputButtonsRow: NSView!
     private var inputButtonsClip: NSScrollView!
     private var cardRuns: [CardRun] = []
@@ -718,6 +719,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var reviewEmptyLabel: NSTextField!
     private var reviewCurrentWordId: Int64 = 0
     private var runChipViews: [RunChipView] = []
+    private var runTabsContentWidth: CGFloat = 376
     private var cardX: CGFloat = 0
     private var cardTopY: CGFloat = 0
     private var cardModelHeight: CGFloat = 240
@@ -1195,6 +1197,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultTabsClip.documentView = runsDoc
         resultRunsBar.addSubview(resultTabsClip)
 
+        runsSeparator = NSView(frame: .zero)
+        runsSeparator.wantsLayer = true
+        resultContainer.addSubview(runsSeparator)
+
         resultTrashButton = NSButton(title: "", target: self, action: #selector(clearRunsClicked))
         resultTrashButton.bezelStyle = .regularSquare
         resultTrashButton.isBordered = false
@@ -1203,7 +1209,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultTrashButton.toolTip = "Close all results"
         resultTrashButton.contentTintColor = .secondaryLabelColor
         resultTrashButton.frame = NSRect(x: resultCardWidth - 30, y: 3, width: 22, height: 22)
-        resultRunsBar.addSubview(resultTrashButton)
+        resultContainer.addSubview(resultTrashButton) // top level: can never be overdrawn
 
         // Content: markdown text + loading spinner + idle hint.
         resultScrollView = NSScrollView(frame: NSRect(x: 0, y: 70, width: resultCardWidth, height: 130))
@@ -1914,9 +1920,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         inputPlaceholder.isHidden = !inputTextView.string.isEmpty
 
         resultRunsBar.isHidden = runsH == 0
-        resultRunsBar.frame = NSRect(x: 0, y: runsY, width: width, height: runsH)
-        resultTabsClip.frame = NSRect(x: 8, y: 0, width: width - 84, height: 28)
-        resultTabsClip.documentView?.frame = NSRect(x: 0, y: 0, width: max(resultTabsClip.documentView?.frame.width ?? 0, width - 84), height: 28)
+        // Chip strip hugs its content; divider and close button FOLLOW the
+        // strip (one compact row) and cap together at the card's right edge
+        // once the chips overflow into scrolling.
+        let stripW = min(max(runTabsContentWidth, 40), width - 44)
+        resultRunsBar.frame = NSRect(x: 8, y: runsY, width: stripW, height: runsH)
+        resultTabsClip.frame = NSRect(x: 0, y: 0, width: stripW, height: 28)
+        resultTabsClip.documentView?.frame = NSRect(x: 0, y: 0, width: max(runTabsContentWidth, stripW), height: 28)
 
         resultScrollView.isHidden = !isTranslate || !(status == "streaming" || status == "ready" || status == "error")
         resultScrollView.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
@@ -1961,7 +1971,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         // Right-anchored chrome must ride the window edge (build-time frames
         // pin to the default 420 width and go stale after a user resize).
         resultCloseButton.frame.origin.x = width - 32
-        resultTrashButton.frame.origin.x = width - 30
+        resultTrashButton.frame = NSRect(x: width - 30, y: runsY + 3, width: 22, height: 22)
+        resultTrashButton.isHidden = runsH == 0
+        runsSeparator.isHidden = runsH == 0
+        runsSeparator.frame = NSRect(x: 8 + stripW + 4, y: runsY + 4, width: 1, height: runsH - 8)
+        resultTrashButton.frame = NSRect(x: min(width - 30, 8 + stripW + 9), y: runsY + 3, width: 22, height: 22)
+        resultTrashButton.isHidden = runsH == 0
+        resultRunsBar.isHidden = runsH == 0
         layoutPanelTabs(width)
         updateEntryTypeTags()
     }
@@ -2090,7 +2106,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         if request.hasPrefix("GET /debug-state ") || request.hasPrefix("POST /debug-state ") {
             DispatchQueue.main.async {
                 let runs = self.cardRuns.map { "\($0.id)|\($0.status)|len=\($0.text.count)" }.joined(separator: "; ")
-                let state = "activeRunId=\(self.activeRunId ?? "-") panel=\(self.activePanel) pinned=\(self.cardPinned) runs=[\(runs)] tvLen=\(self.resultTextView.textStorage?.length ?? 0) scrollHidden=\(self.resultScrollView.isHidden) scroll=\(NSStringFromRect(self.resultScrollView.frame)) tv=\(NSStringFromRect(self.resultTextView.frame)) container=\(NSStringFromRect(self.resultContainer.frame)) panelFrame=\(NSStringFromRect(self.resultPanel.frame)) input=\(NSStringFromRect(self.inputContainer.frame)) tvInset=\(self.inputTextView.textContainerInset) tvFrame=\(self.inputTextView.frame) actions=\(self.cardActions.count)"
+                let state = "runsBar=\(NSStringFromRect(self.resultRunsBar.frame)) tabsClip=\(NSStringFromRect(self.resultTabsClip.frame)) doc=\(NSStringFromRect(self.resultTabsClip.documentView?.frame ?? .zero)) trash=\(NSStringFromRect(self.resultTrashButton.frame)) chips=\(self.runChipViews.count) activeRunId=\(self.activeRunId ?? "-") panel=\(self.activePanel) pinned=\(self.cardPinned) runs=[\(runs)] tvLen=\(self.resultTextView.textStorage?.length ?? 0) scrollHidden=\(self.resultScrollView.isHidden) scroll=\(NSStringFromRect(self.resultScrollView.frame)) tv=\(NSStringFromRect(self.resultTextView.frame)) container=\(NSStringFromRect(self.resultContainer.frame)) panelFrame=\(NSStringFromRect(self.resultPanel.frame)) input=\(NSStringFromRect(self.inputContainer.frame)) tvInset=\(self.inputTextView.textContainerInset) tvFrame=\(self.inputTextView.frame) actions=\(self.cardActions.count)"
+                self.log("STATE \(state)")
                 self.log("DEBUG \(state)")
             }
             return
@@ -2218,6 +2235,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 ? NSColor.white.withAlphaComponent(0.22)
                 : NSColor.black.withAlphaComponent(0.20)).cgColor
             resultContainer.layer?.borderColor = hairline
+            runsSeparator.layer?.backgroundColor = hairline
             // chips: force a rebuild (the diff skips identical id/status/active)
             runChipViews.forEach { $0.removeFromSuperview() }
             runChipViews.removeAll()
@@ -2428,6 +2446,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func rebuildRunTabs() {
         let dark = theme == .dark
+        let doc = resultTabsClip.documentView ?? NSView()
         if runChipViews.count == cardRuns.count {
             var unchanged = true
             for (chip, run) in zip(runChipViews, cardRuns) {
@@ -2454,16 +2473,17 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 self?.dismissRun(run.id)
             }
             chip.setActive(run.id == activeRunId, dark: dark)
-            resultTabsClip.addSubview(chip)
+            doc.addSubview(chip)
             runChipViews.append(chip)
             chip.frame = NSRect(x: x, y: 3, width: chip.fitWidth, height: 24)
             x += chip.fitWidth + 4
         }
         // Horizontal scroll: document view grows with the chips; keep the
-        // newest run visible.
-        let doc = resultTabsClip.documentView ?? NSView()
+        // newest run visible. The strip caps at width-44; layoutResultCard
+        // sizes it to the content when the chips fit.
+        runTabsContentWidth = max(x - 4, 0)
         let visible = resultTabsClip.frame.width
-        let contentW = max(x, visible)
+        let contentW = max(x - 4, visible)
         doc.frame = NSRect(x: 0, y: 0, width: contentW, height: 28)
         resultTabsClip.contentView.scroll(to: NSPoint(x: contentW - visible, y: 0))
         resultTabsClip.reflectScrolledClipView(resultTabsClip.contentView)
