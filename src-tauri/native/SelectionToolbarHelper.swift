@@ -1504,6 +1504,12 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         cardNotesClip.autohidesScrollers = true
         cardNotesClip.scrollerStyle = .overlay
         notesTableView = NotesTable(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
+        notesTableView.onDoubleClickRow = { [weak self] row in
+            guard let self, row >= 0, row < self.cardNotesItems.count else { return }
+            if let cell = self.notesTableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NoteRowCell {
+                cell.beginRenaming()
+            }
+        }
         notesTableView.onEnterKey = { [weak self] in
             guard let self, self.notesTableView.selectedRow >= 0 else { return }
             // Reuses the Rust "notes-click" pipeline: set selection, inject
@@ -1523,7 +1529,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         notesTableView.dataSource = self
         notesTableView.delegate = self
         notesTableView.target = self
-        notesTableView.doubleAction = #selector(notesDoubleClicked(_:))
+        notesTableView.doubleAction = nil
         notesTableView.action = #selector(notesTableClicked(_:))
         notesTableView.sizeLastColumnToFit()
         NotificationCenter.default.addObserver(
@@ -1739,14 +1745,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     /// Mouse click on a row: select it (selectionDidChange copies the
     /// content) and arm the card for Enter. Injection happens on Enter only.
-    @objc private func notesDoubleClicked(_ sender: NSTableView) {
-        let row = sender.clickedRow
-        guard row >= 0, row < cardNotesItems.count else { return }
-        if let cell = sender.view(atColumn: 0, row: row, makeIfNecessary: false) as? NoteRowCell {
-            cell.beginRenaming()
-        }
-    }
-
     @objc private func notesTableClicked(_ sender: NSTableView) {
         FileLog.write("SEL clicked row=\(sender.clickedRow)")
         postAction(action: "card-key", text: "1")
@@ -3096,6 +3094,9 @@ private final class NotesTable: NSTableView {
     /// Enter inserts the highlighted note and Tab cycles panel tabs — no
     /// global event tap involved.
     var onEnterKey: (() -> Void)?
+    var onDoubleClickRow: ((Int) -> Void)?
+    private var lastClickRow = -1
+    private var lastClickTime = TimeInterval(0)
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
@@ -3122,6 +3123,19 @@ private final class NotesTable: NSTableView {
         let point = convert(event.locationInWindow, from: nil)
         let clickedRow = self.row(at: point)
         if clickedRow >= 0 {
+            // Double-click is ours to detect: the system's doubleAction dispatch
+            // ran a longer event chain that beeped. Same row inside the
+            // double-click interval = rename, nothing else.
+            let now = event.timestamp
+            if clickedRow == lastClickRow,
+               now - lastClickTime < NSEvent.doubleClickInterval,
+               let onDoubleClickRow {
+                lastClickRow = -1
+                onDoubleClickRow(clickedRow)
+                return
+            }
+            lastClickRow = clickedRow
+            lastClickTime = now
             selectRowIndexes(IndexSet(integer: clickedRow), byExtendingSelection: false)
         }
         super.mouseDown(with: event)
