@@ -1598,15 +1598,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         layoutResultCard()
     }
 
-    /// Mouse click on a row: SELECT it and copy the content to the
-    /// clipboard. Injection happens on Enter only (WebView parity).
-    @objc private func notesTableClicked(_ sender: NSTableView) {
-        let row = sender.clickedRow
-        guard row >= 0, row < cardNotesItems.count else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(cardNotesItems[row].content, forType: .string)
-    }
+    /// Mouse click on a row: select it (selectionDidChange copies the
+    /// content). Injection happens on Enter only.
+    @objc private func notesTableClicked(_ sender: NSTableView) {}
 
     @objc private func noteInsertClicked(_ sender: NSButton) {
         guard let content = sender.identifier?.rawValue, !content.isEmpty else { return }
@@ -3321,6 +3315,14 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         let selected = notesTableView.selectedRow
+        // Selected => its content goes to the clipboard (panel stays).
+        // Enter (Rust side) injects + hides. This covers every selection
+        // source: the initial first row, ↑/↓, and mouse clicks.
+        if selected >= 0, selected < cardNotesItems.count {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(cardNotesItems[selected].content, forType: .string)
+        }
         var painted = false
         for row in 0..<cardNotesItems.count {
             guard let cell = notesTableView.view(
