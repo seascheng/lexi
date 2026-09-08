@@ -1595,7 +1595,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             notesTableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
             notesTableView.scrollRowToVisible(0)
         }
+        FileLog.write("NOTES loaded count=\(cardNotesItems.count) selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden)")
         layoutResultCard()
+        FileLog.write("NOTES post-layout selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden) panel=\(activePanel)")
     }
 
     /// Mouse click on a row: select it (selectionDidChange copies the
@@ -2091,7 +2093,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         if request.hasPrefix("GET /debug-state ") || request.hasPrefix("POST /debug-state ") {
             DispatchQueue.main.async {
                 let runs = self.cardRuns.map { "\($0.id)|\($0.status)|len=\($0.text.count)" }.joined(separator: "; ")
-                let state = "runsBar=\(NSStringFromRect(self.resultRunsBar.frame)) tabsClip=\(NSStringFromRect(self.resultTabsClip.frame)) doc=\(NSStringFromRect(self.resultTabsClip.documentView?.frame ?? .zero)) trash=\(NSStringFromRect(self.resultTrashButton.frame)) chips=\(self.runChipViews.count) activeRunId=\(self.activeRunId ?? "-") panel=\(self.activePanel) pinned=\(self.cardPinned) runs=[\(runs)] tvLen=\(self.resultTextView.textStorage?.length ?? 0) scrollHidden=\(self.resultScrollView.isHidden) scroll=\(NSStringFromRect(self.resultScrollView.frame)) tv=\(NSStringFromRect(self.resultTextView.frame)) container=\(NSStringFromRect(self.resultContainer.frame)) panelFrame=\(NSStringFromRect(self.resultPanel.frame)) input=\(NSStringFromRect(self.inputContainer.frame)) tvInset=\(self.inputTextView.textContainerInset) tvFrame=\(self.inputTextView.frame) actions=\(self.cardActions.count)"
+                let state = "notesSel=\(self.notesTableView?.selectedRow ?? -99) notesCount=\(self.cardNotesItems.count) runsBar=\(NSStringFromRect(self.resultRunsBar.frame)) tabsClip=\(NSStringFromRect(self.resultTabsClip.frame)) doc=\(NSStringFromRect(self.resultTabsClip.documentView?.frame ?? .zero)) trash=\(NSStringFromRect(self.resultTrashButton.frame)) chips=\(self.runChipViews.count) activeRunId=\(self.activeRunId ?? "-") panel=\(self.activePanel) pinned=\(self.cardPinned) runs=[\(runs)] tvLen=\(self.resultTextView.textStorage?.length ?? 0) scrollHidden=\(self.resultScrollView.isHidden) scroll=\(NSStringFromRect(self.resultScrollView.frame)) tv=\(NSStringFromRect(self.resultTextView.frame)) container=\(NSStringFromRect(self.resultContainer.frame)) panelFrame=\(NSStringFromRect(self.resultPanel.frame)) input=\(NSStringFromRect(self.inputContainer.frame)) tvInset=\(self.inputTextView.textContainerInset) tvFrame=\(self.inputTextView.frame) actions=\(self.cardActions.count)"
                 self.log("STATE \(state)")
                 self.log("DEBUG \(state)")
             }
@@ -2303,6 +2305,15 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func hideIfClickOutsidePanel(_ event: NSEvent) {
         let screenPoint = NSEvent.mouseLocation
+
+        // Card interaction focus: a click inside the card arms the notes
+        // Enter; any click elsewhere disarms it. (Nonactivating panels can
+        // never become key windows — windowDidBecomeKey never fires.)
+        if resultPanel.isVisible {
+            let inside = event.window === resultPanel
+                || resultPanel.frame.contains(screenPoint)
+            postAction(action: "card-key", text: inside ? "1" : "0")
+        }
 
         // Native notes panel: hide + tell lexi so its tap flag never goes stale.
         if notesPanel.isVisible,
@@ -3323,17 +3334,14 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
             pasteboard.clearContents()
             pasteboard.setString(cardNotesItems[selected].content, forType: .string)
         }
-        var painted = false
         for row in 0..<cardNotesItems.count {
             guard let cell = notesTableView.view(
                 atColumn: 0, row: row, makeIfNecessary: false
             ) as? NoteRowCell else { continue }
             cell.setEmphasized(row == selected)
-            painted = true
         }
-        if !painted {
-            notesTableView.reloadData() // cells not yet materialized
-        }
+        // Rows not yet materialized pick their state up in viewFor — never
+        // reloadData here: it clears the selection (the "flash then gone").
     }
 }
 
