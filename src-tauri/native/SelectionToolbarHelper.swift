@@ -1884,12 +1884,17 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             // The text view is the scroll view's documentView: its frame must
             // track the content or everything past the initial height stays
             // clipped (window grows, text doesn't — exactly the reported bug).
-            let textWidth = resultScrollView.frame.width - resultTextView.textContainerInset.width * 2
+            //
+            // WIDTH is owned by the scroll view's autoresizing alone — setting
+            // it manually here fought the autoresize (392 vs 420 every event,
+            // text container flapping ±28pt = the streaming jitter where each
+            // line's last glyphs wrapped and unwrapped). The inset already
+            // narrows the text column; measurement below matches it.
             let needed = markdownRenderedHeight(run?.text ?? "", atWidth: resultScrollView.frame.width - 28)
             resultTextView.frame = NSRect(
                 x: 0,
                 y: 0,
-                width: textWidth,
+                width: resultScrollView.frame.width,
                 height: max(needed + resultTextView.textContainerInset.height * 2, resultScrollView.frame.height)
             )
             if status == "streaming" {
