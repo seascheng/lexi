@@ -1930,11 +1930,11 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let isMultiline = rowMeasured > 34
         let fullMeasured = inputTextHeight(atWidth: contentWidth - 24)
         let textHeight = isMultiline ? min(fullMeasured, 152) : max(min(rowMeasured, 34), 24)
-        let inputBarHeight = isMultiline ? textHeight + 6 + 28 + 8 : textHeight + 8
+        let inputBarHeight = isMultiline ? textHeight + 12 + 6 + 28 + 8 : textHeight + 8
 
         if isMultiline {
             inputTextView.textContainerInset = NSSize(width: 6, height: 6)
-            inputTextView.frame = NSRect(x: 6, y: 6 + 28, width: contentWidth - 12, height: textHeight)
+            inputTextView.frame = NSRect(x: 6, y: 6 + 28, width: contentWidth - 12, height: textHeight + 12)
             inputButtonsRow.frame = NSRect(x: 0, y: 0, width: buttonGroupWidth, height: 28)
             inputButtonsClip.frame = NSRect(x: 6, y: 4, width: min(buttonGroupWidth, contentWidth - 12), height: 28)
             inputButtonsClip.contentView.scroll(to: NSPoint(x: max(0, buttonGroupWidth - inputButtonsClip.frame.width), y: 0))
