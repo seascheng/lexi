@@ -1602,9 +1602,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         var y: CGFloat = CGFloat(max(payload.notes.count - 1, 0)) * 64
         let rowW = (cardUserWidth ?? resultCardWidth) - 16
         for note in payload.notes {
-            let row = NSView(frame: NSRect(x: 4, y: y, width: rowW, height: 64))
+            let row = ClickableRow(frame: NSRect(x: 4, y: y, width: rowW, height: 64))
             row.wantsLayer = true
             row.layer?.cornerRadius = 8
+            row.onClicked = { [weak self] in
+                guard let self, let index = self.cardNoteRowViews.firstIndex(of: row) else { return }
+                self.cardNotesInject(index)
+            }
 
             let icon = NSImageView(frame: NSRect(x: 12, y: 23, width: 18, height: 18))
             icon.image = lucideImage(for: "file-text", title: note.name)
@@ -2827,6 +2831,14 @@ private struct CardReviewPayload: Decodable {
         let entryType: String?
     }
     let word: ReviewWord?
+}
+
+/// Whole-row click target (notes rows: click = select + inject).
+private final class ClickableRow: NSView {
+    var onClicked: (() -> Void)?
+    override func mouseDown(with event: NSEvent) {
+        onClicked?()
+    }
 }
 
 /// NSTextField that reports clicks (notes rows: click = copy).
