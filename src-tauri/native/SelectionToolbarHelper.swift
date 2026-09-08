@@ -837,7 +837,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var resultRunsBar: NSView!
     private var cardNotesClip: HorizontalOnlyClip!
 
-    private var notesTableView: NSTableView!
+    private var notesTableView: NotesTable!
     private var cardNotesItems: [CardNotesPayload.Note] = []
     private var reviewCardView: NSView!
     private var reviewWordLabel: NSTextField!
@@ -1063,7 +1063,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     // renderer; lexi's event tap owns the list, the selection, and the keys)
 
     private func buildNotesPanel() {
-        notesPanel = NSPanel(
+        notesPanel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: notesPanelWidth, height: 200),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -1151,7 +1151,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         )
         applyNotesTheme()
         selectNoteRow(payload.selected, scroll: true)
-        notesPanel.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+        notesPanel.makeKeyAndOrderFront(nil)
+        notesPanel.makeFirstResponder(notesTableView)
         log("notes panel shown rows=\(payload.notes.count)")
     }
 
@@ -1493,6 +1495,17 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         cardNotesClip.hasVerticalScroller = true
         cardNotesClip.autohidesScrollers = true
         notesTableView = NotesTable(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
+        notesTableView.onEnterKey = { [weak self] in
+            guard let self, self.notesTableView.selectedRow >= 0 else { return }
+            // Reuses the Rust "notes-click" pipeline: set selection, inject
+            // at the source caret, mirror clipboard, hide panels.
+            self.postAction(action: "notes-click", text: String(self.notesTableView.selectedRow))
+        }
+        notesTableView.onTabKey = { [weak self] in
+            let ids = self?.panelDefs.map { $0.id } ?? []
+            guard !ids.isEmpty, let current = ids.firstIndex(of: self?.activePanel ?? "") else { return }
+            self?.showPanelTab(ids[(current + 1) % ids.count])
+        }
         notesTableView.headerView = nil
         notesTableView.rowHeight = 64
         notesTableView.intercellSpacing = .zero
@@ -1623,7 +1636,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 rise.duration = 0.22
                 rise.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 layer.add(rise, forKey: "materialize")
-                resultPanel.orderFrontRegardless()
+                NSApp.activate(ignoringOtherApps: true)
+                resultPanel.makeKeyAndOrderFront(nil)
                 NSAnimationContext.runAnimationGroup({ context in
                     context.duration = 0.22
                     context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -1631,7 +1645,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 })
             } else {
                 resultPanel.alphaValue = 0
-                resultPanel.orderFrontRegardless()
+                NSApp.activate(ignoringOtherApps: true)
+                resultPanel.makeKeyAndOrderFront(nil)
                 NSAnimationContext.runAnimationGroup({ context in
                     context.duration = 0.15
                     resultPanel.animator().alphaValue = 1
@@ -1683,9 +1698,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         // (webview parity — the AiForm autofocused). Without this, a table
         // that was first responder on the Notes tab leaves the window with
         // no text target and every keystroke beeps.
-        if id == "translate", !cardRuns.isEmpty || true {
-            DispatchQueue.main.async {
+        DispatchQueue.main.async {
+            switch id {
+            case "translate":
                 self.inputTextView.window?.makeFirstResponder(self.inputTextView)
+            case "notes":
+                self.notesTableView.window?.makeFirstResponder(self.notesTableView)
+            default:
+                break
             }
         }
         guard notify else { return }
@@ -2416,6 +2436,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private func hidePanel(force: Bool = false) {
         selectedText = ""
         panel.orderOut(nil)
+        postAction(action: "card-hidden", text: "-")
     }
 
     private func hideIfClickOutsidePanel(_ event: NSEvent) {
@@ -2944,6 +2965,23 @@ private final class NoteRowCell: NSTableCellView {
 /// system capsule's inset/radius so the two geometries read as one.
 private final class NotesTable: NSTableView {
     override var mouseDownCanMoveWindow: Bool { false }
+
+    /// Responder-chain keyboard: the panel is key (OS-normal model), so
+    /// Enter inserts the highlighted note and Tab cycles panel tabs — no
+    /// global event tap involved.
+    var onEnterKey: (() -> Void)?
+    var onTabKey: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 36, 52: // Enter / keypad Enter
+            onEnterKey?()
+        case 48: // Tab
+            onTabKey?()
+        default:
+            super.keyDown(with: event)
+        }
+    }
 
     override func mouseDown(with event: NSEvent) {
         // The panel is nonactivating: on the first click the app isn't

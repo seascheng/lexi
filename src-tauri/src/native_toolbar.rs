@@ -273,11 +273,9 @@ static CARD_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 /// The native card is showing its Notes tab: ArrowUp/Down select, Enter
 /// injects the selected note at the source app's caret (the whole point of
 /// the panel — keyboard-only, no mouse round trip).
-static CARD_NOTES_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The result card is the KEY window (user clicked into it). Notes keyboard
 /// actions are legal ONLY now — without this gate the tap ate Enter typed in
 /// other apps and injected notes into them.
-static CARD_NOTES_FOCUS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static CARD_AUTO_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub(crate) fn forward_card_event(
@@ -1880,46 +1878,10 @@ fn handle_system_event(
             // Swallow: navigation must not also land in the source document.
             return CallbackResult::Drop;
         }
-        CGEventType::KeyDown if CARD_UP.load(std::sync::atomic::Ordering::Relaxed) => {
-            // Card is up and not focused: Tab belongs to the card (cycles its
-            // panel tabs), mirroring the WebView popup consuming navigation
-            // keys while visible. Everything else passes through.
-            let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-            let card_focused = CARD_NOTES_FOCUS.load(std::sync::atomic::Ordering::Relaxed);
-            if keycode == 48 {
-                if let Some(port) = crate::native_toolbar::toolbar_port() {
-                    let _ = post_to_helper(port, "/card-tab-cycle", "{}");
-                }
-                return CallbackResult::Drop;
-            }
-            if CARD_NOTES_MODE.load(std::sync::atomic::Ordering::Relaxed) {
-                if keycode == 36 || keycode == 52 {
-                    log_native(&format!(
-                        "notes Enter key: focus={} snapshot={}",
-                        CARD_NOTES_FOCUS.load(std::sync::atomic::Ordering::Relaxed),
-                        NOTES_SNAPSHOT.lock().map(|c| c.len()).unwrap_or(0)
-                    ));
-                }
-                match keycode {
-                    125 | 126 => {
-                        let delta = if keycode == 125 { 1 } else { -1 };
-                        thread::spawn(move || notes_navigate(delta));
-                        return CallbackResult::Drop;
-                    }
-                    36 | 52 if card_focused
-                        && !NOTES_SNAPSHOT.lock().map(|c| c.is_empty()).unwrap_or(true) => {
-                        thread::spawn(notes_enter);
-                        return CallbackResult::Drop;
-                    }
-                    53 => {
-                        notes_hide();
-                        return CallbackResult::Drop;
-                    }
-                    _ => {}
-                }
-            }
-            return CallbackResult::Keep;
-        }
+        // NOTE: while the native card is up, the helper is the ACTIVE app with
+        // a key panel (OS-normal model): arrows/Enter/Tab/Esc travel the
+        // standard responder chain inside the helper. This tap no longer
+        // intercepts or rewrites any of them — no global key pollution.
 
         CGEventType::KeyDown if is_translate_shortcut(event) => {
             log_native("shortcut key detected");
@@ -3115,8 +3077,6 @@ fn dispatch_toolbar_action(
     // CARD_UP never goes stale and swallows later stream events.
     if action.action == "card-hidden" || action.action == "card-cleared" {
         CARD_UP.store(false, std::sync::atomic::Ordering::Relaxed);
-        CARD_NOTES_MODE.store(false, std::sync::atomic::Ordering::Relaxed);
-        CARD_NOTES_FOCUS.store(false, std::sync::atomic::Ordering::Relaxed);
         return Ok(());
     }
     // Manual input surface: open the card on AiForm + IdleState (no run).
@@ -3137,7 +3097,6 @@ fn dispatch_toolbar_action(
     // tab switch; Rust owns the database.
     // Notes tab row actions: insert at the source caret / delete the note.
     if action.action == "note-insert" {
-        let app_handle = app.clone();
         let text = action.text.clone();
         tauri::async_runtime::spawn(async move {
             let _ = crate::text_injection::insert_at_focus(text.clone());
@@ -3153,21 +3112,16 @@ fn dispatch_toolbar_action(
     }
 
     if action.action == "card-key" {
-        let focused = action.text.trim() == "1";
-        CARD_NOTES_FOCUS.store(focused, std::sync::atomic::Ordering::Relaxed);
-        log_native(&format!("card-key focus={focused}"));
         return Ok(());
     }
     if action.action == "panel-notes" {
         return send_card_notes(app);
     }
     if action.action == "panel-review" {
-        CARD_NOTES_MODE.store(false, std::sync::atomic::Ordering::Relaxed);
         send_next_review_word(app);
         return Ok(());
     }
     if action.action == "panel-translate" {
-        CARD_NOTES_MODE.store(false, std::sync::atomic::Ordering::Relaxed);
         return Ok(());
     }
     if action.action == "review-grade" {
@@ -3214,7 +3168,6 @@ fn send_card_notes(app: &tauri::AppHandle) -> Result<(), String> {
             *cell = parsed;
         }
         NOTES_SELECTED.store(0, std::sync::atomic::Ordering::Relaxed);
-        CARD_NOTES_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     let Some(port) = toolbar_port() else { return Ok(()) };
     let body = format!("{{\"notes\":{rows}}}");
