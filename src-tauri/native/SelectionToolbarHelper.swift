@@ -731,7 +731,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var panelTabButtons: [NSButton] = []
     private var panelTabsContentWidth: CGFloat = 0
     private var resultRunsBar: NSView!
-    private var cardNotesClip: NSView!
+    private var cardNotesClip: NSScrollView!
     private var cardNotesRows: [NSTextField] = []
     private var cardNoteRowViews: [NSView] = []
     private var cardNotesSelectedIndex = 0
@@ -1365,9 +1365,12 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         inputContainer.addSubview(inputButtonsClip)
 
         // Notes tab: browsable note rows (click = copy).
-        cardNotesClip = NSView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
-        cardNotesClip.wantsLayer = true
-        cardNotesClip.layer?.masksToBounds = true
+        cardNotesClip = NSScrollView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
+        cardNotesClip.drawsBackground = false
+        cardNotesClip.hasVerticalScroller = true
+        cardNotesClip.autohidesScrollers = true
+        let notesDoc = NSView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
+        cardNotesClip.documentView = notesDoc
         resultContainer.addSubview(cardNotesClip)
 
         // Review tab: word card + reveal + SM-2 grade buttons.
@@ -1578,22 +1581,27 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     private func handleCardNotes(_ payload: CardNotesPayload) {
-        cardNotesRows.forEach { $0.removeFromSuperview() }
         cardNoteRowViews.forEach { $0.removeFromSuperview() }
-        cardNotesClip.subviews.forEach { $0.removeFromSuperview() }
         cardNotesRows.removeAll()
         cardNoteRowViews.removeAll()
         cardNotesSelectedIndex = 0
 
-        // Hapigo-style rows: bold title over muted content (two lines max).
-        var y: CGFloat = CGFloat(max(payload.notes.count - 1, 0)) * 44
+        // Hapigo-style rows: bold title band over a two-line muted content
+        // band. Row is 56pt: title 35..52, content 4..34 — no overlap. The
+        // newest note sits at the TOP of the scroller.
+        let doc = cardNotesClip.documentView ?? NSView()
+        var y: CGFloat = CGFloat(max(payload.notes.count - 1, 0)) * 56
+        let rowW = (cardUserWidth ?? resultCardWidth) - 16
         for note in payload.notes {
-            let row = NSView(frame: NSRect(x: 4, y: y, width: (cardUserWidth ?? resultCardWidth) - 12, height: 44))
+            let row = NSView(frame: NSRect(x: 4, y: y, width: rowW, height: 56))
             row.wantsLayer = true
             row.layer?.cornerRadius = 6
 
             let hasContent = !note.content.isEmpty
-            let title = ClickableTextField(labelWithString: note.name.isEmpty ? "(untitled)" : note.name)
+            let titleText = note.name.isEmpty
+                ? String(note.content.prefix(40))
+                : note.name
+            let title = ClickableTextField(labelWithString: titleText)
             title.font = .systemFont(ofSize: 13, weight: .semibold)
             title.textColor = .labelColor
             title.lineBreakMode = .byTruncatingTail
@@ -1601,7 +1609,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             title.cell?.truncatesLastVisibleLine = true
             title.cell?.wraps = false
             title.toolTip = note.content
-            title.frame = NSRect(x: 10, y: hasContent ? 23 : 13, width: row.frame.width - 76, height: 17)
+            title.frame = NSRect(x: 10, y: hasContent ? 35 : 20, width: rowW - 86, height: 17)
             title.onClicked = { [weak self] in
                 guard let self, let index = self.cardNoteRowViews.firstIndex(of: row) else { return }
                 self.cardNotesSelect(index)
@@ -1617,7 +1625,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 content.maximumNumberOfLines = 2
                 content.cell?.truncatesLastVisibleLine = true
                 content.cell?.wraps = true
-                content.frame = NSRect(x: 10, y: 4, width: row.frame.width - 76, height: 34)
+                content.frame = NSRect(x: 10, y: 4, width: rowW - 86, height: 30)
                 row.addSubview(content)
             }
 
@@ -1628,7 +1636,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             insertButton.contentTintColor = .secondaryLabelColor
             insertButton.toolTip = "Insert at cursor"
             insertButton.identifier = NSUserInterfaceItemIdentifier(note.content)
-            insertButton.frame = NSRect(x: row.frame.width - 56, y: 11, width: 24, height: 22)
+            insertButton.frame = NSRect(x: rowW - 56, y: 17, width: 24, height: 22)
             row.addSubview(insertButton)
 
             if let id = note.id {
@@ -1639,19 +1647,22 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 deleteButton.contentTintColor = .secondaryLabelColor
                 deleteButton.toolTip = "Delete note"
                 deleteButton.identifier = NSUserInterfaceItemIdentifier(String(id))
-                deleteButton.frame = NSRect(x: row.frame.width - 28, y: 11, width: 24, height: 22)
+                deleteButton.frame = NSRect(x: rowW - 28, y: 17, width: 24, height: 22)
                 row.addSubview(deleteButton)
             }
 
-            cardNotesClip.addSubview(row)
+            doc.addSubview(row)
             cardNoteRowViews.append(row)
-            y -= 44
+            y -= 56
         }
+        let notesHeight = CGFloat(max(payload.notes.count, 1)) * 56 + 12
+        doc.frame = NSRect(x: 0, y: 0, width: rowW + 8, height: notesHeight)
         cardNotesSelect(0)
         layoutResultCard()
     }
 
-    /// Keyboard/click selection: accent-tinted row highlight.
+    /// Keyboard/click selection: accent-tinted row highlight + keep the row
+    /// inside the visible strip.
     private func cardNotesSelect(_ index: Int) {
         guard !cardNoteRowViews.isEmpty else { return }
         cardNotesSelectedIndex = min(max(index, 0), cardNoteRowViews.count - 1)
@@ -1659,6 +1670,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         for (i, row) in cardNoteRowViews.enumerated() {
             row.layer?.backgroundColor = i == cardNotesSelectedIndex ? accent : NSColor.clear.cgColor
         }
+        let count = cardNoteRowViews.count
+        let rowY = CGFloat(count - 1 - cardNotesSelectedIndex) * 56
+        let clipH = cardNotesClip.frame.height
+        let docH = CGFloat(count) * 56 + 12
+        let targetY = min(max(rowY - 8, 0), max(0, docH - clipH))
+        cardNotesClip.contentView.scroll(to: NSPoint(x: 0, y: targetY))
+        cardNotesClip.reflectScrolledClipView(cardNotesClip.contentView)
     }
 
     @objc private func noteInsertClicked(_ sender: NSButton) {
@@ -1920,7 +1938,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let status = activeRun?.status
         var contentH: CGFloat = 76 // idle
         if activePanel == "notes" {
-            contentH = min(CGFloat(max(cardNoteRowViews.count, 1)) * 44 + 12, 420)
+            contentH = min(CGFloat(max(cardNoteRowViews.count, 1)) * 56 + 12, 420)
         } else if activePanel == "review" {
             contentH = 200
         } else if status == "loading" {
