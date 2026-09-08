@@ -1496,7 +1496,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         notesTableView.headerView = nil
         notesTableView.rowHeight = 64
         notesTableView.intercellSpacing = .zero
-        notesTableView.style = .sourceList
+        notesTableView.style = .fullWidth
+        notesTableView.selectionHighlightStyle = .regular
         notesTableView.backgroundColor = .clear
         notesTableView.usesAutomaticRowHeights = false
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("note"))
@@ -2858,10 +2859,17 @@ private final class NoteRowCell: NSTableCellView {
     }
 
     private func applyThemeColors() {
-        titleLabel.textColor = themeColors.foreground
-        contentLabel.textColor = themeColors.secondaryText
-        iconView.contentTintColor = themeColors.secondaryText
-        deleteButton?.contentTintColor = themeColors.secondaryText
+        let selected = backgroundStyle == .emphasized
+        titleLabel.textColor = selected ? .white : themeColors.foreground
+        contentLabel.textColor = selected
+            ? NSColor.white.withAlphaComponent(0.92)
+            : themeColors.secondaryText
+        iconView.contentTintColor = selected ? .white : themeColors.secondaryText
+        deleteButton?.contentTintColor = selected ? .white : themeColors.secondaryText
+    }
+
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { applyThemeColors() }
     }
 
     func configure(note: CardNotesPayload.Note, dark: Bool,
