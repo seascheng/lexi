@@ -2944,17 +2944,41 @@ fn send_card_notes(app: &tauri::AppHandle) -> Result<(), String> {
          FROM notes n ORDER BY n.created_at DESC, n.id DESC LIMIT 50;",
     )
     .unwrap_or_else(|| "[]".to_string());
-    // Arm keyboard navigation: ArrowUp/Down move the highlight, Enter injects
-    // the selected note (NOTES_SNAPSHOT is shared with the old notes panel).
-    if let Ok(parsed) = serde_json::from_str::<Vec<NoteRow>>(&rows) {
+    // Map rows by hand: sqlite's GROUP_CONCAT yields NULL (no tags) or a
+    // comma string — neither deserializes into Vec<String>, and a derive
+    // round-trip would fail the whole batch into an empty list.
+    if let Ok(values) = serde_json::from_str::<Vec<serde_json::Value>>(&rows) {
+        let parsed: Vec<NoteRow> = values
+            .iter()
+            .map(|row| NoteRow {
+                id: row["id"].as_i64(),
+                name: row["name"].as_str().unwrap_or("").to_string(),
+                content: row["content"].as_str().unwrap_or("").to_string(),
+                tags: row["tags"]
+                    .as_str()
+                    .map(|joined| {
+                        joined
+                            .split(',')
+                            .map(str::trim)
+                            .filter(|t| !t.is_empty())
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            })
+            .collect();
         if let Ok(mut cell) = NOTES_SNAPSHOT.lock() {
             *cell = parsed;
         }
         NOTES_SELECTED_NOTE_ID.store(-1, std::sync::atomic::Ordering::Relaxed);
     }
     let Some(port) = toolbar_port() else { return Ok(()) };
-    let body = format!("{{\"notes\":{rows}}}");
-    let _ = post_to_helper(port, "/card-notes", &body);
+    if let Ok(cell) = NOTES_SNAPSHOT.lock() {
+        if let Ok(serialized) = serde_json::to_string(&*cell) {
+            let body = format!("{{\"notes\":{serialized}}}");
+            let _ = post_to_helper(port, "/card-notes", &body);
+        }
+    }
     Ok(())
 }
 
