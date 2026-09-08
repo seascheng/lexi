@@ -1506,6 +1506,13 @@ fn handle_system_event(
                     return;
                 }
 
+                // Clicks on our own UI (helper panels / main window) are
+                // interactions, not selection gestures — the fallback's
+                // synthetic Cmd+C would land on the still-frontmost source
+                // app and beep.
+                if position_hits_own_ui(down_x, down_y) {
+                    return;
+                }
                 // Let the app process the mouse up and update its selection. Our
                 // tap runs BEFORE the app sees the event (HeadInsert).
                 thread::sleep(Duration::from_millis(80));
