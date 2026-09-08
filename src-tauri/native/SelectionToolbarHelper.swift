@@ -842,7 +842,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var cardNotesClip: HorizontalOnlyClip!
 
     private var notesTableView: NotesTable!
-    private var noteSearchField: NSTextField!
+    private var noteSearchContainer: NSView!
+    private var noteSearchField: NSTextView!
+    private var noteSearchPlaceholder: NSTextField!
     private var noteTagBar: NSView!
     private var noteTagButtons: [NSButton] = []
     private var noteSearchText = ""
@@ -1541,18 +1543,29 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         cardNotesClip.documentView = notesTableView
         resultContainer.addSubview(cardNotesClip)
 
-        // Notes toolbar: live title search + tag filter chips.
-        noteSearchField = NSTextField()
-        let searchCell = VerticallyCenteredTextFieldCell()
-        searchCell.isEditable = true
-        searchCell.placeholderString = "Search notes"
-        searchCell.font = .systemFont(ofSize: 12)
-        noteSearchField.cell = searchCell
-        noteSearchField.wantsLayer = true
-        noteSearchField.layer?.cornerRadius = 8
-        noteSearchField.layer?.borderWidth = 1
+        // Notes toolbar: live title search + tag filter chips. The search
+        // surface IS the Actions input component: container + CardInputTextView
+        // + overlay placeholder — identical construction, one language.
+        noteSearchContainer = NSView(frame: .zero)
+        noteSearchContainer.wantsLayer = true
+        noteSearchContainer.layer?.cornerRadius = 8
+        noteSearchContainer.layer?.borderWidth = 1
+        resultContainer.addSubview(noteSearchContainer)
+
+        noteSearchField = CardInputTextView(frame: NSRect(x: 6, y: 4, width: 100, height: 22))
+        noteSearchField.font = .systemFont(ofSize: 13)
+        noteSearchField.drawsBackground = false
+        noteSearchField.isRichText = false
+        noteSearchField.isAutomaticQuoteSubstitutionEnabled = false
+        noteSearchField.isAutomaticDashSubstitutionEnabled = false
         noteSearchField.delegate = self
-        resultContainer.addSubview(noteSearchField)
+        noteSearchField.textContainer?.lineFragmentPadding = 0
+        noteSearchContainer.addSubview(noteSearchField)
+
+        noteSearchPlaceholder = NSTextField(labelWithString: "Search notes")
+        noteSearchPlaceholder.font = .systemFont(ofSize: 13)
+        noteSearchPlaceholder.textColor = .tertiaryLabelColor
+        noteSearchContainer.addSubview(noteSearchPlaceholder)
 
         noteTagBar = NSView(frame: .zero)
         resultContainer.addSubview(noteTagBar)
@@ -2236,14 +2249,17 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultIdleIcon.frame = NSRect(x: width / 2 - 8, y: contentFinal / 2 + 18, width: 16, height: 16)
 
         let notesUIVisible = activePanel == "notes"
-        let searchH: CGFloat = 28
+        let searchH: CGFloat = 30
         let chipsH: CGFloat = 24
         noteSearchField.isHidden = !notesUIVisible
         noteTagBar.isHidden = !notesUIVisible
         cardNotesClip.isHidden = !notesUIVisible
         if notesUIVisible {
             let listTop = contentY + contentFinal
-            noteSearchField.frame = NSRect(x: 12, y: listTop - searchH, width: width - 24, height: searchH)
+            noteSearchContainer.frame = NSRect(x: 12, y: listTop - searchH, width: width - 24, height: searchH)
+            noteSearchField.frame = NSRect(x: 8, y: 4, width: width - 24 - 16, height: searchH - 9)
+            noteSearchPlaceholder.frame = NSRect(x: 9, y: (searchH - 16) / 2, width: 140, height: 16)
+            noteSearchPlaceholder.isHidden = !noteSearchField.string.isEmpty
             noteTagBar.frame = NSRect(x: 12, y: listTop - searchH - 6 - chipsH, width: width - 24, height: chipsH)
             layoutNoteTagButtons()
             cardNotesClip.frame = NSRect(
@@ -3748,6 +3764,12 @@ private enum LightMarkdown {
 
 extension SelectionToolbarApp: NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
+        if notification.object as? NSTextView === noteSearchField {
+            noteSearchText = noteSearchField.string
+            noteSearchPlaceholder.isHidden = !noteSearchField.string.isEmpty
+            applyNoteFilters()
+            return
+        }
         guard notification.object as? NSTextView === inputTextView else { return }
         // AiForm parity: re-measure and re-flow single- vs multi-line on
         // every edit, and re-enable the action buttons when text exists.
@@ -3817,18 +3839,13 @@ extension SelectionToolbarApp {
 }
 
 extension SelectionToolbarApp: NSTextFieldDelegate {
-    func controlTextDidChange(_ obj: Notification) {
-        guard obj.object as? NSTextField === noteSearchField else { return }
-        noteSearchText = noteSearchField.stringValue
-        applyNoteFilters()
-    }
-
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         guard control === noteSearchField else { return false }
         if commandSelector == NSSelectorFromString("cancelOperation:") {
-            if !noteSearchField.stringValue.isEmpty {
-                noteSearchField.stringValue = ""
+            if !noteSearchField.string.isEmpty {
+                noteSearchField.string = ""
                 noteSearchText = ""
+                noteSearchPlaceholder.isHidden = true
                 applyNoteFilters()
             } else {
                 notesTableView.window?.makeFirstResponder(notesTableView)
