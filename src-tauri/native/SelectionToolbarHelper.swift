@@ -583,7 +583,7 @@ private final class HorizontalOnlyClip: NSScrollView {
         // rubber-banding one-line strip displaces the very buttons the
         // user is trying to click.
         let docW = documentView?.frame.width ?? 0
-        if docW <= bounds.width + 0.5 { return }
+        if docW <= bounds.width + 1.5 { return }
         super.scrollWheel(with: event)
     }
 }
@@ -1843,7 +1843,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let buttonGroupWidth: CGFloat = cardActions.isEmpty
             ? 0
             : CGFloat(cardActions.count) * 30 + CGFloat(cardActions.count - 1) * 2 + 4
-        let rowLayoutWidth = max(50, contentWidth - 8 - min(buttonGroupWidth, contentWidth - 58))
+        let availForButtons = contentWidth - 50 - 10
+        let clipW = min(buttonGroupWidth, availForButtons)
+        let rowLayoutWidth = contentWidth - 8 - clipW
         // Two-stage measure (WebView parity): judge multi-line at the ROW
         // width, but size the text view at the FULL width it will actually
         // render at — otherwise the two widths disagree and text is clipped
@@ -1866,7 +1868,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             inputTextView.textContainerInset = NSSize(width: 6, height: (max(textHeight, 24) - 17) / 2)
             inputTextView.frame = NSRect(x: 6, y: (inputBarHeight - max(textHeight, 24)) / 2, width: rowLayoutWidth, height: max(textHeight, 24))
             let buttonsHeight: CGFloat = 28
-            let clipW = min(buttonGroupWidth, contentWidth - rowLayoutWidth - 10)
             inputButtonsRow.frame = NSRect(x: 0, y: 0, width: buttonGroupWidth, height: 28)
             inputButtonsClip.frame = NSRect(
                 x: 6 + rowLayoutWidth + 4,
