@@ -1378,7 +1378,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         notesTableView = NSTableView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
         notesTableView.headerView = nil
         notesTableView.rowHeight = 64
-        notesTableView.intercellSpacing = NSSize(width: 8, height: 0)
+        notesTableView.intercellSpacing = .zero
         notesTableView.selectionHighlightStyle = .regular
         notesTableView.backgroundColor = .clear
         notesTableView.usesAutomaticRowHeights = false
@@ -2754,6 +2754,43 @@ private struct CardActionsPayload: Decodable {
     let panels: [PanelDef]?
 }
 
+/// Row view for the notes table: the system draws selection here, so hover
+/// is drawn here too — same width, same inset, same corner radius. (Hover on
+/// the CELL left an 8pt mismatch against the selection capsule.)
+private final class NoteRowView: NSTableRowView {
+    private var hoverArea: NSTrackingArea?
+    private var hovering = false
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        if let hoverArea { addTrackingArea(hoverArea) }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        if !isSelected, hovering {
+            NSColor.labelColor.withAlphaComponent(0.05).setFill()
+            NSBezierPath(
+                roundedRect: bounds.insetBy(dx: 3, dy: 2),
+                xRadius: 6,
+                yRadius: 6
+            ).fill()
+        }
+    }
+}
+
 /// One notes-table row (view-based NSTableView cell). The system provides
 /// selection (accent capsule), row height, scrolling, and width tracking;
 /// this cell only lays out its subviews and retints on selection/hover.
@@ -2763,8 +2800,6 @@ private final class NoteRowCell: NSTableCellView {
     let contentLabel = NSTextField(labelWithString: "")
     var deleteButton: NSButton?
     private var onDelete: ((Int64) -> Void)?
-    private var hoverArea: NSTrackingArea?
-    private var hovering = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -2837,23 +2872,6 @@ private final class NoteRowCell: NSTableCellView {
         deleteButton?.frame = NSRect(x: w - 28, y: 24, width: 20, height: 16)
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverArea { removeTrackingArea(hoverArea) }
-        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        if let hoverArea { addTrackingArea(hoverArea) }
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        hovering = true
-        retint()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        hovering = false
-        retint()
-    }
-
     private func retint() {
         let selected = backgroundStyle == .emphasized
         titleLabel.textColor = selected ? .white : .labelColor
@@ -2861,15 +2879,6 @@ private final class NoteRowCell: NSTableCellView {
             ? NSColor.white.withAlphaComponent(0.92)
             : .secondaryLabelColor
         iconView.contentTintColor = selected ? .white : .secondaryLabelColor
-        wantsLayer = true
-        layer?.cornerRadius = 8
-        if !selected {
-            layer?.backgroundColor = hovering
-                ? NSColor.labelColor.withAlphaComponent(0.05).cgColor
-                : NSColor.clear.cgColor
-        } else {
-            layer?.backgroundColor = NSColor.clear.cgColor
-        }
     }
 }
 
@@ -3305,8 +3314,15 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        // System row view: regular accent selection capsule.
-        nil
+        if let reused = tableView.makeView(
+            withIdentifier: NSUserInterfaceItemIdentifier("NoteRowView"),
+            owner: self
+        ) as? NoteRowView {
+            return reused
+        }
+        let view = NoteRowView(frame: .zero)
+        view.identifier = NSUserInterfaceItemIdentifier("NoteRowView")
+        return view
     }
 }
 
