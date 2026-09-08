@@ -1806,14 +1806,11 @@ fn trigger_popup_with_selection(app: &tauri::AppHandle) {
         },
     };
 
-    // Terminals / custom-rendered editors: drive the app's own Edit → Copy.
-    let (text, source) = match text {
-        Some(t) => (Some(t), source),
-        None => match read_selected_text_via_menu().or_else(read_selected_text_via_cmd_c) {
-            Some(t) => (Some(t), "fallback"),
-            None => (None, source),
-        },
-    };
+    // NOTE: no menu/Cmd+C fallback on the shortcut path. Synthesizing keys
+    // at an app without a selection lands as an invalid command (the system
+    // error beep users heard). Browsers are covered by the fresh-copy
+    // fallback below; drag-selection reading keeps its own richer path.
+
 
     // Final courtesy: the text the user just Cmd+C'd, if still fresh.
     let (text, source) = match text {
