@@ -1158,7 +1158,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         isInputFocused = focused
         inputContainer.layer?.borderColor = focused
             ? NSColor.controlAccentColor.withAlphaComponent(0.6).cgColor
-            : (theme == .dark ? NSColor.white.withAlphaComponent(0.22) : NSColor.black.withAlphaComponent(0.20)).withAlphaComponent(0.7).cgColor
+            : NSColor.separatorColor.withAlphaComponent(0.8).cgColor
     }
     // MARK: - Native result card (WebView parity): AiForm input bar,
     // multi-run tabs, loading/streaming/ready/error states, EntryTypeTags,
@@ -1205,13 +1205,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultTabsView = NSView(frame: NSRect(x: 0, y: 210, width: resultCardWidth, height: 32))
         resultContainer.addSubview(resultTabsView)
 
-        cardPanelTabsView = NSView(frame: NSRect(x: 8, y: 2, width: resultCardWidth - 48, height: 28))
+        cardPanelTabsView = NSView(frame: NSRect(x: 8, y: 3, width: resultCardWidth - 48, height: 30))
         resultTabsView.addSubview(cardPanelTabsView)
 
         panelTabsControl = NSSegmentedControl()
         panelTabsControl.segmentCount = 3
-        panelTabsControl.segmentStyle = .automatic
+        panelTabsControl.segmentStyle = .texturedRounded
         panelTabsControl.trackingMode = .selectOne
+        panelTabsControl.controlSize = .large
         panelTabsControl.target = self
         panelTabsControl.action = #selector(panelTabClicked(_:))
         for (index, def) in panelDefs.enumerated() {
@@ -1871,7 +1872,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         // --- Strip sizes (screen order top→bottom: tabs / input / runs /
         // content / actionBar). Notes & Review replace everything below tabs.
         let isTranslate = activePanel == "translate"
-        let tabsH: CGFloat = 32
+        let tabsH: CGFloat = 36
         let runsH: CGFloat = (isTranslate && !cardRuns.isEmpty) ? 28 : 0
         let inputH = isTranslate ? inputBarHeight : 0
         let status = activeRun?.status
@@ -1954,7 +1955,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         reviewCardView.isHidden = activePanel != "review"
         reviewCardView.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
-        relayoutReview(width: width)
+        relayoutReview(width: width, height: contentFinal)
 
         resultActionBar.isHidden = actionH == 0
         resultActionBar.frame = NSRect(x: side, y: actionY, width: contentWidth, height: actionH)
@@ -1989,9 +1990,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let segW = panelTabsControl.fittingSize.width
         panelTabsControl.frame = NSRect(
             x: max(0, (cardPanelTabsView.bounds.width - segW) / 2),
-            y: 0,
+            y: 1,
             width: segW,
-            height: 24
+            height: 26
         )
         resultCloseButton.frame.origin.x = width - 32
         resultTrashButton.frame = NSRect(x: width - 30, y: runsY + 3, width: 22, height: 22)
@@ -2036,15 +2037,18 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         return ceil(manager.usedRect(for: container).height)
     }
 
-    /// Re-fit the review card's fixed chrome to the current card width.
-    private func relayoutReview(width: CGFloat) {
-        reviewWordLabel.frame = NSRect(x: 10, y: 120, width: width - 20, height: 28)
-        reviewAnswerLabel.frame = NSRect(x: 20, y: 88, width: width - 40, height: 18)
-        reviewRevealButton.frame.origin.x = width / 2 - 40
+    /// Review card: word block vertically centered in the content area,
+    /// everything tracks the live width/height.
+    private func relayoutReview(width: CGFloat, height: CGFloat) {
+        let mid = height / 2
+        reviewWordLabel.font = .systemFont(ofSize: min(28, max(20, height / 7)), weight: .semibold)
+        reviewWordLabel.frame = NSRect(x: 10, y: mid + 16, width: width - 20, height: 34)
+        reviewAnswerLabel.frame = NSRect(x: 20, y: mid - 8, width: width - 40, height: 18)
+        reviewRevealButton.frame = NSRect(x: width / 2 - 40, y: mid - 44, width: 80, height: 24)
         for (index, grade) in reviewGradeButtons.enumerated() {
-            grade.frame.origin.x = 20 + CGFloat(index) * 98
+            grade.frame = NSRect(x: 20 + CGFloat(index) * 98, y: 16, width: 88, height: 26)
         }
-        reviewEmptyLabel.frame = NSRect(x: 10, y: 90, width: width - 20, height: 18)
+        reviewEmptyLabel.frame = NSRect(x: 10, y: mid - 9, width: width - 20, height: 18)
     }
 
     /// Height changes apply in ONE atomic setFrame: subview geometry is set
