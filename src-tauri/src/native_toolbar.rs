@@ -218,6 +218,36 @@ fn mark_popup_up(visible: bool) {
 /// Global handle for deferred native-card work (sqlite access from workers).
 static CURRENT_APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 
+/// Last theme the frontend pushed. The helper defaults to dark and its
+/// lifecycle is independent of the frontend (watchdog relaunches), so every
+/// helper (re)start must be followed by a theme push — the cached value is
+/// what those re-pushes use.
+static LAST_THEME: std::sync::LazyLock<Mutex<String>> =
+    std::sync::LazyLock::new(|| Mutex::new("dark".to_string()));
+
+fn push_theme_to_helper(toolbar_port: u16) {
+    let theme = LAST_THEME
+        .lock()
+        .map(|t| t.clone())
+        .unwrap_or_else(|_| "dark".to_string());
+    let Ok(body) = serde_json::to_string(&ToolbarThemePayload { theme }) else {
+        return;
+    };
+    for attempt in 0..5 {
+        match post_to_helper(toolbar_port, "/theme", &body) {
+            Ok(()) => return,
+            Err(e) if attempt < 4 => {
+                log_native(&format!("theme push attempt {} failed: {e}", attempt + 1));
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            Err(e) => {
+                log_native(&format!("theme push gave up: {e}"));
+                return;
+            }
+        }
+    }
+}
+
 /// The note the frontend currently has highlighted in the popup's NotesPanel,
 /// synced eagerly by `set_pending_note` so the tap's Enter can insert it
 /// without touching the (throttled) webview.
@@ -1033,6 +1063,7 @@ pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
     spawn_action_server(listener, app_handle.clone());
     launch_helper(&app_handle, action_port, toolbar_port)?;
     wait_for_helper(toolbar_port);
+    push_theme_to_helper(toolbar_port);
     spawn_helper_watchdog(app_handle.clone(), action_port, toolbar_port);
     spawn_selection_monitor(app_handle.clone(), toolbar_port);
     spawn_extension_server(&app_handle);
@@ -1077,6 +1108,9 @@ fn read_toolbar_enabled_from_sqlite(path: &Path) -> Option<bool> {
 #[tauri::command]
 pub fn set_native_toolbar_theme(theme: String) -> Result<(), String> {
     let theme = if theme == "light" { "light" } else { "dark" };
+    if let Ok(mut cached) = LAST_THEME.lock() {
+        *cached = theme.to_string();
+    }
     let port = TOOLBAR_PORT
         .get_or_init(|| Mutex::new(None))
         .lock()
@@ -3545,6 +3579,16 @@ fn spawn_helper_watchdog(app: tauri::AppHandle, action_port: u16, toolbar_port: 
             log_native("watchdog: helper unreachable, relaunching");
             if let Err(error) = launch_helper(&app, action_port, toolbar_port) {
                 log_native(&format!("watchdog: relaunch failed: {error}"));
+            } else {
+                // The relaunched helper comes up with its default theme —
+                // re-push the cached one once it binds.
+                for _ in 0..30 {
+                    if TcpStream::connect((IPC_HOST, toolbar_port)).is_ok() {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(500));
+                }
+                push_theme_to_helper(toolbar_port);
             }
             last_launch = Instant::now();
         }

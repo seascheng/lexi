@@ -31,14 +31,20 @@ private func defaultToolbarActions() -> [ToolbarAction] {
     ]
 }
 
-private func lucideImage(for icon: String, title: String) -> NSImage? {
+private func hexString(_ color: NSColor) -> String {
+    let c = color.usingColorSpace(.sRGB) ?? color
+    return String(format: "#%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
+}
+
+private func lucideImage(for icon: String, title: String, color: NSColor? = nil) -> NSImage? {
+    let stroke = color.map { "stroke=\"\(hexString($0))\"" } ?? "stroke=\"#000000\""
     let svg = """
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">\(lucideMarkup(for: icon))</svg>
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" \(stroke) stroke-width="2" stroke-linecap="round" stroke-linejoin="round">\(lucideMarkup(for: icon))</svg>
     """
     guard let image = NSImage(data: Data(svg.utf8)) else {
         return NSImage(systemSymbolName: "wand.and.stars", accessibilityDescription: title)
     }
-    image.isTemplate = true
+    image.isTemplate = color == nil
     image.size = NSSize(width: toolbarIconSize, height: toolbarIconSize)
     image.accessibilityDescription = title
     return image
@@ -517,7 +523,131 @@ private final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
-final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
+/// Borderless icon button with hover/press feedback (system-feel chrome):
+/// subtle fill on hover, stronger on press, corner radius to match chips.
+private final class HoverIconButton: NSButton {
+    private var hoverArea: NSTrackingArea?
+    var baseAlpha: CGFloat = 0.10
+    var pressAlpha: CGFloat = 0.16
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    required init?(coder: NSCoder) { fatalError("not supported") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self, userInfo: nil)
+        if let hoverArea { addTrackingArea(hoverArea) }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(baseAlpha).cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(pressAlpha).cgColor
+        super.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(isMousePoint(event.locationInWindow, in: frame) ? baseAlpha : 0).cgColor
+        super.mouseUp(with: event)
+    }
+}
+
+/// Resize surfaces for the borderless card: bottom-right corner, right edge,
+/// bottom edge. Dragging anchors the opposite edge (standard window resize
+/// semantics) and each zone shows the matching system cursor.
+private final class CardResizeZone: NSView {
+    enum Edge { case corner, right, bottom }
+    let edge: Edge
+    /// (width, height) deltas — nil means "this zone doesn't change it".
+    var onResize: ((_ width: CGFloat?, _ height: CGFloat?) -> Void)?
+    var onReset: (() -> Void)?
+    private var startMouse = NSPoint.zero
+    private var startSize = NSSize(width: 420, height: 240)
+    private var isDark = false
+    private static let diagonalCursor: NSCursor = {
+        if let image = NSImage(systemSymbolName: "arrow.up.left.and.arrow.down.right",
+                               accessibilityDescription: "Resize") {
+            let configured = image.withSymbolConfiguration(.init(pointSize: 13, weight: .medium)) ?? image
+            return NSCursor(image: configured, hotSpot: NSPoint(x: 8, y: 8))
+        }
+        return .crosshair
+    }()
+
+    init(edge: Edge, frame: NSRect) {
+        self.edge = edge
+        super.init(frame: frame)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("not supported") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard edge == .corner else { return }
+        let color = (isDark ? NSColor.white : NSColor.black).withAlphaComponent(0.28)
+        color.setStroke()
+        for i in 0..<3 {
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: bounds.width - 3.5 - CGFloat(i) * 4, y: 2.5))
+            path.line(to: NSPoint(x: bounds.width - 2.5, y: 3.5 + CGFloat(i) * 4))
+            path.lineWidth = 1.2
+            path.lineCapStyle = .round
+            path.stroke()
+        }
+    }
+
+    private var cursor: NSCursor {
+        switch edge {
+        case .corner: return Self.diagonalCursor
+        case .right: return .resizeLeftRight
+        case .bottom: return .resizeUpDown
+        }
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: cursor)
+    }
+
+    func setDark(_ dark: Bool) {
+        isDark = dark
+        needsDisplay = true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            onReset?()
+            return
+        }
+        startMouse = NSEvent.mouseLocation
+        startSize = window?.frame.size ?? NSSize(width: 420, height: 240)
+        cursor.set()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let cur = NSEvent.mouseLocation
+        let dx = cur.x - startMouse.x
+        let dy = startMouse.y - cur.y // drag down grows (AppKit y-up)
+        switch edge {
+        case .corner: onResize?(startSize.width + dx, startSize.height + dy)
+        case .right: onResize?(startSize.width + dx, nil)
+        case .bottom: onResize?(nil, startSize.height + dy)
+        }
+    }
+}
+
+final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var panel: NSPanel!
     private var container: NSVisualEffectView!
     private var dragHandle: ToolbarDragHandle!
@@ -551,6 +681,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     private var resultLoadingLabel: NSTextField!
     private var resultIdleLabel: NSTextField!
     private var resultIdleHint: NSTextField!
+    private var resultIdleIcon: NSImageView!
+    private var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
     private var resultActionBar: NSView!
     private var resultEntryBar: NSView!
     private var resultCopyButton: NSButton!
@@ -559,6 +691,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     private var inputTextView: NSTextView!
     private var inputPlaceholder: NSTextField!
     private var inputButtonsRow: NSView!
+    private var inputButtonsClip: NSScrollView!
     private var cardRuns: [CardRun] = []
     private var cardActions: [CardActionsPayload.Item] = []
     private var activeRunId: String?
@@ -566,6 +699,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     private var panelDefs: [(id: String, name: String, icon: String)] = []
     private var cardPanelTabsView: NSView!
     private var panelTabButtons: [NSButton] = []
+    private var panelTabsContentWidth: CGFloat = 0
     private var resultRunsBar: NSView!
     private var cardNotesClip: NSView!
     private var cardNotesRows: [NSTextField] = []
@@ -578,6 +712,15 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     private var reviewEmptyLabel: NSTextField!
     private var reviewCurrentWordId: Int64 = 0
     private var runChipViews: [RunChipView] = []
+    private var cardX: CGFloat = 0
+    private var cardTopY: CGFloat = 0
+    private var cardModelHeight: CGFloat = 240
+    private var cardUserWidth: CGFloat?
+    private var cardUserHeight: CGFloat?
+    private var programmaticFrame = false
+    private var resizeCorner: CardResizeZone!
+    private var resizeRight: CardResizeZone!
+    private var resizeBottom: CardResizeZone!
     private var entryButtons: [NSButton] = []
     private var listener: NWListener?
     private let listenerQueue = DispatchQueue(label: "lexi.toolbar.display")
@@ -989,6 +1132,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         resultPanel.level = .popUpMenu
         resultPanel.hidesOnDeactivate = false
         resultPanel.isMovableByWindowBackground = true
+        resultPanel.acceptsMouseMovedEvents = true
+        resultPanel.delegate = self
         resultPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
         resultContainer = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 240))
@@ -1095,6 +1240,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         resultIdleHint.textColor = .tertiaryLabelColor
         resultIdleHint.alignment = .center
         resultIdleHint.frame = NSRect(x: 10, y: 76, width: resultCardWidth - 20, height: 14)
+
+        resultIdleIcon = NSImageView(frame: NSRect(x: resultCardWidth / 2 - 8, y: 102, width: 16, height: 16))
+        resultIdleIcon.image = lucideImage(for: "sparkles", title: "Idle")
+        resultIdleIcon.contentTintColor = .controlAccentColor
+        resultIdleIcon.imageScaling = .scaleProportionallyDown
+        resultIdleIcon.isHidden = true
+        resultContainer.addSubview(resultIdleIcon)
         resultContainer.addSubview(resultIdleHint)
 
         // Action bar: EntryTypeTags + Copy + Save (ready runs).
@@ -1163,7 +1315,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         inputContainer.addSubview(inputPlaceholder)
 
         inputButtonsRow = NSView(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
-        inputContainer.addSubview(inputButtonsRow)
+        inputButtonsClip = NSScrollView(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
+        inputButtonsClip.drawsBackground = false
+        inputButtonsClip.hasVerticalScroller = false
+        inputButtonsClip.hasHorizontalScroller = false
+        inputButtonsClip.autohidesScrollers = true
+        inputButtonsClip.contentView.automaticallyAdjustsContentInsets = false
+        inputButtonsClip.documentView = inputButtonsRow
+        inputContainer.addSubview(inputButtonsClip)
 
         // Notes tab: browsable note rows (click = copy).
         cardNotesClip = NSView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
@@ -1207,6 +1366,28 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
             reviewGradeButtons.append(grade)
         }
 
+        let makeZone: (CardResizeZone.Edge, NSRect) -> CardResizeZone = { [weak self] edge, frame in
+            let zone = CardResizeZone(edge: edge, frame: frame)
+            zone.onResize = { [weak self] width, height in
+                guard let self else { return }
+                if let width { self.cardUserWidth = min(max(width, 360), 760) }
+                if let height { self.cardUserHeight = min(max(height, 240), 900) }
+                self.layoutResultCard()
+            }
+            zone.onReset = { [weak self] in
+                self?.cardUserWidth = nil
+                self?.cardUserHeight = nil
+                self?.layoutResultCard()
+            }
+            return zone
+        }
+        resizeCorner = makeZone(.corner, NSRect(x: resultCardWidth - 16, y: 0, width: 16, height: 16))
+        resizeRight = makeZone(.right, NSRect(x: resultCardWidth - 4, y: 16, width: 4, height: 180))
+        resizeBottom = makeZone(.bottom, NSRect(x: 0, y: 0, width: resultCardWidth - 16, height: 4))
+        resultContainer.addSubview(resizeCorner)
+        resultContainer.addSubview(resizeRight)
+        resultContainer.addSubview(resizeBottom)
+
         reviewEmptyLabel = NSTextField(labelWithString: "No words due for review.")
         reviewEmptyLabel.font = .systemFont(ofSize: 13)
         reviewEmptyLabel.textColor = .secondaryLabelColor
@@ -1248,7 +1429,28 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         layoutResultCard()
         if !resultPanel.isVisible {
             placeResultCard()
-            resultPanel.orderFrontRegardless()
+            if !reduceMotion, let layer = resultPanel.contentView?.layer {
+                resultPanel.alphaValue = 0
+                let rise = CABasicAnimation(keyPath: "transform.translation.y")
+                rise.fromValue = 6
+                rise.toValue = 0
+                rise.duration = 0.22
+                rise.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                layer.add(rise, forKey: "materialize")
+                resultPanel.orderFrontRegardless()
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = 0.22
+                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    resultPanel.animator().alphaValue = 1
+                })
+            } else {
+                resultPanel.alphaValue = 0
+                resultPanel.orderFrontRegardless()
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = 0.15
+                    resultPanel.animator().alphaValue = 1
+                })
+            }
         }
         applyNotesTheme()
         // WebView parity: the selected text lands in the input bar,
@@ -1279,24 +1481,36 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         var built: [Built] = []
         var totalWidth: CGFloat = 0
         for panel in panelDefs {
-            let button = NSButton(title: panel.name, target: self, action: #selector(panelTabClicked(_:)))
+            let active = activePanel == panel.id
+            let fg: NSColor = active ? .labelColor : .secondaryLabelColor
+            let button = NSButton(title: "", target: self, action: #selector(panelTabClicked(_:)))
             button.bezelStyle = .regularSquare
             button.isBordered = false
-            button.font = .systemFont(ofSize: 12, weight: .medium)
             button.identifier = NSUserInterfaceItemIdentifier(panel.id)
-            button.image = lucideImage(for: panel.icon, title: panel.name)
-            button.imageScaling = .scaleProportionallyDown
-            button.imagePosition = .imageLeading
-            button.contentTintColor = activePanel == panel.id ? .labelColor : .secondaryLabelColor
             button.wantsLayer = true
             button.layer?.cornerRadius = 6
-            button.layer?.backgroundColor = activePanel == panel.id
+            button.layer?.backgroundColor = active
                 ? (theme == .dark ? NSColor.white.withAlphaComponent(0.14).cgColor : NSColor.black.withAlphaComponent(0.08).cgColor)
                 : NSColor.clear.cgColor
-            let width = button.attributedTitle.size().width + 30
+            // Icon + title as a single attributed string: identical leading
+            // and trailing padding (imageLeading flushed the icon to the
+            // left edge of the button).
+            let attach = NSTextAttachment()
+            attach.image = lucideImage(for: panel.icon, title: panel.name, color: fg)
+            attach.bounds = NSRect(x: 0, y: -1.5, width: 13, height: 13)
+            let attr = NSMutableAttributedString()
+            attr.append(NSAttributedString(string: "  "))
+            attr.append(NSAttributedString(attachment: attach))
+            attr.append(NSAttributedString(string: " \(panel.name)  ", attributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                .foregroundColor: fg,
+            ]))
+            button.attributedTitle = attr
+            let width = attr.size().width + 8
             built.append(Built(button: button, width: width))
             totalWidth += width + 6
         }
+        panelTabsContentWidth = totalWidth - 6
 
         var x = max(0, (cardPanelTabsView.frame.width - (totalWidth - 6)) / 2)
         for item in built {
@@ -1330,7 +1544,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
 
         var y: CGFloat = CGFloat(max(payload.notes.count - 1, 0)) * 30
         for note in payload.notes {
-            let row = NSView(frame: NSRect(x: 0, y: y, width: resultCardWidth, height: 30))
+            let row = NSView(frame: NSRect(x: 0, y: y, width: cardUserWidth ?? resultCardWidth, height: 30))
             row.wantsLayer = true
 
             let text = note.name.isEmpty ? note.content : "\(note.name): \(note.content)"
@@ -1342,7 +1556,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
             label.cell?.truncatesLastVisibleLine = true
             label.cell?.wraps = false
             label.toolTip = text
-            label.frame = NSRect(x: 12, y: 7, width: resultCardWidth - 76, height: 16)
+            label.frame = NSRect(x: 12, y: 7, width: (cardUserWidth ?? resultCardWidth) - 76, height: 16)
             label.onClicked = { [weak label] in
                 guard let text = label?.stringValue else { return }
                 let pasteboard = NSPasteboard.general
@@ -1359,7 +1573,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
             insertButton.contentTintColor = .secondaryLabelColor
             insertButton.toolTip = "Insert at cursor"
             insertButton.identifier = NSUserInterfaceItemIdentifier(note.content)
-            insertButton.frame = NSRect(x: resultCardWidth - 66, y: 4, width: 24, height: 22)
+            insertButton.frame = NSRect(x: (cardUserWidth ?? resultCardWidth) - 66, y: 4, width: 24, height: 22)
             row.addSubview(insertButton)
 
             if let id = note.id {
@@ -1370,7 +1584,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
                 deleteButton.contentTintColor = .secondaryLabelColor
                 deleteButton.toolTip = "Delete note"
                 deleteButton.identifier = NSUserInterfaceItemIdentifier(String(id))
-                deleteButton.frame = NSRect(x: resultCardWidth - 38, y: 4, width: 24, height: 22)
+                deleteButton.frame = NSRect(x: (cardUserWidth ?? resultCardWidth) - 38, y: 4, width: 24, height: 22)
                 row.addSubview(deleteButton)
             }
 
@@ -1508,6 +1722,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         resultLoadingLabel.isHidden = status != "loading"
         resultIdleLabel.isHidden = run != nil
         resultIdleHint.isHidden = run != nil
+        resultIdleIcon.isHidden = run != nil
         resultScrollView.isHidden = !(status == "streaming" || status == "ready" || status == "error")
         resultActionBar.isHidden = status != "ready"
 
@@ -1525,7 +1740,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
                 width: textWidth,
                 height: max(needed + resultTextView.textContainerInset.height * 2, resultScrollView.frame.height)
             )
-            resultTextView.scrollToEndOfDocument(nil)
+            if status == "streaming" {
+                resultTextView.scrollToEndOfDocument(nil)
+            }
         } else if status == "error" {
             let error = NSMutableAttributedString()
             error.append(NSAttributedString(string: "⚠︎ Action failed\n", attributes: [
@@ -1577,7 +1794,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     /// Single unified layout pass: measures content, positions every strip,
     /// sizes the panel (top-anchored so growth pushes down, not up).
     private func layoutResultCard() {
-        let width = resultCardWidth
+        let width = cardUserWidth ?? resultCardWidth
         let side: CGFloat = 10
         let contentWidth = width - side * 2
 
@@ -1588,7 +1805,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         let buttonGroupWidth: CGFloat = cardActions.isEmpty
             ? 0
             : CGFloat(cardActions.count) * 30 + CGFloat(cardActions.count - 1) * 2 + 4
-        let rowLayoutWidth = max(50, contentWidth - 8 - buttonGroupWidth)
+        let rowLayoutWidth = max(50, contentWidth - 8 - min(buttonGroupWidth, contentWidth - 58))
         // Two-stage measure (WebView parity): judge multi-line at the ROW
         // width, but size the text view at the FULL width it will actually
         // render at — otherwise the two widths disagree and text is clipped
@@ -1602,18 +1819,25 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         if isMultiline {
             inputTextView.textContainerInset = NSSize(width: 6, height: 6)
             inputTextView.frame = NSRect(x: 6, y: 6 + 28, width: contentWidth - 12, height: textHeight)
-            inputButtonsRow.frame = NSRect(x: 6, y: 4, width: buttonGroupWidth, height: 28)
+            inputButtonsRow.frame = NSRect(x: 0, y: 0, width: buttonGroupWidth, height: 28)
+            inputButtonsClip.frame = NSRect(x: 6, y: 4, width: min(buttonGroupWidth, contentWidth - 12), height: 28)
+            inputButtonsClip.contentView.scroll(to: NSPoint(x: max(0, buttonGroupWidth - inputButtonsClip.frame.width), y: 0))
+            inputButtonsClip.reflectScrolledClipView(inputButtonsClip.contentView)
         } else {
             // Fixed single-line row, vertically centered (WebView parity).
             inputTextView.textContainerInset = NSSize(width: 6, height: (max(textHeight, 24) - 17) / 2)
             inputTextView.frame = NSRect(x: 6, y: (inputBarHeight - max(textHeight, 24)) / 2, width: rowLayoutWidth, height: max(textHeight, 24))
             let buttonsHeight: CGFloat = 28
-            inputButtonsRow.frame = NSRect(
+            let clipW = min(buttonGroupWidth, contentWidth - rowLayoutWidth - 10)
+            inputButtonsRow.frame = NSRect(x: 0, y: 0, width: buttonGroupWidth, height: 28)
+            inputButtonsClip.frame = NSRect(
                 x: 6 + rowLayoutWidth + 4,
                 y: (inputBarHeight - buttonsHeight) / 2,
-                width: buttonGroupWidth,
+                width: clipW,
                 height: buttonsHeight
             )
+            inputButtonsClip.contentView.scroll(to: NSPoint(x: max(0, buttonGroupWidth - clipW), y: 0))
+            inputButtonsClip.reflectScrolledClipView(inputButtonsClip.contentView)
         }
 
         inputPlaceholder.isHidden = !inputTextView.string.isEmpty
@@ -1639,17 +1863,39 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
 
         let actionH: CGFloat = (isTranslate && status == "ready") ? 34 : 0
 
-        let overflow = max(0, tabsH + 6 + inputH + 4 + runsH + contentH + actionH + side - 640)
-        let contentFinal = max(60, contentH - overflow)
+        // Total-height cap = min(640, on-screen room below the top anchor).
+        // Overflow is absorbed by the content strip (internal scrolling), so
+        // the window NEVER has to be re-anchored upward mid-stream — the
+        // previous clamp-to-screen behavior made the card "jump upward" as
+        // every streamed chunk grew the window past the screen bottom.
+        var maxTotal: CGFloat = 640
+        if resultPanel.isVisible, cardTopY > 0,
+           let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: cardX, y: cardTopY)) }) ?? NSScreen.main {
+            maxTotal = min(maxTotal, max(240, cardTopY - screen.visibleFrame.minY - 8))
+        }
+        let overflow = max(0, tabsH + 6 + inputH + 4 + runsH + contentH + actionH + side - maxTotal)
+        var contentFinal = max(60, contentH - overflow)
         // --- Frames, AppKit y-up, derived strictly bottom-up so adjacent
         // strips can never overlap or drift: action → content → runs →
         // input → tabs. contentFinal absorbs clamping (min 60).
         let actionY: CGFloat = 10
         let contentY = actionY + actionH
-        let runsY = contentY + contentFinal
-        let inputY = runsY + runsH + 4
-        let tabsY = inputY + inputH + 6
-        let clampedTotal = tabsY + tabsH
+        var runsY = contentY + contentFinal
+        var inputY = runsY + runsH + 4
+        var tabsY = inputY + inputH + 6
+        var clampedTotal = tabsY + tabsH
+        // User-resized height wins: the content strip absorbs the requested
+        // total (overflow scrolls internally), auto sizing stays untouched.
+        if let userH = cardUserHeight {
+            let cappedH = min(userH, maxTotal)
+            let fixed = clampedTotal - contentFinal
+            let userH = cappedH
+            contentFinal = max(60, userH - fixed)
+            runsY = contentY + contentFinal
+            inputY = runsY + runsH + 4
+            tabsY = inputY + inputH + 6
+            clampedTotal = tabsY + tabsH
+        }
 
         resultTabsView.frame = NSRect(x: 0, y: tabsY, width: width, height: tabsH)
         cardPanelTabsView.frame = NSRect(x: 8, y: 2, width: width - 48, height: 28)
@@ -1675,6 +1921,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         resultIdleHint.isHidden = !isTranslate || activeRun != nil
         resultIdleLabel.frame = NSRect(x: 10, y: contentY + contentFinal / 2, width: width - 20, height: 18)
         resultIdleHint.frame = NSRect(x: 10, y: contentY + contentFinal / 2 - 20, width: width - 20, height: 14)
+        resultIdleIcon.frame = NSRect(x: width / 2 - 8, y: contentY + contentFinal / 2 + 24, width: 16, height: 16)
 
         cardNotesClip.isHidden = activePanel != "notes"
         cardNotesClip.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
@@ -1684,32 +1931,40 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         resultActionBar.isHidden = actionH == 0
         resultActionBar.frame = NSRect(x: side, y: actionY, width: contentWidth, height: actionH)
 
-        // Top-anchored resize: keep the card's top edge where it was. setFrame
-        // (origin+size) in one call — setFrameOrigin keeps the OLD size, so
-        // growing content used to drag the window down the screen chunk by
-        // chunk until it fell off.
+        // Top-anchored resize driven by MODEL values (cardX/cardTopY), never
+        // by the animating window frame: reading frame.maxY mid-animation made
+        // each stream chunk re-anchor to an intermediate position and the
+        // card's top edge jittered up and down while text streamed in.
         if resultPanel.isVisible {
-            let topLeft = NSPoint(x: resultPanel.frame.minX, y: resultPanel.frame.maxY)
-            resultPanel.setFrame(
-                NSRect(x: topLeft.x, y: topLeft.y - clampedTotal, width: width, height: clampedTotal),
-                display: true
-            )
+            var target = NSRect(x: cardX, y: cardTopY - clampedTotal, width: width, height: clampedTotal)
+            if let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: cardX, y: cardTopY)) }) ?? NSScreen.main {
+                let visible = screen.visibleFrame
+                target.origin.y = max(target.origin.y, visible.minY + 8)
+                target.origin.x = min(max(target.minX, visible.minX + 8), visible.maxX - target.width - 8)
+            }
+            animatePanelFrame(to: target)
         } else {
-            resultPanel.setFrame(NSRect(x: 0, y: 0, width: width, height: clampedTotal), display: true)
+            animatePanelFrame(to: NSRect(x: 0, y: 0, width: width, height: clampedTotal))
         }
         resultContainer.frame = NSRect(x: 0, y: 0, width: width, height: clampedTotal)
-        resultPanel.contentView?.frame = NSRect(x: 0, y: 0, width: width, height: clampedTotal)
-        // Keep the resized card on its screen (growth can push past edges).
-        let cardFrame = resultPanel.frame
-        if let screen = NSScreen.screens.first(where: { $0.frame.intersects(cardFrame) }) ?? NSScreen.main {
-            let visible = screen.visibleFrame
-            let clampedOrigin = NSPoint(
-                x: min(max(cardFrame.minX, visible.minX + 8), visible.maxX - cardFrame.width - 8),
-                y: min(max(cardFrame.minY, visible.minY + 8), visible.maxY - cardFrame.height - 8)
-            )
-            if clampedOrigin != cardFrame.origin {
-                resultPanel.setFrameOrigin(clampedOrigin)
-            }
+        resizeCorner.frame = NSRect(x: width - 16, y: 0, width: 16, height: 16)
+        resizeRight.frame = NSRect(x: width - 4, y: 16, width: 4, height: clampedTotal - 32)
+        resizeBottom.frame = NSRect(x: 0, y: 0, width: width - 16, height: 4)
+        resizeCorner.setDark(theme == .dark)
+        // Right-anchored chrome must ride the window edge (build-time frames
+        // pin to the default 420 width and go stale after a user resize).
+        resultCloseButton.frame.origin.x = width - 32
+        resultTrashButton.frame.origin.x = width - 30
+        layoutPanelTabs(width)
+        updateEntryTypeTags()
+    }
+
+    /// Re-centers the panel tab group for the current card width.
+    private func layoutPanelTabs(_ width: CGFloat) {
+        var x = max(0, (cardPanelTabsView.frame.width - panelTabsContentWidth) / 2)
+        for button in panelTabButtons {
+            button.frame.origin.x = x
+            x += button.frame.width + 6
         }
     }
 
@@ -1745,15 +2000,43 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         return ceil(manager.usedRect(for: container).height) + 12
     }
 
+    /// Height changes apply in ONE atomic setFrame: subview geometry is set
+    /// to the new layout in the same pass, so animating the window frame left
+    /// a torn intermediate (new subview positions inside the old window) and
+    /// tab switches / state changes visibly jittered. The top-anchored target
+    /// means an atomic frame change never moves the top edge.
+    private func animatePanelFrame(to target: NSRect) {
+        cardModelHeight = target.height
+        programmaticFrame = true
+        resultPanel.setFrame(target, display: true)
+        programmaticFrame = false
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        guard notification.object as? NSPanel === resultPanel else { return }
+        // Programmatic setFrame (layout/resize) also fires didMove; treating
+        // it as a user drag overwrote cardTopY with clamped intermediates and
+        // the card drifted while resizing. Only real user drags re-anchor.
+        guard !programmaticFrame else { return }
+        cardX = resultPanel.frame.minX
+        cardTopY = resultPanel.frame.maxY
+        cardModelHeight = resultPanel.frame.height
+    }
+
     private func placeResultCard() {
         let point = NSEvent.mouseLocation
         var origin = NSPoint(x: point.x + 16, y: point.y - 40)
         if let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main {
             let frame = screen.visibleFrame
-            origin.x = min(max(origin.x, frame.minX + 8), frame.maxX - resultCardWidth - 8)
+            origin.x = min(max(origin.x, frame.minX + 8), frame.maxX - (cardUserWidth ?? resultCardWidth) - 8)
             origin.y = min(max(origin.y, frame.minY + 8), frame.maxY - 300 - 8)
         }
+        programmaticFrame = true
         resultPanel.setFrameOrigin(origin)
+        programmaticFrame = false
+        cardX = origin.x
+        cardTopY = origin.y + resultPanel.frame.height
+        cardModelHeight = resultPanel.frame.height
     }
 
     // MARK: - HTTP request routing (helper's display server)
@@ -1908,6 +2191,27 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
             : NSColor.black.withAlphaComponent(0.20)).cgColor
         dragHandle.theme = theme
         buttons.forEach { $0.theme = theme }
+        // The result card follows the same theme: appearance, hairlines, and
+        // every themed subview rebuilt (tinted icons, chips, markdown).
+        if resultPanel != nil {
+            let cardAppearance = theme == .dark
+                ? NSAppearance(named: .vibrantDark)
+                : NSAppearance(named: .vibrantLight)
+            resultPanel.appearance = cardAppearance
+            let hairline = (theme == .dark
+                ? NSColor.white.withAlphaComponent(0.22)
+                : NSColor.black.withAlphaComponent(0.20)).cgColor
+            resultContainer.layer?.borderColor = hairline
+            // chips: force a rebuild (the diff skips identical id/status/active)
+            runChipViews.forEach { $0.removeFromSuperview() }
+            runChipViews.removeAll()
+            rebuildRunTabs()
+            rebuildPanelTabs()
+            rebuildInputButtons()
+            applyNotesTheme()
+            renderActiveRun()
+            layoutResultCard()
+        }
         log("theme applied \(theme.rawValue)")
     }
 
@@ -2107,11 +2411,22 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     }
 
     private func rebuildRunTabs() {
+        let dark = theme == .dark
+        if runChipViews.count == cardRuns.count {
+            var unchanged = true
+            for (chip, run) in zip(runChipViews, cardRuns) {
+                let activeNow = run.id == activeRunId
+                if chip.runId != run.id || chip.statusKey != run.status || chip.isActiveChip != activeNow {
+                    unchanged = false
+                    break
+                }
+            }
+            if unchanged { return }
+        }
         runChipViews.forEach { $0.removeFromSuperview() }
         runChipViews.removeAll()
 
         var x: CGFloat = 0
-        let dark = theme == .dark
         for run in cardRuns {
             let chip = RunChipView(run: run, dark: dark)
             chip.onSelected = { [weak self] in
@@ -2142,9 +2457,11 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         inputButtonsRow.subviews.forEach { $0.removeFromSuperview() }
         let hasInput = !inputTextView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         for (index, item) in cardActions.enumerated() {
-            let button = NSButton(title: "", target: self, action: #selector(inputActionClicked(_:)))
+            let button = HoverIconButton(frame: .zero)
             button.bezelStyle = .regularSquare
             button.isBordered = false
+            button.target = self
+            button.action = #selector(inputActionClicked(_:))
             button.identifier = NSUserInterfaceItemIdentifier(item.id)
             button.image = lucideImage(for: item.icon, title: item.name)
             button.imageScaling = .scaleProportionallyDown
@@ -2189,7 +2506,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         let run = activeRun
         let canSave = run?.translationJson != nil
         resultSaveButton.isHidden = !canSave
-        resultCopyButton.frame.origin.x = canSave ? resultCardWidth - 190 : resultCardWidth - 66
+        let cardW = cardUserWidth ?? resultCardWidth
+        resultCopyButton.frame.origin.x = canSave ? cardW - 190 : cardW - 66
+        resultSaveButton.frame.origin.x = cardW - 158
         if canSave {
             let saved = run?.saved == true
             resultSaveButton.isEnabled = !saved
@@ -2211,7 +2530,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     @objc private func inputActionClicked(_ sender: NSButton) {
         let id = sender.identifier?.rawValue ?? ""
         let isTool = ["copy", "search", "read", "speak", "note", "handoff"].contains(id)
-        submitInput(kind: isTool ? "tool" : "feature", id: isTool ? id : "")
+        submitInput(kind: isTool ? "tool" : "feature", id: id)
     }
 
     private func submitInput(kind: String, id: String) {
@@ -2393,22 +2712,32 @@ private final class RunChipView: NSView {
     private let dismissButton: NSButton
     private var isActive = false
     private var isDark = false
+    private var statusDot: NSView!
+    var runId = ""
+    var statusKey = ""
+    var isActiveChip = false
 
     init(run: CardRun, dark: Bool) {
         isDark = dark
+        runId = run.id
+        statusKey = run.status
         let icon = lucideImage(for: run.icon, title: run.title) ?? NSImage()
         let title = run.title
         let titleWidth = (title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width + 8
-        fitWidth = 8 + 13 + 4 + titleWidth + 8 + 14
+        fitWidth = 8 + 4 + 5 + 13 + 4 + titleWidth + 8 + 14
         let frame = NSRect(x: 0, y: 0, width: fitWidth, height: 24)
 
-        iconView = NSImageView(frame: NSRect(x: 8, y: 5.5, width: 13, height: 13))
+        statusDot = NSView(frame: NSRect(x: 8, y: 10, width: 4, height: 4))
+        statusDot.wantsLayer = true
+        statusDot.layer?.cornerRadius = 3
+
+        iconView = NSImageView(frame: NSRect(x: 18, y: 5.5, width: 13, height: 13))
         iconView.image = icon
         iconView.imageScaling = .scaleProportionallyDown
 
         titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 12)
-        titleLabel.frame = NSRect(x: 25, y: 4.5, width: titleWidth, height: 15)
+        titleLabel.frame = NSRect(x: 35, y: 4.5, width: titleWidth, height: 15)
 
         dismissButton = NSButton(title: "", target: nil, action: nil)
         dismissButton.bezelStyle = .regularSquare
@@ -2420,6 +2749,7 @@ private final class RunChipView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         layer?.cornerRadius = 6
+        addSubview(statusDot)
         addSubview(iconView)
         addSubview(titleLabel)
         addSubview(dismissButton)
@@ -2432,6 +2762,7 @@ private final class RunChipView: NSView {
 
     func setActive(_ active: Bool, dark: Bool) {
         isActive = active
+        isActiveChip = active
         isDark = dark
         layer?.backgroundColor = active
             ? (dark ? NSColor.white.withAlphaComponent(0.14).cgColor : NSColor.black.withAlphaComponent(0.08).cgColor)
@@ -2439,6 +2770,15 @@ private final class RunChipView: NSView {
         let color: NSColor = active ? .labelColor : .secondaryLabelColor
         titleLabel.textColor = color
         iconView.contentTintColor = color
+        statusDot.layer?.backgroundColor = Self.dotColor(for: statusKey).cgColor
+    }
+
+    private static func dotColor(for status: String) -> NSColor {
+        switch status {
+        case "error": return .systemRed.withAlphaComponent(0.85)
+        case "ready": return .controlAccentColor.withAlphaComponent(0.65)
+        default: return .secondaryLabelColor.withAlphaComponent(0.55)
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
