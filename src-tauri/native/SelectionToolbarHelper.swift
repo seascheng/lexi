@@ -592,6 +592,12 @@ private final class CardResizeZone: NSView {
         wantsLayer = true
     }
 
+    /// Without this the window's movable-background drag runs IN PARALLEL with
+    /// our per-frame resize setFrame: each frame the drag moves the window,
+    /// setFrame pulls it back, and the async windowDidMove then bakes the
+    /// mangled origin into the anchors — the reported "whole window drifts".
+    override var mouseDownCanMoveWindow: Bool { false }
+
     required init?(coder: NSCoder) { fatalError("not supported") }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -718,6 +724,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var cardUserWidth: CGFloat?
     private var cardUserHeight: CGFloat?
     private var programmaticFrame = false
+    private var lastProgrammaticFrame: NSRect?
     private var resizeCorner: CardResizeZone!
     private var resizeRight: CardResizeZone!
     private var resizeBottom: CardResizeZone!
@@ -1370,8 +1377,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             let zone = CardResizeZone(edge: edge, frame: frame)
             zone.onResize = { [weak self] width, height in
                 guard let self else { return }
-                if let width { self.cardUserWidth = min(max(width, 360), 760) }
-                if let height { self.cardUserHeight = min(max(height, 240), 900) }
+                if let width { self.cardUserWidth = (min(max(width, 360), 760)).rounded() }
+                if let height { self.cardUserHeight = (min(max(height, 240), 900)).rounded() }
                 self.layoutResultCard()
             }
             zone.onReset = { [weak self] in
@@ -2007,6 +2014,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     /// means an atomic frame change never moves the top edge.
     private func animatePanelFrame(to target: NSRect) {
         cardModelHeight = target.height
+        lastProgrammaticFrame = target
         programmaticFrame = true
         resultPanel.setFrame(target, display: true)
         programmaticFrame = false
@@ -2014,6 +2022,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     func windowDidMove(_ notification: Notification) {
         guard notification.object as? NSPanel === resultPanel else { return }
+        if let lp = lastProgrammaticFrame {
+            let f = resultPanel.frame
+            if abs(f.minX - lp.minX) < 1.5, abs(f.minY - lp.minY) < 1.5,
+               abs(f.width - lp.width) < 1.5, abs(f.height - lp.height) < 1.5 {
+                return // our own setFrame (rounded by the window server)
+            }
+        }
+
         // Programmatic setFrame (layout/resize) also fires didMove; treating
         // it as a user drag overwrote cardTopY with clamped intermediates and
         // the card drifted while resizing. Only real user drags re-anchor.
@@ -2506,9 +2522,12 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let run = activeRun
         let canSave = run?.translationJson != nil
         resultSaveButton.isHidden = !canSave
-        let cardW = cardUserWidth ?? resultCardWidth
-        resultCopyButton.frame.origin.x = canSave ? cardW - 190 : cardW - 66
-        resultSaveButton.frame.origin.x = cardW - 158
+        // Bar-local coordinates (the bar is inset by `side` from the card and
+        // sized contentWidth): anchor to its right edge so Copy/Save ride the
+        // card edge at any user width.
+        let barW = resultActionBar.bounds.width
+        resultSaveButton.frame.origin.x = barW - 148 - 10
+        resultCopyButton.frame.origin.x = canSave ? barW - 148 - 10 - 26 - 8 : barW - 26 - 10
         if canSave {
             let saved = run?.saved == true
             resultSaveButton.isEnabled = !saved
@@ -2780,6 +2799,8 @@ private final class RunChipView: NSView {
         default: return .secondaryLabelColor.withAlphaComponent(0.55)
         }
     }
+
+    override var mouseDownCanMoveWindow: Bool { false }
 
     override func mouseDown(with event: NSEvent) {
         onSelected?()
