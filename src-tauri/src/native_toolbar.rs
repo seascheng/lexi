@@ -490,6 +490,7 @@ fn panel_config_items() -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
         .and_then(|v| v.as_array().cloned())
         .map(|rows| rows.to_vec())
         .unwrap_or_default();
+    let builtin_order = ["translate", "notes", "review"];
     for (id, name, icon) in [
         ("translate", "Actions", "file-text"),
         ("notes", "Notes", "notebook-pen"),
@@ -499,8 +500,17 @@ fn panel_config_items() -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
             panels.push(serde_json::json!({ "id": id, "name": name, "icon": icon }));
         }
     }
+    // Canonical tab order: built-ins first (actions, notes, review), custom
+    // panels keep their DB order after them.
+    let mut ordered: Vec<serde_json::Value> = Vec::with_capacity(panels.len());
+    for id in builtin_order {
+        if let Some(pos) = panels.iter().position(|p| p["id"].as_str() == Some(id)) {
+            ordered.push(panels.swap_remove(pos));
+        }
+    }
+    ordered.append(&mut panels);
 
-    (actions, panels)
+    (actions, ordered)
 }
 
 fn default_toolbar_tools_json() -> Vec<serde_json::Value> {

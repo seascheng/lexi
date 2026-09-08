@@ -986,6 +986,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             if event.keyCode == 53 { // kVK_Escape
                 self?.escapeResultCardIfNeeded()
             }
+            if event.keyCode == 48, let self, self.resultPanel != nil, self.resultPanel.isVisible {
+                // Tab cycles the card's panel tabs — one source of truth for
+                // every page/responder (the old per-responder handlers died on
+                // the Review page where no text view owns the key).
+                self.cyclePanelTab()
+                return nil
+            }
             return event
         }
     }
@@ -1500,11 +1507,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             // at the source caret, mirror clipboard, hide panels.
             self.postAction(action: "notes-click", text: String(self.notesTableView.selectedRow))
         }
-        notesTableView.onTabKey = { [weak self] in
-            let ids = self?.panelDefs.map { $0.id } ?? []
-            guard !ids.isEmpty, let current = ids.firstIndex(of: self?.activePanel ?? "") else { return }
-            self?.showPanelTab(ids[(current + 1) % ids.count])
-        }
         notesTableView.headerView = nil
         notesTableView.rowHeight = 64
         notesTableView.intercellSpacing = .zero
@@ -1681,6 +1683,12 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let index = sender.selectedSegment
         guard index >= 0, index < panelDefs.count else { return }
         showPanelTab(panelDefs[index].id)
+    }
+
+    private func cyclePanelTab() {
+        let ids = panelDefs.map { $0.id }
+        guard !ids.isEmpty, let current = ids.firstIndex(of: activePanel) else { return }
+        showPanelTab(ids[(current + 1) % ids.count])
     }
 
     private func showPanelTab(_ id: String, notify: Bool = true) {
@@ -2260,16 +2268,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 self.postAction(action: "card-hidden", text: "-")
             }
         }
-        if request.hasPrefix("POST /card-tab-cycle "),
-           request.components(separatedBy: "\r\n\r\n").last != nil {
-            DispatchQueue.main.async {
-                let ids = self.panelDefs.map { $0.id }
-                if let current = ids.firstIndex(of: self.activePanel), !ids.isEmpty {
-                    self.showPanelTab(ids[(current + 1) % ids.count])
-                }
-            }
-            return
-        }
 
 
         if request.hasPrefix("POST /card-notes "),
@@ -2278,7 +2276,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
            let payload = try? JSONDecoder().decode(CardNotesPayload.self, from: bodyData) {
             DispatchQueue.main.async {
                 self.handleCardNotes(payload)
-                self.showPanelTab("notes", notify: false)
             }
             return
         }
@@ -2946,14 +2943,11 @@ private final class NotesTable: NSTableView {
     /// Enter inserts the highlighted note and Tab cycles panel tabs — no
     /// global event tap involved.
     var onEnterKey: (() -> Void)?
-    var onTabKey: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 36, 52: // Enter / keypad Enter
             onEnterKey?()
-        case 48: // Tab
-            onTabKey?()
         default:
             super.keyDown(with: event)
         }
@@ -3390,16 +3384,6 @@ extension SelectionToolbarApp: NSTextViewDelegate {
 
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         guard textView === inputTextView else { return false }
-        let tabSel = NSSelectorFromString("insertTab:")
-        if commandSelector == tabSel {
-            // Tab cycles the panel tabs (WebView keydown parity).
-            let ids = panelDefs.map { $0.id }
-            if let current = ids.firstIndex(of: activePanel), !ids.isEmpty {
-                showPanelTab(ids[(current + 1) % ids.count])
-            }
-            return true
-        }
-
         let newline = NSSelectorFromString("insertNewline:")
         let cancel = NSSelectorFromString("cancelOperation:")
         if commandSelector == newline {
