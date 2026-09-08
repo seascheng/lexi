@@ -1401,7 +1401,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         notesTableView.headerView = nil
         notesTableView.rowHeight = 64
         notesTableView.intercellSpacing = .zero
-        notesTableView.selectionHighlightStyle = .none
+        notesTableView.selectionHighlightStyle = .regular
         notesTableView.backgroundColor = .clear
         notesTableView.usesAutomaticRowHeights = false
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("note"))
@@ -2788,6 +2788,7 @@ private final class NoteRowCell: NSTableCellView {
     /// system never flips backgroundStyle, so selectionDidChange pushes it.
     func setEmphasized(_ emphasized: Bool) {
         isSelectedState = emphasized
+        backgroundStyle = emphasized ? .emphasized : .normal
         retint(selected: emphasized)
     }
 
@@ -2876,15 +2877,13 @@ private final class NoteRowCell: NSTableCellView {
             ? NSColor.white.withAlphaComponent(0.92)
             : .secondaryLabelColor
         iconView.contentTintColor = selected ? .white : .secondaryLabelColor
+        // The SYSTEM paints the selection capsule (.regular); this layer
+        // only ever paints the unselected hover tint.
         wantsLayer = true
         layer?.cornerRadius = 6
-        if selected {
-            layer?.backgroundColor = NSColor.controlAccentColor.cgColor
-        } else if hovering {
-            layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.05).cgColor
-        } else {
-            layer?.backgroundColor = NSColor.clear.cgColor
-        }
+        layer?.backgroundColor = (!selected && hovering)
+            ? NSColor.labelColor.withAlphaComponent(0.05).cgColor
+            : NSColor.clear.cgColor
     }
 }
 
@@ -3316,7 +3315,9 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
         cell.configure(note: note, dark: theme == .dark) { [weak self] id in
             self?.noteDeleteClickedId(id)
         }
-        cell.setEmphasized(tableView.isRowSelected(row))
+        let rowSelected = tableView.isRowSelected(row)
+        FileLog.write("VIEWFOR row=\(row) selected=\(rowSelected)")
+        cell.setEmphasized(rowSelected)
         return cell
     }
 
@@ -3334,14 +3335,20 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
             pasteboard.clearContents()
             pasteboard.setString(cardNotesItems[selected].content, forType: .string)
         }
-        for row in 0..<cardNotesItems.count {
-            guard let cell = notesTableView.view(
-                atColumn: 0, row: row, makeIfNecessary: false
-            ) as? NoteRowCell else { continue }
-            cell.setEmphasized(row == selected)
+        // Repaint one frame later, FORCING cell materialization: during
+        // reloadData-driven selection changes the rows aren't instantiated
+        // yet when didChange fires, and stale timing is what made the
+        // selection "flash then disappear".
+        let selectedRow = selected
+        DispatchQueue.main.async {
+            guard selectedRow == self.notesTableView.selectedRow else { return }
+            for row in 0..<self.cardNotesItems.count {
+                guard let cell = self.notesTableView.view(
+                    atColumn: 0, row: row, makeIfNecessary: true
+                ) as? NoteRowCell else { continue }
+                cell.setEmphasized(row == selectedRow)
+            }
         }
-        // Rows not yet materialized pick their state up in viewFor — never
-        // reloadData here: it clears the selection (the "flash then gone").
     }
 }
 
