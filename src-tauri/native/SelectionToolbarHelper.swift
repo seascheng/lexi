@@ -4,6 +4,92 @@ import Network
 
 private let logURL = URL(fileURLWithPath: "/tmp/lexi-selection-helper.log")
 
+/// goty-style color system: every lift is derived from the theme's own
+/// background/foreground pair (no second palette, no accent-blue capsules).
+/// Contrast floors are computed like ChromeTheme: 4.5:1 secondary, 3.5:1
+/// tertiary; alpha is used only for hairlines, never for text.
+struct CardTheme {
+    static let dark = CardTheme(
+        background: NSColor(red: 28.0 / 255, green: 28.0 / 255, blue: 28.0 / 255, alpha: 1),
+        foreground: NSColor(red: 221.0 / 255, green: 238.0 / 255, blue: 221.0 / 255, alpha: 1)
+    )
+    static let light = CardTheme(
+        background: NSColor.white,
+        foreground: NSColor(red: 0.09, green: 0.09, blue: 0.10, alpha: 1)
+    )
+
+    let background: NSColor
+    let foreground: NSColor
+
+    var isDark: Bool {
+        (background.usingColorSpace(.deviceRGB) ?? background).brightnessComponent < 0.5
+    }
+
+    func blend(_ from: NSColor, toward: NSColor, fraction: CGFloat) -> NSColor {
+        let a = from.usingColorSpace(.deviceRGB) ?? from
+        let b = toward.usingColorSpace(.deviceRGB) ?? toward
+        return NSColor(
+            red: a.redComponent + (b.redComponent - a.redComponent) * fraction,
+            green: a.greenComponent + (b.greenComponent - a.greenComponent) * fraction,
+            blue: a.blueComponent + (b.blueComponent - a.blueComponent) * fraction,
+            alpha: 1
+        )
+    }
+
+    private func luminance(_ c: NSColor) -> CGFloat {
+        let x = c.usingColorSpace(.deviceRGB) ?? c
+        func f(_ v: CGFloat) -> CGFloat { v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        return 0.2126 * f(x.redComponent) + 0.7152 * f(x.greenComponent) + 0.0722 * f(x.blueComponent)
+    }
+
+    private func contrast(_ a: NSColor, _ b: NSColor) -> CGFloat {
+        let la = luminance(a), lb = luminance(b)
+        return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+    }
+
+    /// Foreground stepped back toward the background, never below 4.5:1.
+    var secondaryText: NSColor {
+        var t: CGFloat = 0.38
+        while t >= 0 {
+            let mixed = blend(foreground, toward: background, fraction: t)
+            if contrast(mixed, background) >= 4.5 { return mixed }
+            t -= 0.04
+        }
+        return foreground
+    }
+
+    /// Quietest step (hints, footnotes) — 3.5:1 floor.
+    var tertiaryText: NSColor {
+        var t: CGFloat = 0.55
+        while t >= 0 {
+            let mixed = blend(foreground, toward: background, fraction: t)
+            if contrast(mixed, background) >= 3.5 { return mixed }
+            t -= 0.04
+        }
+        return secondaryText
+    }
+
+    /// tty7 recipe: surface lifted toward the foreground.
+    var hoverFill: NSColor { blend(background, toward: foreground, fraction: isDark ? 0.08 : 0.055) }
+
+    /// One step stronger than hover — the input field surface.
+    var inputFill: NSColor { blend(background, toward: foreground, fraction: isDark ? 0.11 : 0.07) }
+
+    /// Selection capsule: same-hue emphasis, not accent blue (goty style).
+    var selectedFill: NSColor { blend(background, toward: foreground, fraction: isDark ? 0.16 : 0.12) }
+
+    /// Icon tint sits near the full foreground.
+    var iconTint: NSColor { blend(background, toward: foreground, fraction: 0.85) }
+
+    var hairline: NSColor {
+        NSColor.black.withAlphaComponent(isDark ? 0.35 : 0.12)
+    }
+
+    var dangerFill: NSColor {
+        NSColor(calibratedRed: 0.78, green: 0.22, blue: 0.25, alpha: 1)
+    }
+}
+
 /// File logger usable from any class (the controller's log() is private).
 private enum FileLog {
     static func write(_ message: String) {
@@ -700,6 +786,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var buttons: [ToolbarButton] = []
     private var actions = defaultToolbarActions()
     private var theme: ToolbarTheme = .dark
+    private var cardTheme: CardTheme { theme == .dark ? CardTheme.dark : CardTheme.light }
     private var selectedText = ""
     private var localKeyMonitor: Any?
     private var globalKeyMonitor: Any?
@@ -1156,9 +1243,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func setInputFocused(_ focused: Bool) {
         isInputFocused = focused
+        inputContainer.layer?.backgroundColor = cardTheme.inputFill.cgColor
         inputContainer.layer?.borderColor = focused
-            ? NSColor.controlAccentColor.withAlphaComponent(0.6).cgColor
-            : NSColor.separatorColor.withAlphaComponent(0.8).cgColor
+            ? cardTheme.hairline.cgColor
+            : cardTheme.hairline.cgColor
     }
     // MARK: - Native result card (WebView parity): AiForm input bar,
     // multi-run tabs, loading/streaming/ready/error states, EntryTypeTags,
@@ -1308,14 +1396,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         resultIdleLabel = NSTextField(labelWithString: "Enter text, then choose an action.")
         resultIdleLabel.font = .systemFont(ofSize: 13)
-        resultIdleLabel.textColor = .secondaryLabelColor
+        resultIdleLabel.textColor = cardTheme.secondaryText
         resultIdleLabel.alignment = .center
         resultIdleLabel.frame = NSRect(x: 10, y: 26, width: resultCardWidth - 20, height: 18)
         translateIdleView.addSubview(resultIdleLabel)
 
         resultIdleHint = NSTextField(labelWithString: "⏎ Run default")
         resultIdleHint.font = .systemFont(ofSize: 11)
-        resultIdleHint.textColor = .tertiaryLabelColor
+        resultIdleHint.textColor = cardTheme.tertiaryText
         resultIdleHint.alignment = .center
         resultIdleHint.frame = NSRect(x: 10, y: 6, width: resultCardWidth - 20, height: 14)
         translateIdleView.addSubview(resultIdleHint)
@@ -1408,7 +1496,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         notesTableView.headerView = nil
         notesTableView.rowHeight = 64
         notesTableView.intercellSpacing = .zero
-        notesTableView.selectionHighlightStyle = .regular
+        notesTableView.style = .sourceList
         notesTableView.backgroundColor = .clear
         notesTableView.usesAutomaticRowHeights = false
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("note"))
@@ -2563,7 +2651,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             button.isEnabled = !saved && hasEntry
             button.alphaValue = saved ? 0.4 : 1
             button.layer?.backgroundColor = active
-                ? (theme == .dark ? NSColor.white.withAlphaComponent(0.14).cgColor : NSColor.black.withAlphaComponent(0.08).cgColor)
+                ? cardTheme.selectedFill.cgColor
                 : NSColor.clear.cgColor
         }
         if hasEntry {
@@ -2765,17 +2853,15 @@ private final class NoteRowCell: NSTableCellView {
         return self
     }
 
-    override var backgroundStyle: NSView.BackgroundStyle {
-        didSet {
-            // The ONLY custom visual: white text on the system's accent
-            // capsule. Selection itself is entirely the system's.
-            let selected = backgroundStyle == .emphasized
-            titleLabel.textColor = selected ? .white : .labelColor
-            contentLabel.textColor = selected
-                ? NSColor.white.withAlphaComponent(0.92)
-                : .secondaryLabelColor
-            iconView.contentTintColor = selected ? .white : .secondaryLabelColor
-        }
+    var themeColors: CardTheme = .dark {
+        didSet { applyThemeColors() }
+    }
+
+    private func applyThemeColors() {
+        titleLabel.textColor = themeColors.foreground
+        contentLabel.textColor = themeColors.secondaryText
+        iconView.contentTintColor = themeColors.secondaryText
+        deleteButton?.contentTintColor = themeColors.secondaryText
     }
 
     func configure(note: CardNotesPayload.Note, dark: Bool,
@@ -2887,10 +2973,14 @@ private final class NoteRowView: NSTableRowView {
         needsDisplay = true
     }
 
+    var hoverColor: NSColor = NSColor.labelColor.withAlphaComponent(0.06) {
+        didSet { needsDisplay = true }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect) // system selection capsule paints here
         if !isSelected, hovering {
-            NSColor.labelColor.withAlphaComponent(0.06).setFill()
+            hoverColor.setFill()
             NSBezierPath(
                 roundedRect: bounds.insetBy(dx: 3, dy: 2),
                 xRadius: 6,
@@ -3348,6 +3438,7 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
         cell.configure(note: note, dark: theme == .dark) { [weak self] id in
             self?.noteDeleteClickedId(id)
         }
+        cell.themeColors = cardTheme
         return cell
     }
 
@@ -3360,6 +3451,7 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
         }
         let view = NoteRowView(frame: .zero)
         view.identifier = NSUserInterfaceItemIdentifier("NoteRowView")
+        view.hoverColor = cardTheme.hoverFill
         return view
     }
 
