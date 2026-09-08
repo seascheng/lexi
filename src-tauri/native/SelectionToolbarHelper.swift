@@ -1404,7 +1404,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         notesTableView.headerView = nil
         notesTableView.rowHeight = 64
         notesTableView.intercellSpacing = .zero
-        notesTableView.selectionHighlightStyle = .none
+        notesTableView.selectionHighlightStyle = .regular
         notesTableView.backgroundColor = .clear
         notesTableView.usesAutomaticRowHeights = false
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("note"))
@@ -1416,6 +1416,11 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         notesTableView.doubleAction = #selector(notesTableClicked(_:))
         notesTableView.action = #selector(notesTableClicked(_:))
         notesTableView.sizeLastColumnToFit()
+        cardNotesClip.contentView.postsBoundsChangedNotification = true
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(notesClipScrolled),
+            name: NSView.boundsDidChangeNotification, object: cardNotesClip.contentView
+        )
         cardNotesClip.documentView = notesTableView
         resultContainer.addSubview(cardNotesClip)
 
@@ -2731,9 +2736,6 @@ private final class NoteRowCell: NSTableCellView {
     let contentLabel = NSTextField(labelWithString: "")
     var deleteButton: NSButton?
     private var onDelete: ((Int64) -> Void)?
-    private var isSelectedState = false
-    private var hoverArea: NSTrackingArea?
-    private var hovering = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -2746,60 +2748,19 @@ private final class NoteRowCell: NSTableCellView {
 
     override var backgroundStyle: NSView.BackgroundStyle {
         didSet {
-            isSelectedState = backgroundStyle == .emphasized
-            retint(selected: isSelectedState)
-        }
-    }
-
-    /// Explicit selection drive — with selectionHighlightStyle = .none the
-    /// system never flips backgroundStyle, so selectionDidChange pushes it.
-    func setEmphasized(_ emphasized: Bool) {
-        isSelectedState = emphasized
-        retint(selected: emphasized)
-        needsDisplay = true // the capsule lives in draw(); it never repaints without this
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverArea { removeTrackingArea(hoverArea) }
-        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        if let hoverArea { addTrackingArea(hoverArea) }
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        hovering = true
-        needsDisplay = true
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        hovering = false
-        needsDisplay = true
-    }
-
-    /// Both states, one geometry, one code path — widths identical by
-    /// construction. (layer.backgroundColor was set-but-invisible in this
-    /// table; draw() is not.)
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        let capsule = NSBezierPath(
-            roundedRect: bounds.insetBy(dx: 3, dy: 2),
-            xRadius: 6,
-            yRadius: 6
-        )
-        if isSelectedState {
-            NSColor.controlAccentColor.setFill()
-            capsule.fill()
-        } else if hovering {
-            NSColor.labelColor.withAlphaComponent(0.06).setFill()
-            capsule.fill()
+            // The ONLY custom visual: white text on the system's accent
+            // capsule. Selection itself is entirely the system's.
+            let selected = backgroundStyle == .emphasized
+            titleLabel.textColor = selected ? .white : .labelColor
+            contentLabel.textColor = selected
+                ? NSColor.white.withAlphaComponent(0.92)
+                : .secondaryLabelColor
+            iconView.contentTintColor = selected ? .white : .secondaryLabelColor
         }
     }
 
     func configure(note: CardNotesPayload.Note, dark: Bool,
                    onDelete: ((Int64) -> Void)?) {
-        isSelectedState = false
-        hovering = false
-        needsDisplay = true
         iconView.image = lucideImage(for: "file-text", title: note.name)
         iconView.imageScaling = .scaleProportionallyDown
 
@@ -2855,18 +2816,46 @@ private final class NoteRowCell: NSTableCellView {
         iconView.frame = NSRect(x: 10, y: 23, width: 18, height: 18)
         deleteButton?.frame = NSRect(x: w - 28, y: 24, width: 20, height: 16)
     }
+}
 
-    /// Selection + hover are painted HERE (selectionHighlightStyle = .none),
-    /// both at the same inset/radius so the widths always match. Selection
-    /// copy comes from the system's backgroundStyle (.emphasized).
-    private func retint(selected: Bool) {
-        titleLabel.textColor = selected ? .white : .labelColor
-        contentLabel.textColor = selected
-            ? NSColor.white.withAlphaComponent(0.92)
-            : .secondaryLabelColor
-        iconView.contentTintColor = selected ? .white : .secondaryLabelColor
-        // Selection capsule AND hover live on the row view; this cell only
-        // owns text/icon tinting.
+/// Row view: paints ONLY the hover (the system has none), mimicking the
+/// system capsule's inset/radius so the two geometries read as one.
+private final class NoteRowView: NSTableRowView {
+    private var hoverArea: NSTrackingArea?
+    private var hovering = false
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        if let hoverArea { addTrackingArea(hoverArea) }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        needsDisplay = true
+    }
+
+    func clearHover() {
+        hovering = false
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect) // system selection capsule paints here
+        if !isSelected, hovering {
+            NSColor.labelColor.withAlphaComponent(0.06).setFill()
+            NSBezierPath(
+                roundedRect: bounds.insetBy(dx: 3, dy: 2),
+                xRadius: 6,
+                yRadius: 6
+            ).fill()
+        }
     }
 }
 
@@ -3290,6 +3279,18 @@ private struct NotesSelectPayload: Decodable {
     let selected: Int
 }
 
+extension SelectionToolbarApp {
+    /// Hovers are the only self-drawn effect; scrolling invalidates them.
+    @objc func notesClipScrolled() {
+        let range = notesTableView.rows(in: notesTableView.visibleRect)
+        for row in range.location..<max(range.location, range.location + range.length) {
+            if let rowView = notesTableView.rowView(atRow: row, makeIfNecessary: false) as? NoteRowView {
+                rowView.clearHover()
+            }
+        }
+    }
+}
+
 extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int {
         cardNotesItems.count
@@ -3306,14 +3307,40 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
         cell.configure(note: note, dark: theme == .dark) { [weak self] id in
             self?.noteDeleteClickedId(id)
         }
-        let rowSelected = tableView.isRowSelected(row)
-        FileLog.write("VIEWFOR row=\(row) selected=\(rowSelected)")
-        cell.setEmphasized(rowSelected)
         return cell
     }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        nil // the cell owns selection + hover visuals
+        if let reused = tableView.makeView(
+            withIdentifier: NSUserInterfaceItemIdentifier("NoteRowView"),
+            owner: self
+        ) as? NoteRowView {
+            return reused
+        }
+        let view = NoteRowView(frame: .zero)
+        view.identifier = NSUserInterfaceItemIdentifier("NoteRowView")
+        return view
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        let selected = notesTableView.selectedRow
+        if selected >= 0, selected < cardNotesItems.count {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(cardNotesItems[selected].content, forType: .string)
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        if let reused = tableView.makeView(
+            withIdentifier: NSUserInterfaceItemIdentifier("NoteRowView"),
+            owner: self
+        ) as? NoteRowView {
+            return reused
+        }
+        let view = NoteRowView(frame: .zero)
+        view.identifier = NSUserInterfaceItemIdentifier("NoteRowView")
+        return view
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
