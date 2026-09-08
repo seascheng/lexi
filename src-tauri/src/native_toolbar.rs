@@ -731,6 +731,9 @@ fn notes_enter() {
     match text_injection::deliver_text(&note.content) {
         Ok(tier) => {
             log_native(&format!("notes Enter: inserted via {tier}"));
+            // Mirror the note onto the clipboard: the paste tier overwrote it
+            // with the same content, but the AX tier did not touch it.
+            write_pasteboard_string_via_pb(&note.content);
             notes_hide();
         }
         Err(error) => {
@@ -2175,7 +2178,7 @@ fn trigger_popup_with_selection(app: &tauri::AppHandle) {
         // straight onto its Notes tab — ↑/↓ select, Enter injects at the
         // source app's caret (the panel's core purpose).
         show_idle_card(app);
-        send_card_notes(app);
+        let _ = send_card_notes(app);
         log_native(&format!("shortcut notes mode (source={})", source));
     }
 }
@@ -2925,6 +2928,24 @@ pub(crate) unsafe fn pasteboard_change_count() -> isize {
     }
     let sel = sel_registerName(b"changeCount\0".as_ptr() as *const i8);
     objc_msgSend(pb, sel) as isize
+}
+
+/// Write plain text to the general pasteboard via `pbcopy` — same rationale
+/// as the pbpaste reader: direct ObjC string writes on background threads have
+/// a crash history, while pbcopy is simple and safe.
+fn write_pasteboard_string_via_pb(text: &str) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    if let Ok(mut child) = Command::new("pbcopy")
+        .env("LANG", "en_US.UTF-8")
+        .stdin(Stdio::piped())
+        .spawn()
+    {
+        if let Some(stdin) = child.stdin.as_mut() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        let _ = child.wait();
+    }
 }
 
 /// Read the current UTF-8 plain-text contents of the pasteboard via `pbpaste`.
