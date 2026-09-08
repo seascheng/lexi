@@ -564,6 +564,10 @@ fn notes_enter() {
         Err(error) => {
             // Panel stays up — Esc or an outside click still dismisses it.
             log_native(&format!("notes Enter: insert failed: {error}"));
+            if let Some(port) = toolbar_port() {
+                let body = format!("{{\"message\":\"{}\"}}", error.replace('"', "'"));
+                let _ = post_to_helper(port, "/card-note-error", &body);
+            }
         }
     }
 }

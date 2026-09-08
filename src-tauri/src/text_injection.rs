@@ -81,6 +81,15 @@ pub(crate) fn deliver_text(text: &str) -> Result<&'static str, String> {
         AxTier::Unavailable => {}
     }
 
+    // The keystroke/paste tiers have NO delivery confirmation: events posted
+    // at an app without a focused text target are simply dropped by it (and
+    // beep once per chunk), while the pipeline would report success and the
+    // panel would dismiss with nothing inserted. Gate both tiers on a
+    // text-ish focused element first.
+    if !focused_text_target(pid) {
+        return Err("No text input is focused in the target app.".into());
+    }
+
     let single_line = !text.contains('\n') && !text.contains('\r');
     if text.chars().count() <= UNICODE_TIER_MAX_CHARS && single_line {
         if unicode_tier(text, pid) {
@@ -91,6 +100,33 @@ pub(crate) fn deliver_text(text: &str) -> Result<&'static str, String> {
     }
 
     paste_tier(text, pid)
+}
+
+/// True when the target app's focused AX element is a text entry (the only
+/// surfaces the keystroke/paste tiers can actually land in). Renderer pages
+/// expose their inputs as AXTextField/AXTextArea (including contenteditable),
+/// so a bare AXWebArea means "reading surface, no insertion point".
+fn focused_text_target(pid: i32) -> bool {
+    unsafe {
+        let app = AXUIElementCreateApplication(pid);
+        if app.is_null() {
+            return false;
+        }
+        let verdict = (|| -> Option<bool> {
+            let focused = focused_element_of(app)?;
+            let role = accessibility_string_attribute(focused, "AXRole");
+            CFRelease(focused);
+            Some(
+                matches!(
+                    role.as_deref().unwrap_or(""),
+                    "AXTextArea" | "AXTextField" | "AXComboBox"
+                ),
+            )
+        })()
+        .unwrap_or(false);
+        CFRelease(app);
+        verdict
+    }
 }
 
 enum AxTier {
