@@ -1886,20 +1886,21 @@ fn handle_system_event(
             // keys while visible. Everything else passes through.
             let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
             let card_focused = CARD_NOTES_FOCUS.load(std::sync::atomic::Ordering::Relaxed);
-            if keycode == 48 && card_focused {
+            if keycode == 48 {
                 if let Some(port) = crate::native_toolbar::toolbar_port() {
                     let _ = post_to_helper(port, "/card-tab-cycle", "{}");
                 }
                 return CallbackResult::Drop;
             }
-            if CARD_NOTES_MODE.load(std::sync::atomic::Ordering::Relaxed) && card_focused {
+            if CARD_NOTES_MODE.load(std::sync::atomic::Ordering::Relaxed) {
                 match keycode {
                     125 | 126 => {
                         let delta = if keycode == 125 { 1 } else { -1 };
                         thread::spawn(move || notes_navigate(delta));
                         return CallbackResult::Drop;
                     }
-                    36 | 52 if !NOTES_SNAPSHOT.lock().map(|c| c.is_empty()).unwrap_or(true) => {
+                    36 | 52 if card_focused
+                        && !NOTES_SNAPSHOT.lock().map(|c| c.is_empty()).unwrap_or(true) => {
                         thread::spawn(notes_enter);
                         return CallbackResult::Drop;
                     }

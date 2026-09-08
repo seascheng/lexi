@@ -3,6 +3,21 @@ import Foundation
 import Network
 
 private let logURL = URL(fileURLWithPath: "/tmp/lexi-selection-helper.log")
+
+/// File logger usable from any class (the controller's log() is private).
+private enum FileLog {
+    static func write(_ message: String) {
+        let line = "\(Date()) \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: logURL) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: logURL)
+        }
+    }
+}
 private let IPC_HOST = "127.0.0.1"
 private let ACTION_PORT: UInt16 = 43876  // legacy fallback; real port comes from --action-port
 
@@ -2029,6 +2044,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     /// tab switches / state changes visibly jittered. The top-anchored target
     /// means an atomic frame change never moves the top edge.
     private func animatePanelFrame(to target: NSRect) {
+        FileLog.write("MOVE animate target=\(NSStringFromRect(target)) anchor=\(cardX),\(cardTopY)")
         cardModelHeight = target.height
         lastProgrammaticFrame = target
         programmaticFrame = true
@@ -2765,7 +2781,13 @@ private final class NoteRowCell: NSTableCellView {
     required init?(coder: NSCoder) { fatalError("not supported") }
 
     override var backgroundStyle: NSView.BackgroundStyle {
-        didSet { retint() }
+        didSet { retint(selected: backgroundStyle == .emphasized) }
+    }
+
+    /// Explicit selection drive — with selectionHighlightStyle = .none the
+    /// system never flips backgroundStyle, so selectionDidChange pushes it.
+    func setEmphasized(_ emphasized: Bool) {
+        retint(selected: emphasized)
     }
 
     func configure(note: CardNotesPayload.Note, dark: Bool,
@@ -2835,19 +2857,18 @@ private final class NoteRowCell: NSTableCellView {
 
     override func mouseEntered(with event: NSEvent) {
         hovering = true
-        retint()
+        retint(selected: backgroundStyle == .emphasized)
     }
 
     override func mouseExited(with event: NSEvent) {
         hovering = false
-        retint()
+        retint(selected: backgroundStyle == .emphasized)
     }
 
     /// Selection + hover are painted HERE (selectionHighlightStyle = .none),
     /// both at the same inset/radius so the widths always match. Selection
     /// copy comes from the system's backgroundStyle (.emphasized).
-    private func retint() {
-        let selected = backgroundStyle == .emphasized
+    private func retint(selected: Bool) {
         titleLabel.textColor = selected ? .white : .labelColor
         contentLabel.textColor = selected
             ? NSColor.white.withAlphaComponent(0.92)
@@ -3302,11 +3323,16 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         let selected = notesTableView.selectedRow
+        var painted = false
         for row in 0..<cardNotesItems.count {
             guard let cell = notesTableView.view(
                 atColumn: 0, row: row, makeIfNecessary: false
             ) as? NoteRowCell else { continue }
-            cell.backgroundStyle = row == selected ? .emphasized : .normal
+            cell.setEmphasized(row == selected)
+            painted = true
+        }
+        if !painted {
+            notesTableView.reloadData() // cells not yet materialized
         }
     }
 }
