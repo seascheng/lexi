@@ -2893,7 +2893,7 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     /// Labels are the deepest hit-test targets and reject the first mouse by
     /// default — claim every non-button hit so the table gets the click.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        if let hit = super.hitTest(point), hit is NSButton {
+        if let hit = super.hitTest(point), hit is NSButton || hit === titleEditor {
             return hit
         }
         return self
@@ -3026,10 +3026,12 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         super.layout()
         let w = bounds.width
         titleLabel.frame = NSRect(x: 36, y: 38, width: w - 70, height: 18)
+        // Same text origin as the label: no bezel padding to compensate,
+        // vertical growth extends downward so the baseline stays put.
         titleEditor.frame = NSRect(
-            x: titleLabel.frame.minX - 4,
+            x: titleLabel.frame.minX - 2,
             y: titleLabel.frame.minY - 3,
-            width: titleLabel.frame.width + 8,
+            width: titleLabel.frame.width + 4,
             height: 24
         )
         contentLabel.frame = NSRect(x: 36, y: 6, width: w - 70, height: 30)

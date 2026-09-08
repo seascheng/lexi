@@ -19,6 +19,7 @@ extern "C" {
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     pub(crate) fn AXUIElementCreateSystemWide() -> AXUIElementRef;
+    pub(crate) fn AXUIElementGetPid(element: AXUIElementRef, pid: *mut i32) -> i32;
     pub(crate) fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
     pub(crate) fn AXUIElementCopyAttributeValue(
         element: AXUIElementRef,

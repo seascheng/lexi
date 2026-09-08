@@ -4,7 +4,7 @@ use crate::ax::{
     copy_ax_element_attribute, copy_marker_range, drain_autorelease_pool, frontmost_pid,
     new_autorelease_pool, objc_getClass, objc_msgSend, sel_registerName, AX_ERROR_SUCCESS,
     AXUIElementCopyAttributeValue, AXUIElementCopyElementAtPosition,
-    AXUIElementCopyParameterizedAttributeValue, AXUIElementCreateSystemWide,
+    AXUIElementCopyParameterizedAttributeValue, AXUIElementCreateSystemWide, AXUIElementGetPid,
     AXUIElementPerformAction, AXValueGetValue, AXUIElementRef, CFArrayGetCount,
     CFArrayGetValueAtIndex,
 };
@@ -176,6 +176,9 @@ pub(crate) fn current_selection_target() -> Option<SelectionTarget> {
 /// Global handle for deferred native-card work (sqlite access from workers).
 static CURRENT_APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 static CARD_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Pid of the selection helper — selection reads inside our own UI (the
+/// rename editor's select-all) must never trigger the toolbar.
+static HELPER_PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 static CARD_AUTO_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Last theme the frontend pushed. The helper defaults to dark and its
@@ -1952,6 +1955,18 @@ fn read_selected_text_via_ax() -> Option<String> {
             return None;
         }
 
+        // Self-selection guard: while the helper's rename editor owns the
+        // focused element (double-click → select-all), that text is OUR UI,
+        // not a user selection in a source app.
+        let mut element_pid: i32 = 0;
+        AXUIElementGetPid(focused, &mut element_pid);
+        if element_pid == std::process::id() as i32
+            || element_pid == HELPER_PID.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            CFRelease(focused as CFTypeRef);
+            return None;
+        }
+
         // Try AXSelectedText directly
         if let Some(text) = accessibility_string_attribute(focused, "AXSelectedText") {
             CFRelease(focused as CFTypeRef);
@@ -3233,12 +3248,15 @@ fn launch_helper(app: &tauri::AppHandle, action_port: u16, toolbar_port: u16) ->
     log_native(&format!("launching helper at {}", helper_app.display()));
 
     let helper_bin = helper_app.join("Contents/MacOS/LexiSelectionHelper");
-    Command::new(&helper_bin)
+    if let Ok(child) = Command::new(&helper_bin)
         .arg("--action-port")
         .arg(action_port.to_string())
         .arg("--toolbar-port")
         .arg(toolbar_port.to_string())
-        .spawn()?;
+        .spawn()
+    {
+        HELPER_PID.store(child.id() as i32, std::sync::atomic::Ordering::Relaxed);
+    }
 
     eprintln!("[toolbar] helper launch attempted: action={action_port}, toolbar={toolbar_port}");
     log_native(&format!("helper launch attempted, action={action_port}, toolbar={toolbar_port}"));
