@@ -759,13 +759,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var reviewCurrentWordId: Int64 = 0
     private var runChipViews: [RunChipView] = []
     private var runTabsContentWidth: CGFloat = 376
-    private var cardX: CGFloat = 0
-    private var cardTopY: CGFloat = 0
-    private var cardModelHeight: CGFloat = 240
     private var cardUserWidth: CGFloat?
     private var cardUserHeight: CGFloat?
-    private var programmaticFrame = false
-    private var lastProgrammaticFrame: NSRect?
     private var resizeCorner: CardResizeZone!
     private var resizeRight: CardResizeZone!
     private var resizeBottom: CardResizeZone!
@@ -1890,9 +1885,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         // previous clamp-to-screen behavior made the card "jump upward" as
         // every streamed chunk grew the window past the screen bottom.
         var maxTotal: CGFloat = 640
-        if resultPanel.isVisible, cardTopY > 0,
-           let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: cardX, y: cardTopY)) }) ?? NSScreen.main {
-            maxTotal = min(maxTotal, max(240, cardTopY - screen.visibleFrame.minY - 8))
+        if resultPanel.isVisible,
+           let screen = NSScreen.screens.first(where: { $0.frame.contains(resultPanel.frame.origin) }) ?? NSScreen.main {
+            maxTotal = min(maxTotal, max(240, resultPanel.frame.maxY - screen.visibleFrame.minY - 8))
         }
         let overflow = max(0, tabsH + 6 + inputH + 4 + runsH + contentH + actionH + side - maxTotal)
         var contentFinal = max(60, contentH - overflow)
@@ -1960,8 +1955,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         // each stream chunk re-anchor to an intermediate position and the
         // card's top edge jittered up and down while text streamed in.
         if resultPanel.isVisible {
-            var target = NSRect(x: cardX, y: cardTopY - clampedTotal, width: width, height: clampedTotal)
-            if let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: cardX, y: cardTopY)) }) ?? NSScreen.main {
+            // Anchor directly on the LIVE frame: setFrame is atomic (no
+            // animation), so the frame always reflects the user's last drag.
+            // The cached cardX/cardTopY model was built for the removed
+            // animation and caused snap-back after user drags.
+            let live = resultPanel.frame
+            var target = NSRect(x: live.minX, y: live.maxY - clampedTotal, width: width, height: clampedTotal)
+            if let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: live.minX, y: live.maxY)) }) ?? NSScreen.main {
                 let visible = screen.visibleFrame
                 target.origin.y = max(target.origin.y, visible.minY + 8)
                 target.origin.x = min(max(target.minX, visible.minX + 8), visible.maxX - target.width - 8)
@@ -2044,12 +2044,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     /// tab switches / state changes visibly jittered. The top-anchored target
     /// means an atomic frame change never moves the top edge.
     private func animatePanelFrame(to target: NSRect) {
-        FileLog.write("MOVE animate target=\(NSStringFromRect(target)) anchor=\(cardX),\(cardTopY)")
-        cardModelHeight = target.height
-        lastProgrammaticFrame = target
-        programmaticFrame = true
         resultPanel.setFrame(target, display: true)
-        programmaticFrame = false
     }
 
     private func placeResultCard() {
@@ -2064,12 +2059,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             let room = min(560, frame.height - 16)
             origin.y = min(max(origin.y, frame.minY + room), frame.maxY - 300 - 8)
         }
-        programmaticFrame = true
         resultPanel.setFrameOrigin(origin)
-        programmaticFrame = false
-        cardX = origin.x
-        cardTopY = origin.y + resultPanel.frame.height
-        cardModelHeight = resultPanel.frame.height
     }
 
     // MARK: - HTTP request routing (helper's display server)
@@ -3314,6 +3304,7 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
         cell.configure(note: note, dark: theme == .dark) { [weak self] id in
             self?.noteDeleteClickedId(id)
         }
+        cell.setEmphasized(tableView.isRowSelected(row))
         return cell
     }
 
