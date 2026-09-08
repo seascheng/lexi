@@ -1364,6 +1364,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultScrollView.drawsBackground = false
         resultScrollView.hasVerticalScroller = true
         resultScrollView.autohidesScrollers = true
+        resultScrollView.scrollerStyle = .overlay
         resultContainer.addSubview(resultScrollView)
 
         resultTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 130))
@@ -1501,6 +1502,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         cardNotesClip.drawsBackground = false
         cardNotesClip.hasVerticalScroller = true
         cardNotesClip.autohidesScrollers = true
+        cardNotesClip.scrollerStyle = .overlay
         notesTableView = NotesTable(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
         notesTableView.onEnterKey = { [weak self] in
             guard let self, self.notesTableView.selectedRow >= 0 else { return }
@@ -2008,7 +2010,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         } else if status == "loading" {
             contentH = 48
         } else if status == "streaming" || status == "ready" || status == "error" {
-            contentH = min(max(markdownRenderedHeight(activeRun?.text ?? "", atWidth: width - 56) + 24, 64), 440)
+            contentH = min(max(markdownRenderedHeight(activeRun?.text ?? "", atWidth: width - 28) + 24, 64), 440)
         }
 
         let actionH: CGFloat = (isTranslate && status == "ready") ? 34 : 0
