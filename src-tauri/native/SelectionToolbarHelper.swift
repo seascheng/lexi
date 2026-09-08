@@ -1588,16 +1588,21 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         cardNoteRowViews.removeAll()
         cardNotesSelectedIndex = 0
 
-        // Hapigo-style rows: bold title band over a two-line muted content
-        // band. Row is 56pt: title 35..52, content 4..34 — no overlap. The
-        // newest note sits at the TOP of the scroller.
+        // Hapigo-style rows: rounded leading icon, bold title, two-line muted
+        // content, 64pt row pitch. Click = select + inject at the source
+        // caret; the per-row ↵ button is gone (Enter does the same).
         let doc = cardNotesClip.documentView ?? NSView()
-        var y: CGFloat = CGFloat(max(payload.notes.count - 1, 0)) * 56
+        var y: CGFloat = CGFloat(max(payload.notes.count - 1, 0)) * 64
         let rowW = (cardUserWidth ?? resultCardWidth) - 16
         for note in payload.notes {
-            let row = NSView(frame: NSRect(x: 4, y: y, width: rowW, height: 56))
+            let row = NSView(frame: NSRect(x: 4, y: y, width: rowW, height: 64))
             row.wantsLayer = true
-            row.layer?.cornerRadius = 6
+            row.layer?.cornerRadius = 8
+
+            let icon = NSImageView(frame: NSRect(x: 12, y: 23, width: 18, height: 18))
+            icon.image = lucideImage(for: "file-text", title: note.name)
+            icon.contentTintColor = .secondaryLabelColor
+            row.addSubview(icon)
 
             let hasContent = !note.content.isEmpty
             let titleText = note.name.isEmpty
@@ -1611,10 +1616,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             title.cell?.truncatesLastVisibleLine = true
             title.cell?.wraps = false
             title.toolTip = note.content
-            title.frame = NSRect(x: 10, y: hasContent ? 35 : 20, width: rowW - 86, height: 17)
+            title.frame = NSRect(x: 40, y: hasContent ? 40 : 24, width: rowW - 84, height: 18)
             title.onClicked = { [weak self] in
                 guard let self, let index = self.cardNoteRowViews.firstIndex(of: row) else { return }
-                self.cardNotesSelect(index)
+                self.cardNotesInject(index)
             }
             row.addSubview(title)
             cardNotesRows.append(title)
@@ -1627,58 +1632,68 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 content.maximumNumberOfLines = 2
                 content.cell?.truncatesLastVisibleLine = true
                 content.cell?.wraps = true
-                content.frame = NSRect(x: 10, y: 4, width: rowW - 86, height: 30)
+                content.frame = NSRect(x: 40, y: 6, width: rowW - 84, height: 32)
                 row.addSubview(content)
             }
-
-            let insertButton = NSButton(title: "↵", target: self, action: #selector(noteInsertClicked(_:)))
-            insertButton.bezelStyle = .regularSquare
-            insertButton.isBordered = false
-            insertButton.font = .systemFont(ofSize: 12)
-            insertButton.contentTintColor = .secondaryLabelColor
-            insertButton.toolTip = "Insert at cursor"
-            insertButton.identifier = NSUserInterfaceItemIdentifier(note.content)
-            insertButton.frame = NSRect(x: rowW - 56, y: 17, width: 24, height: 22)
-            row.addSubview(insertButton)
 
             if let id = note.id {
                 let deleteButton = NSButton(title: "✕", target: self, action: #selector(noteDeleteClicked(_:)))
                 deleteButton.bezelStyle = .regularSquare
                 deleteButton.isBordered = false
-                deleteButton.font = .systemFont(ofSize: 10)
+                deleteButton.font = .systemFont(ofSize: 9)
+                deleteButton.alphaValue = 0.55
                 deleteButton.contentTintColor = .secondaryLabelColor
                 deleteButton.toolTip = "Delete note"
                 deleteButton.identifier = NSUserInterfaceItemIdentifier(String(id))
-                deleteButton.frame = NSRect(x: rowW - 28, y: 17, width: 24, height: 22)
+                deleteButton.frame = NSRect(x: rowW - 30, y: 24, width: 20, height: 16)
                 row.addSubview(deleteButton)
             }
 
             doc.addSubview(row)
             cardNoteRowViews.append(row)
-            y -= 56
+            y -= 64
         }
-        let notesHeight = CGFloat(max(payload.notes.count, 1)) * 56 + 12
+        let notesHeight = CGFloat(max(payload.notes.count, 1)) * 64 + 12
         doc.frame = NSRect(x: 0, y: 0, width: rowW + 8, height: notesHeight)
         cardNotesSelect(0)
         layoutResultCard()
     }
 
-    /// Keyboard/click selection: accent-tinted row highlight + keep the row
-    /// inside the visible strip.
+    /// Keyboard/click selection: solid accent capsule, white text, and the
+    /// row kept inside the visible strip.
     private func cardNotesSelect(_ index: Int) {
         guard !cardNoteRowViews.isEmpty else { return }
         cardNotesSelectedIndex = min(max(index, 0), cardNoteRowViews.count - 1)
-        let accent = NSColor.controlAccentColor.withAlphaComponent(0.14).cgColor
+        let accent = NSColor.controlAccentColor.cgColor
         for (i, row) in cardNoteRowViews.enumerated() {
-            row.layer?.backgroundColor = i == cardNotesSelectedIndex ? accent : NSColor.clear.cgColor
+            let selected = i == cardNotesSelectedIndex
+            row.layer?.backgroundColor = selected ? accent : NSColor.clear.cgColor
+            let isTitleRow = i < cardNotesRows.count && cardNotesRows[i].superview === row
+            for case let label as NSTextField in row.subviews {
+                if isTitleRow && label === cardNotesRows[i] {
+                    label.textColor = selected ? .white : .labelColor
+                } else {
+                    label.textColor = selected ? NSColor.white.withAlphaComponent(0.92) : .secondaryLabelColor
+                }
+            }
+            for case let icon as NSImageView in row.subviews {
+                icon.contentTintColor = selected ? .white : .secondaryLabelColor
+            }
         }
         let count = cardNoteRowViews.count
-        let rowY = CGFloat(count - 1 - cardNotesSelectedIndex) * 56
+        let rowY = CGFloat(count - 1 - cardNotesSelectedIndex) * 64
         let clipH = cardNotesClip.frame.height
-        let docH = CGFloat(count) * 56 + 12
+        let docH = CGFloat(count) * 64 + 12
         let targetY = min(max(rowY - 8, 0), max(0, docH - clipH))
         cardNotesClip.contentView.scroll(to: NSPoint(x: 0, y: targetY))
         cardNotesClip.reflectScrolledClipView(cardNotesClip.contentView)
+    }
+
+    /// Click a row: select it and run the same Enter pipeline (Rust already
+    /// implements notes-click = store index + notes_enter).
+    private func cardNotesInject(_ index: Int) {
+        cardNotesSelect(index)
+        postAction(action: "notes-click", text: "\(cardNotesSelectedIndex)")
     }
 
     @objc private func noteInsertClicked(_ sender: NSButton) {
@@ -1807,9 +1822,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             spinnerStop()
         }
         resultLoadingLabel.isHidden = status != "loading"
-        resultIdleLabel.isHidden = run != nil
-        resultIdleHint.isHidden = run != nil
-        resultIdleIcon.isHidden = run != nil
+        let idleVisible = activePanel == "translate" && run == nil
+        resultIdleLabel.isHidden = !idleVisible
+        resultIdleHint.isHidden = !idleVisible
+        resultIdleIcon.isHidden = !idleVisible
         resultScrollView.isHidden = !(status == "streaming" || status == "ready" || status == "error")
         resultActionBar.isHidden = status != "ready"
 
@@ -1940,7 +1956,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let status = activeRun?.status
         var contentH: CGFloat = 76 // idle
         if activePanel == "notes" {
-            contentH = min(CGFloat(max(cardNoteRowViews.count, 1)) * 56 + 12, 420)
+            contentH = min(CGFloat(max(cardNoteRowViews.count, 1)) * 64 + 12, 420)
         } else if activePanel == "review" {
             contentH = 200
         } else if status == "loading" {
