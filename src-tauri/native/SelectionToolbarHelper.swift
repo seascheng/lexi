@@ -197,6 +197,10 @@ private func lucideMarkup(for icon: String) -> String {
         return """
         <rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>
         """
+    case "x":
+        return """
+        <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+        """
     case "copy":
         return """
         <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
@@ -1769,16 +1773,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         panelTabPills.forEach { $0.removeFromSuperview() }
         panelTabPills.removeAll()
         for def in panelDefs {
-            let button = NSButton(title: def.name, target: self, action: #selector(panelTabClicked(_:)))
+            let button = NSButton(title: "", target: self, action: #selector(panelTabClicked(_:)))
             button.isBordered = false
-            button.font = .systemFont(ofSize: 12, weight: .medium)
-            button.image = lucideImage(for: def.icon, title: def.name, color: cardTheme.secondaryText)
-            button.imagePosition = .imageLeading
-            button.imageScaling = .scaleProportionallyDown
             button.toolTip = def.name
             button.identifier = NSUserInterfaceItemIdentifier(def.id)
             button.wantsLayer = true
-            button.layer?.cornerRadius = 13
+            button.layer?.cornerRadius = 6
+            button.attributedTitle = tabPillTitle(def)
             cardPanelTabsView.addSubview(button)
             panelTabPills.append(button)
         }
@@ -1786,22 +1787,43 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         stylePanelTabPills()
     }
 
+    /// Icon + label as one attributed title: exact padding (8pt leading,
+    /// 4pt gap) — NSButton's imageLeading spacing is untamable.
+    private func tabPillTitle(_ def: (id: String, name: String, icon: String), active: Bool = false) -> NSAttributedString {
+        let title = NSMutableAttributedString(string: " ")
+        if let icon = lucideImage(for: def.icon, title: def.name,
+                                  color: active ? cardTheme.background : cardTheme.secondaryText) {
+            icon.size = NSSize(width: 12, height: 12)
+            let attachment = NSTextAttachment()
+            attachment.image = icon
+            title.append(NSAttributedString(attachment: attachment))
+        }
+        title.append(NSAttributedString(string: "  \(def.name)", attributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: active ? cardTheme.background : cardTheme.secondaryText,
+        ]))
+        return title
+    }
+
     private func layoutPanelTabPills() {
         var x: CGFloat = 0
         for pill in panelTabPills {
             pill.sizeToFit()
-            let w = max(pill.frame.width + 30, 64)
+            let w = max(pill.frame.width + 20, 60)
             pill.frame = NSRect(x: x, y: 2, width: w, height: 26)
-            x += w + 4
+            x += w + 6
         }
     }
 
     private func stylePanelTabPills() {
         for pill in panelTabPills {
+            let def = panelDefs.first { $0.id == pill.identifier?.rawValue }
             let active = pill.identifier?.rawValue == activePanel
-            pill.contentTintColor = active ? cardTheme.foreground : cardTheme.secondaryText
+            // INVERTED active pill: foreground surface, background-colored
+            // glyphs — contrast the quiet wash could never deliver.
+            pill.attributedTitle = def.map { tabPillTitle($0, active: active) } ?? pill.attributedTitle
             pill.layer?.backgroundColor = active
-                ? cardTheme.selectedFill.cgColor
+                ? cardTheme.foreground.cgColor
                 : NSColor.clear.cgColor
         }
     }
@@ -3065,15 +3087,24 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     var themeColors: CardTheme = .dark {
         didSet { applyThemeColors() }
     }
+    private var inverted = false
+
+    func setInverted(_ value: Bool) {
+        guard value != inverted else { return }
+        inverted = value
+        applyThemeColors()
+    }
 
     private func applyThemeColors() {
-        titleLabel.textColor = themeColors.foreground
-        contentLabel.textColor = themeColors.tertiaryText
-        iconView.contentTintColor = themeColors.secondaryText
-        deleteButton?.contentTintColor = themeColors.secondaryText
+        titleLabel.textColor = inverted ? themeColors.background : themeColors.foreground
+        contentLabel.textColor = inverted ? themeColors.background.withAlphaComponent(0.8) : themeColors.tertiaryText
+        iconView.contentTintColor = inverted ? themeColors.background : themeColors.secondaryText
+        deleteButton?.contentTintColor = inverted ? themeColors.background : themeColors.secondaryText
         if let tagLabel {
-            tagLabel.textColor = themeColors.secondaryText
-            tagLabel.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(themeColors.isDark ? 0.10 : 0.06).cgColor
+            tagLabel.textColor = inverted ? themeColors.background : themeColors.secondaryText
+            tagLabel.layer?.backgroundColor = inverted
+                ? NSColor.black.withAlphaComponent(0.18).cgColor
+                : NSColor.labelColor.withAlphaComponent(themeColors.isDark ? 0.10 : 0.06).cgColor
         }
 
         // Rename editor: always its own surface (inputFill + foreground) —
@@ -3337,26 +3368,28 @@ private final class NoteRowView: NSTableRowView {
     // keeps its color); hover is one step lighter.
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let fill: NSColor
+        let pill = bounds.insetBy(dx: 3, dy: 2)
+        let path = NSBezierPath(
+            roundedRect: pill,
+            xRadius: 8,
+            yRadius: 8
+        )
         if isSelected {
-            fill = pillColor
-        } else if hovering {
-            fill = hoverColor
+            // Inverted selection: foreground surface, high contrast.
+            pillColor.setFill()
+            path.fill()
+            if let cell = subviews.first(where: { $0 is NoteRowCell }) as? NoteRowCell {
+                cell.setInverted(true)
+            }
         } else {
-            return
+            if let cell = subviews.first(where: { $0 is NoteRowCell }) as? NoteRowCell {
+                cell.setInverted(false)
+            }
+            if hovering {
+                hoverColor.setFill()
+                path.fill()
+            }
         }
-        let pill = bounds.insetBy(dx: 4, dy: 3)
-        NSBezierPath(
-            roundedRect: pill,
-            xRadius: pill.height / 2,
-            yRadius: pill.height / 2
-        ).fill()
-        fill.setFill()
-        NSBezierPath(
-            roundedRect: pill,
-            xRadius: pill.height / 2,
-            yRadius: pill.height / 2
-        ).fill()
     }
 }
 
@@ -3836,7 +3869,7 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
         let view = NoteRowView(frame: .zero)
         view.identifier = NSUserInterfaceItemIdentifier("NoteRowView")
         view.hoverColor = cardTheme.hoverFill
-        view.pillColor = cardTheme.selectedFill
+        view.pillColor = cardTheme.foreground
         return view
     }
 
