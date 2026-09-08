@@ -1263,7 +1263,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         isInputFocused = focused
         inputContainer.layer?.backgroundColor = cardTheme.inputFill.cgColor
         inputContainer.layer?.borderColor = focused
-            ? cardTheme.hairline.cgColor
+            ? cardTheme.foreground.withAlphaComponent(0.45).cgColor
             : cardTheme.hairline.cgColor
     }
     // MARK: - Native result card (WebView parity): AiForm input bar,
@@ -1544,11 +1544,12 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         // Notes toolbar: live title search + tag filter chips.
         noteSearchField = NSTextField()
         let searchCell = VerticallyCenteredTextFieldCell()
+        searchCell.isEditable = true
         searchCell.placeholderString = "Search notes"
         searchCell.font = .systemFont(ofSize: 12)
         noteSearchField.cell = searchCell
         noteSearchField.wantsLayer = true
-        noteSearchField.layer?.cornerRadius = 6
+        noteSearchField.layer?.cornerRadius = 8
         noteSearchField.layer?.borderWidth = 1
         noteSearchField.delegate = self
         resultContainer.addSubview(noteSearchField)
@@ -1806,14 +1807,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     private func layoutPanelTabPills() {
-        let widths = panelTabPills.map { pill -> CGFloat in
-            pill.sizeToFit()
-            return max(pill.frame.width + 20, 60)
-        }
-        // The pill group centers in the tab strip.
-        let total = widths.reduce(0, +) + CGFloat(max(widths.count - 1, 0)) * 6
+        panelTabPills.forEach { $0.sizeToFit() }
+        // ONE width for every pill — the tab strip reads as a set, not as
+        // three differently-sized leftovers.
+        let w = max(panelTabPills.map { $0.frame.width + 20 }.max() ?? 60, 60)
+        let total = CGFloat(panelTabPills.count) * w + CGFloat(max(panelTabPills.count - 1, 0)) * 6
         var x = max((cardPanelTabsView.bounds.width - total) / 2, 0)
-        for (pill, w) in zip(panelTabPills, widths) {
+        for pill in panelTabPills {
             pill.frame = NSRect(x: x, y: 2, width: w, height: 26)
             x += w + 6
         }
