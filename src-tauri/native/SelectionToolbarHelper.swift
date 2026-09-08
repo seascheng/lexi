@@ -1307,24 +1307,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultTabsView = NSView(frame: NSRect(x: 0, y: 210, width: resultCardWidth, height: 32))
         resultContainer.addSubview(resultTabsView)
 
-        cardPanelTabsView = NSView(frame: NSRect(x: 8, y: 3, width: resultCardWidth - 48, height: 30))
+        cardPanelTabsView = NSView(frame: NSRect(x: 12, y: 4, width: resultCardWidth - 24 - 28, height: 28))
         resultTabsView.addSubview(cardPanelTabsView)
 
         panelTabsControl = NSSegmentedControl()
-        panelTabsControl.segmentCount = 3
-        panelTabsControl.segmentStyle = .texturedRounded
-        panelTabsControl.trackingMode = .selectOne
-        panelTabsControl.controlSize = .large
-        panelTabsControl.target = self
-        panelTabsControl.action = #selector(panelTabClicked(_:))
-        for (index, def) in panelDefs.enumerated() {
-            panelTabsControl.setLabel(def.name, forSegment: index)
-            panelTabsControl.setImage(lucideImage(for: def.icon, title: def.name), forSegment: index)
-            panelTabsControl.setToolTip(def.name, forSegment: index)
-        }
-        panelTabsControl.selectedSegment = 0
-        panelTabsControl.sizeToFit()
+        panelTabsControl.isHidden = true // replaced by the goty tab pills
         cardPanelTabsView.addSubview(panelTabsControl)
+        buildPanelTabPills()
 
         // Pin toggle (WebView FloatingFrame parity): unpinned = dismisses on
         // outside click / Esc; pinned = stays. Replaces the close button —
@@ -1334,9 +1323,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultCloseButton.isBordered = false
         resultCloseButton.image = lucideImage(for: "pin-off", title: "Pin")
         resultCloseButton.imageScaling = .scaleProportionallyDown
-        resultCloseButton.contentTintColor = .secondaryLabelColor
+        resultCloseButton.contentTintColor = NSColor.secondaryLabelColor
         resultCloseButton.toolTip = "Pin"
-        resultCloseButton.frame = NSRect(x: resultCardWidth - 32, y: 6, width: 24, height: 22)
+        resultCloseButton.frame = NSRect(x: resultCardWidth - 30, y: 7, width: 20, height: 20)
         resultTabsView.addSubview(resultCloseButton)
         resultRunsBar = NSView(frame: NSRect(x: 0, y: 180, width: resultCardWidth, height: 28))
         resultContainer.addSubview(resultRunsBar)
@@ -1352,17 +1341,17 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultRunsBar.addSubview(resultTabsClip)
 
         runsSeparator = NSView(frame: .zero)
-        runsSeparator.wantsLayer = true
+        runsSeparator.isHidden = true
         resultContainer.addSubview(runsSeparator)
 
         resultTrashButton = NSButton(title: "", target: self, action: #selector(clearRunsClicked))
         resultTrashButton.bezelStyle = .regularSquare
         resultTrashButton.isBordered = false
-        resultTrashButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close all results")
+        resultTrashButton.image = lucideImage(for: "x", title: "Close all results")
         resultTrashButton.imageScaling = .scaleProportionallyDown
         resultTrashButton.toolTip = "Close all results"
-        resultTrashButton.contentTintColor = .secondaryLabelColor
-        resultTrashButton.frame = NSRect(x: resultCardWidth - 30, y: 3, width: 22, height: 22)
+        resultTrashButton.contentTintColor = NSColor.secondaryLabelColor
+        resultTrashButton.frame = NSRect(x: resultCardWidth - 34, y: 7, width: 20, height: 20)
         resultContainer.addSubview(resultTrashButton) // top level: can never be overdrawn
 
         // Content: markdown text + loading spinner + idle hint.
@@ -1693,17 +1682,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private func handleCardActions(_ payload: CardActionsPayload) {
         cardActions = payload.actions
         panelDefs = (payload.panels ?? []).map { ($0.id, $0.name, $0.icon) }
-        if panelTabsControl != nil, !panelDefs.isEmpty {
-            panelTabsControl.segmentCount = panelDefs.count
-            for (index, def) in panelDefs.enumerated() {
-                panelTabsControl.setLabel(def.name, forSegment: index)
-                panelTabsControl.setImage(lucideImage(for: def.icon, title: def.name), forSegment: index)
-                panelTabsControl.setToolTip(def.name, forSegment: index)
-            }
-            if let index = panelDefs.firstIndex(where: { $0.id == activePanel }) {
-                panelTabsControl.selectedSegment = index
-            }
-            panelTabsControl.sizeToFit()
+        if !panelDefs.isEmpty, panelTabPills != nil {
+            buildPanelTabPills()
         }
         if panelDefs.isEmpty {
             panelDefs = [("translate", "Actions", "file-text"), ("notes", "Notes", "notebook-pen"), ("review", "Review", "book-open")]
@@ -1712,10 +1692,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         layoutResultCard()
     }
 
-    @objc private func panelTabClicked(_ sender: NSSegmentedControl) {
-        let index = sender.selectedSegment
-        guard index >= 0, index < panelDefs.count else { return }
-        showPanelTab(panelDefs[index].id)
+    @objc private func panelTabClicked(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        showPanelTab(id)
     }
 
     private func applyNoteFilters() {
@@ -1782,6 +1761,51 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         applyNoteFilters()
     }
 
+    private var panelTabPills: [NSButton] = []
+
+    /// goty tab language: icon+label pills, active on the same-hue selected
+    /// wash with full-radius caps, quiet otherwise.
+    private func buildPanelTabPills() {
+        panelTabPills.forEach { $0.removeFromSuperview() }
+        panelTabPills.removeAll()
+        for def in panelDefs {
+            let button = NSButton(title: def.name, target: self, action: #selector(panelTabClicked(_:)))
+            button.isBordered = false
+            button.font = .systemFont(ofSize: 12, weight: .medium)
+            button.image = lucideImage(for: def.icon, title: def.name, color: cardTheme.secondaryText)
+            button.imagePosition = .imageLeading
+            button.imageScaling = .scaleProportionallyDown
+            button.toolTip = def.name
+            button.identifier = NSUserInterfaceItemIdentifier(def.id)
+            button.wantsLayer = true
+            button.layer?.cornerRadius = 13
+            cardPanelTabsView.addSubview(button)
+            panelTabPills.append(button)
+        }
+        layoutPanelTabPills()
+        stylePanelTabPills()
+    }
+
+    private func layoutPanelTabPills() {
+        var x: CGFloat = 0
+        for pill in panelTabPills {
+            pill.sizeToFit()
+            let w = max(pill.frame.width + 30, 64)
+            pill.frame = NSRect(x: x, y: 2, width: w, height: 26)
+            x += w + 4
+        }
+    }
+
+    private func stylePanelTabPills() {
+        for pill in panelTabPills {
+            let active = pill.identifier?.rawValue == activePanel
+            pill.contentTintColor = active ? cardTheme.foreground : cardTheme.secondaryText
+            pill.layer?.backgroundColor = active
+                ? cardTheme.selectedFill.cgColor
+                : NSColor.clear.cgColor
+        }
+    }
+
     private func cyclePanelTab() {
         let ids = panelDefs.map { $0.id }
         guard !ids.isEmpty, let current = ids.firstIndex(of: activePanel) else { return }
@@ -1790,8 +1814,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func showPanelTab(_ id: String, notify: Bool = true) {
         activePanel = id
-        if let index = panelDefs.firstIndex(where: { $0.id == id }), panelTabsControl != nil {
-            panelTabsControl.selectedSegment = index
+        if panelTabPills != nil {
+            stylePanelTabPills()
         }
         rebuildRunTabs()
         renderActiveRun()
@@ -2081,7 +2105,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             inputTextView.textContainerInset = NSSize(width: 6, height: 6)
             inputTextView.frame = NSRect(x: 6, y: 6 + 28, width: contentWidth - 12, height: textHeight + 12)
             inputButtonsRow.frame = NSRect(x: 0, y: 0, width: buttonGroupWidth, height: 28)
-            inputButtonsClip.frame = NSRect(x: 6, y: 4, width: min(buttonGroupWidth, contentWidth - 12), height: 28)
+            inputButtonsClip.frame = NSRect(x: 6, y: 5, width: min(buttonGroupWidth, contentWidth - 12), height: 26)
             inputButtonsClip.contentView.scroll(to: NSPoint(x: max(0, buttonGroupWidth - inputButtonsClip.frame.width), y: 0))
             inputButtonsClip.reflectScrolledClipView(inputButtonsClip.contentView)
         } else {
@@ -2169,7 +2193,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         resultRunsBar.isHidden = runsH == 0
         let stripW = width - 48
-        resultRunsBar.frame = NSRect(x: 8, y: runsY, width: stripW, height: runsH)
+        resultRunsBar.frame = NSRect(x: 12, y: runsY, width: width - 24, height: runsH)
         resultTabsClip.frame = NSRect(x: 0, y: 0, width: stripW, height: 28)
         resultTabsClip.documentView?.frame = NSRect(x: 0, y: 0, width: max(runTabsContentWidth, stripW), height: 28)
 
@@ -2193,8 +2217,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         cardNotesClip.isHidden = !notesUIVisible
         if notesUIVisible {
             let listTop = contentY + contentFinal
-            noteSearchField.frame = NSRect(x: 10, y: listTop - searchH, width: width - 20, height: searchH)
-            noteTagBar.frame = NSRect(x: 10, y: listTop - searchH - 8 - chipsH, width: width - 20, height: chipsH)
+            noteSearchField.frame = NSRect(x: 12, y: listTop - searchH, width: width - 24, height: searchH)
+            noteTagBar.frame = NSRect(x: 12, y: listTop - searchH - 6 - chipsH, width: width - 24, height: chipsH)
             layoutNoteTagButtons()
             cardNotesClip.frame = NSRect(
                 x: 0,
@@ -2249,7 +2273,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultTrashButton.frame = NSRect(x: width - 30, y: runsY + 3, width: 22, height: 22)
         resultTrashButton.isHidden = runsH == 0
         runsSeparator.isHidden = runsH == 0
-        runsSeparator.frame = NSRect(x: width - 38, y: runsY + 4, width: 1, height: runsH - 8)
+        runsSeparator.frame = .zero
         resultTrashButton.frame = NSRect(x: width - 30, y: runsY + 3, width: 22, height: 22)
         resultTrashButton.isHidden = runsH == 0
         resultRunsBar.isHidden = runsH == 0
@@ -2487,7 +2511,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 ? NSColor.white.withAlphaComponent(0.22)
                 : NSColor.black.withAlphaComponent(0.20)).cgColor
             resultContainer.layer?.borderColor = hairline
-            runsSeparator.layer?.backgroundColor = hairline
             // chips: force a rebuild (the diff skips identical id/status/active)
             runChipViews.forEach { $0.removeFromSuperview() }
             runChipViews.removeAll()
