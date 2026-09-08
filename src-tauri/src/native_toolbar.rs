@@ -3184,7 +3184,7 @@ fn dispatch_toolbar_action(
 fn send_card_notes(app: &tauri::AppHandle) -> Result<(), String> {
     let rows = sqlite_query_json(
         app,
-        "SELECT IFNULL(name, '') AS name, content FROM notes ORDER BY created_at DESC, id DESC LIMIT 50;",
+        "SELECT id, IFNULL(name, '') AS name, content FROM notes ORDER BY created_at DESC, id DESC LIMIT 50;",
     )
     .unwrap_or_else(|| "[]".to_string());
     // Arm keyboard navigation: ArrowUp/Down move the highlight, Enter injects

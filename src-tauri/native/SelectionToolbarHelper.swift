@@ -733,9 +733,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var panelTabsContentWidth: CGFloat = 0
     private var resultRunsBar: NSView!
     private var cardNotesClip: NSScrollView!
-    private var cardNotesRows: [NSTextField] = []
-    private var cardNoteRowViews: [NSView] = []
-    private var cardNotesSelectedIndex = 0
+    private var notesTableView: NSTableView!
+    private var cardNotesItems: [CardNotesPayload.Note] = []
     private var reviewCardView: NSView!
     private var reviewWordLabel: NSTextField!
     private var reviewAnswerLabel: NSTextField!
@@ -1376,8 +1375,23 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         cardNotesClip.drawsBackground = false
         cardNotesClip.hasVerticalScroller = true
         cardNotesClip.autohidesScrollers = true
-        let notesDoc = FlippedNotesDoc(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
-        cardNotesClip.documentView = notesDoc
+        notesTableView = NSTableView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
+        notesTableView.headerView = nil
+        notesTableView.rowHeight = 64
+        notesTableView.intercellSpacing = NSSize(width: 8, height: 0)
+        notesTableView.selectionHighlightStyle = .regular
+        notesTableView.backgroundColor = .clear
+        notesTableView.usesAutomaticRowHeights = false
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("note"))
+        column.resizingMask = .autoresizingMask
+        notesTableView.addTableColumn(column)
+        notesTableView.dataSource = self
+        notesTableView.delegate = self
+        notesTableView.target = self
+        notesTableView.doubleAction = #selector(notesTableClicked(_:))
+        notesTableView.action = #selector(notesTableClicked(_:))
+        notesTableView.sizeLastColumnToFit()
+        cardNotesClip.documentView = notesTableView
         resultContainer.addSubview(cardNotesClip)
 
         // Review tab: word card + reveal + SM-2 grade buttons.
@@ -1590,128 +1604,22 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     private func handleCardNotes(_ payload: CardNotesPayload) {
-        cardNoteRowViews.forEach { $0.removeFromSuperview() }
-        cardNotesRows.removeAll()
-        cardNoteRowViews.removeAll()
-        cardNotesSelectedIndex = 0
-
-        // Hapigo-style rows: rounded leading icon, bold title, two-line muted
-        // content, 64pt row pitch. Click = select + inject at the source
-        // caret; the per-row ↵ button is gone (Enter does the same).
-        let doc = cardNotesClip.documentView ?? NSView()
-        var y: CGFloat = 4
-        let rowW = (cardUserWidth ?? resultCardWidth) - 16
-        for note in payload.notes {
-            let row = ClickableRow(frame: NSRect(x: 4, y: y, width: rowW, height: 64))
-            row.wantsLayer = true
-            row.layer?.cornerRadius = 8
-            row.onClicked = { [weak self] in
-                guard let self, let index = self.cardNoteRowViews.firstIndex(of: row) else { return }
-                self.cardNotesInject(index)
-            }
-            row.onHover = { [weak self, weak row] entered in
-                guard let self, let row, let index = self.cardNoteRowViews.firstIndex(of: row),
-                      index != self.cardNotesSelectedIndex else { return }
-                row.layer?.backgroundColor = entered
-                    ? NSColor.labelColor.withAlphaComponent(0.05).cgColor
-                    : NSColor.clear.cgColor
-            }
-
-            let icon = NSImageView(frame: NSRect(x: 12, y: 23, width: 18, height: 18))
-            icon.image = lucideImage(for: "file-text", title: note.name)
-            icon.contentTintColor = .secondaryLabelColor
-            row.addSubview(icon)
-
-            let hasContent = !note.content.isEmpty
-            let titleText = note.name.isEmpty
-                ? String(note.content.prefix(40))
-                : note.name
-            let title = ClickableTextField(labelWithString: titleText)
-            title.font = .systemFont(ofSize: 13, weight: .semibold)
-            title.textColor = .labelColor
-            title.lineBreakMode = .byTruncatingTail
-            title.maximumNumberOfLines = 1
-            title.cell?.truncatesLastVisibleLine = true
-            title.cell?.wraps = false
-            title.toolTip = note.content
-            title.frame = NSRect(x: 40, y: hasContent ? 40 : 24, width: rowW - 84, height: 18)
-            title.onClicked = { [weak self] in
-                guard let self, let index = self.cardNoteRowViews.firstIndex(of: row) else { return }
-                self.cardNotesInject(index)
-            }
-            row.addSubview(title)
-            cardNotesRows.append(title)
-
-            if hasContent {
-                let content = NSTextField(labelWithString: note.content)
-                content.font = .systemFont(ofSize: 12)
-                content.textColor = .secondaryLabelColor
-                content.lineBreakMode = .byTruncatingTail
-                content.maximumNumberOfLines = 2
-                content.cell?.truncatesLastVisibleLine = true
-                content.cell?.wraps = true
-                content.frame = NSRect(x: 40, y: 6, width: rowW - 84, height: 32)
-                row.addSubview(content)
-            }
-
-            if let id = note.id {
-                let deleteButton = NSButton(title: "✕", target: self, action: #selector(noteDeleteClicked(_:)))
-                deleteButton.bezelStyle = .regularSquare
-                deleteButton.isBordered = false
-                deleteButton.font = .systemFont(ofSize: 9)
-                deleteButton.alphaValue = 0.55
-                deleteButton.contentTintColor = .secondaryLabelColor
-                deleteButton.toolTip = "Delete note"
-                deleteButton.identifier = NSUserInterfaceItemIdentifier(String(id))
-                deleteButton.frame = NSRect(x: rowW - 30, y: 24, width: 20, height: 16)
-                row.addSubview(deleteButton)
-            }
-
-            doc.addSubview(row)
-            cardNoteRowViews.append(row)
-            y -= 64
+        cardNotesItems = payload.notes
+        notesTableView.reloadData()
+        notesTableView.sizeLastColumnToFit()
+        if !cardNotesItems.isEmpty {
+            notesTableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+            notesTableView.scrollRowToVisible(0)
         }
-        let notesHeight = CGFloat(max(payload.notes.count, 1)) * 64 + 8
-        doc.frame = NSRect(x: 0, y: 0, width: rowW + 8, height: notesHeight)
-        cardNotesSelect(0)
         layoutResultCard()
     }
 
-    /// Keyboard/click selection: solid accent capsule, white text, and the
-    /// row kept inside the visible strip.
-    private func cardNotesSelect(_ index: Int) {
-        guard !cardNoteRowViews.isEmpty else { return }
-        cardNotesSelectedIndex = min(max(index, 0), cardNoteRowViews.count - 1)
-        let accent = NSColor.controlAccentColor.cgColor
-        for (i, row) in cardNoteRowViews.enumerated() {
-            let selected = i == cardNotesSelectedIndex
-            row.layer?.backgroundColor = selected ? accent : NSColor.clear.cgColor
-            let isTitleRow = i < cardNotesRows.count && cardNotesRows[i].superview === row
-            for case let label as NSTextField in row.subviews {
-                if isTitleRow && label === cardNotesRows[i] {
-                    label.textColor = selected ? .white : .labelColor
-                } else {
-                    label.textColor = selected ? NSColor.white.withAlphaComponent(0.92) : .secondaryLabelColor
-                }
-            }
-            for case let icon as NSImageView in row.subviews {
-                icon.contentTintColor = selected ? .white : .secondaryLabelColor
-            }
-        }
-        let count = cardNoteRowViews.count
-        let rowY = CGFloat(cardNotesSelectedIndex) * 64 // flipped: index 0 = top
-        let clipH = cardNotesClip.frame.height
-        let docH = CGFloat(count) * 64 + 8
-        let targetY = min(max(rowY - 8, 0), max(0, docH - clipH))
-        cardNotesClip.contentView.scroll(to: NSPoint(x: 0, y: targetY))
-        cardNotesClip.reflectScrolledClipView(cardNotesClip.contentView)
-    }
-
-    /// Click a row: select it and run the same Enter pipeline (Rust already
-    /// implements notes-click = store index + notes_enter).
-    private func cardNotesInject(_ index: Int) {
-        cardNotesSelect(index)
-        postAction(action: "notes-click", text: "\(cardNotesSelectedIndex)")
+    /// Mouse click on a row: select + run the Enter pipeline (notes-click on
+    /// the Rust side). Keyboard ↑/↓ selection does NOT fire the action.
+    @objc private func notesTableClicked(_ sender: NSTableView) {
+        let row = sender.clickedRow
+        guard row >= 0, row < cardNotesItems.count else { return }
+        postAction(action: "notes-click", text: "\(row)")
     }
 
     @objc private func noteInsertClicked(_ sender: NSButton) {
@@ -1719,6 +1627,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         postAction(action: "note-insert", text: content)
         resultPanel.orderOut(nil)
         postAction(action: "card-hidden", text: "-")
+    }
+
+    private func noteDeleteClickedId(_ id: Int64) {
+        postAction(action: "note-delete", text: String(id))
     }
 
     @objc private func noteDeleteClicked(_ sender: NSButton) {
@@ -1971,7 +1883,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let status = activeRun?.status
         var contentH: CGFloat = 76 // idle
         if activePanel == "notes" {
-            contentH = min(CGFloat(max(cardNoteRowViews.count, 1)) * 64 + 12, 420)
+            contentH = min(CGFloat(max(cardNotesItems.count, 1)) * 64 + 12, 420)
         } else if activePanel == "review" {
             contentH = 200
         } else if status == "loading" {
@@ -2045,7 +1957,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         cardNotesClip.isHidden = activePanel != "notes"
         cardNotesClip.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
-        relayoutNotesRows(width: width)
+
         reviewCardView.isHidden = activePanel != "review"
         reviewCardView.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
         relayoutReview(width: width)
@@ -2160,19 +2072,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         cardModelHeight = resultPanel.frame.height
     }
 
-    /// Re-fit notes rows to the current card width (user resize).
-    private func relayoutNotesRows(width: CGFloat) {
-        let rowW = width - 16
-        for (i, row) in cardNoteRowViews.enumerated() {
-            row.frame.size.width = rowW
-            for case let label as NSTextField in row.subviews {
-                label.frame.size.width = rowW - 84
-            }
-        }
-        if let doc = cardNotesClip.documentView {
-            doc.frame.size.width = rowW + 8
-        }
-    }
 
     /// Re-fit the review card's fixed chrome to the current card width.
     private func relayoutReview(width: CGFloat) {
@@ -2273,7 +2172,11 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
            let bodyData = body.data(using: .utf8),
            let payload = try? JSONDecoder().decode(CardNotesSelectPayload.self, from: bodyData) {
             DispatchQueue.main.async {
-                self.cardNotesSelect(payload.index)
+                let index = min(max(payload.index, 0), max(self.cardNotesItems.count - 1, 0))
+                if !self.cardNotesItems.isEmpty {
+                    self.notesTableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+                    self.notesTableView.scrollRowToVisible(index)
+                }
             }
             return
         }
@@ -2851,6 +2754,116 @@ private struct CardActionsPayload: Decodable {
     let panels: [PanelDef]?
 }
 
+/// One notes-table row (view-based NSTableView cell). The system provides
+/// selection (accent capsule), row height, scrolling, and width tracking;
+/// this cell only lays out its subviews and retints on selection/hover.
+private final class NoteRowCell: NSTableCellView {
+    let iconView = NSImageView(frame: NSRect(x: 10, y: 23, width: 18, height: 18))
+    let titleLabel = NSTextField(labelWithString: "")
+    let contentLabel = NSTextField(labelWithString: "")
+    var deleteButton: NSButton?
+    private var onDelete: ((Int64) -> Void)?
+    private var hoverArea: NSTrackingArea?
+    private var hovering = false
+
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { retint() }
+    }
+
+    func configure(note: CardNotesPayload.Note, dark: Bool,
+                   onDelete: ((Int64) -> Void)?) {
+        iconView.image = lucideImage(for: "file-text", title: note.name)
+        iconView.imageScaling = .scaleProportionallyDown
+
+        let titleText = note.name.isEmpty ? String(note.content.prefix(40)) : note.name
+        titleLabel.stringValue = titleText
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.cell?.truncatesLastVisibleLine = true
+        titleLabel.cell?.wraps = false
+        titleLabel.toolTip = note.content
+
+        contentLabel.stringValue = note.content
+        contentLabel.font = .systemFont(ofSize: 12)
+        contentLabel.textColor = .secondaryLabelColor
+        contentLabel.lineBreakMode = .byTruncatingTail
+        contentLabel.maximumNumberOfLines = 2
+        contentLabel.cell?.truncatesLastVisibleLine = true
+        contentLabel.cell?.wraps = true
+
+        if let deleteButton {
+            deleteButton.removeFromSuperview()
+        }
+        if let id = note.id, let onDelete {
+            let button = NSButton(title: "✕", target: nil, action: nil)
+            button.bezelStyle = .regularSquare
+            button.isBordered = false
+            button.font = .systemFont(ofSize: 9)
+            button.alphaValue = 0.55
+            button.contentTintColor = .secondaryLabelColor
+            button.toolTip = "Delete note"
+            button.identifier = NSUserInterfaceItemIdentifier(String(id))
+            self.onDelete = onDelete
+            button.target = self
+            button.action = #selector(deleteTapped)
+            deleteButton = button
+            addSubview(button)
+        }
+        needsLayout = true
+    }
+
+    @objc private func deleteTapped(_ sender: NSButton) {
+        if let raw = sender.identifier?.rawValue, let id = Int64(raw) {
+            onDelete?(id)
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        let w = bounds.width
+        titleLabel.frame = NSRect(x: 36, y: 38, width: w - 70, height: 18)
+        contentLabel.frame = NSRect(x: 36, y: 6, width: w - 70, height: 30)
+        iconView.frame = NSRect(x: 10, y: 23, width: 18, height: 18)
+        deleteButton?.frame = NSRect(x: w - 28, y: 24, width: 20, height: 16)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        if let hoverArea { addTrackingArea(hoverArea) }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        retint()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        retint()
+    }
+
+    private func retint() {
+        let selected = backgroundStyle == .emphasized
+        titleLabel.textColor = selected ? .white : .labelColor
+        contentLabel.textColor = selected
+            ? NSColor.white.withAlphaComponent(0.92)
+            : .secondaryLabelColor
+        iconView.contentTintColor = selected ? .white : .secondaryLabelColor
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        if !selected {
+            layer?.backgroundColor = hovering
+                ? NSColor.labelColor.withAlphaComponent(0.05).cgColor
+                : NSColor.clear.cgColor
+        } else {
+            layer?.backgroundColor = NSColor.clear.cgColor
+        }
+    }
+}
+
 private struct CardNotesPayload: Decodable {
     struct Note: Decodable {
         let id: Int64?
@@ -3262,3 +3275,29 @@ private struct NotesShowPayload: Decodable {
 private struct NotesSelectPayload: Decodable {
     let selected: Int
 }
+
+extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        cardNotesItems.count
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard row >= 0, row < cardNotesItems.count else { return nil }
+        let cell = tableView.makeView(
+            withIdentifier: NSUserInterfaceItemIdentifier("NoteRow"),
+            owner: self
+        ) as? NoteRowCell ?? NoteRowCell(frame: .zero)
+        cell.identifier = NSUserInterfaceItemIdentifier("NoteRow")
+        let note = cardNotesItems[row]
+        cell.configure(note: note, dark: theme == .dark) { [weak self] id in
+            self?.noteDeleteClickedId(id)
+        }
+        return cell
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        // System row view: regular accent selection capsule.
+        nil
+    }
+}
+
