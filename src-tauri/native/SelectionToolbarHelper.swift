@@ -2853,6 +2853,36 @@ private struct CardActionsPayload: Decodable {
 /// One notes-table row (view-based NSTableView cell). The system provides
 /// selection (accent capsule), row height, scrolling, and width tracking;
 /// this cell only lays out its subviews and retints on selection/hover.
+/// A borderless NSTextField draws its text top-aligned while its label
+/// counterpart centers vertically — and the field EDITOR uses yet another
+/// rect. Route draw/edit/select through one centered rect so the renamed
+/// title sits exactly where the label was, mid-line, in both states.
+private final class VerticallyCenteredTextFieldCell: NSTextFieldCell {
+    override func titleRect(forBounds rect: NSRect) -> NSRect {
+        var r = super.titleRect(forBounds: rect)
+        let lineHeight = (font?.boundingRectForFont.height ?? 16).rounded()
+        r.origin.y = rect.minY + ((rect.height - lineHeight) / 2).rounded()
+        r.size.height = lineHeight
+        return r
+    }
+
+    override func edit(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText,
+                       delegate: Any?, event: NSEvent?) {
+        super.edit(withFrame: titleRect(forBounds: rect), in: controlView,
+                   editor: textObj, delegate: delegate, event: event)
+    }
+
+    override func select(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText,
+                         delegate: Any?, start selStart: Int, length selLength: Int) {
+        super.select(withFrame: titleRect(forBounds: rect), in: controlView,
+                     editor: textObj, delegate: delegate, start: selStart, length: selLength)
+    }
+
+    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+        super.drawInterior(withFrame: titleRect(forBounds: cellFrame), in: controlView)
+    }
+}
+
 private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     let iconView = NSImageView(frame: NSRect(x: 10, y: 23, width: 18, height: 18))
     let titleLabel = NSTextField(labelWithString: "")
@@ -2865,6 +2895,7 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     private var noteId: Int64?
     private var renameCancelled = false
     private var titleBeforeRename = ""
+    private var caretToEndOnBegin = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -2872,11 +2903,13 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         addSubview(titleLabel)
         addSubview(contentLabel)
 
-        titleEditor.isEditable = true
-        titleEditor.isBordered = false
-        titleEditor.font = .systemFont(ofSize: 13, weight: .semibold)
-        titleEditor.lineBreakMode = .byTruncatingTail
-        titleEditor.cell?.wraps = false
+        let centeredCell = VerticallyCenteredTextFieldCell()
+        centeredCell.isEditable = true
+        centeredCell.isBordered = false
+        centeredCell.font = .systemFont(ofSize: 13, weight: .semibold)
+        centeredCell.lineBreakMode = .byTruncatingTail
+        centeredCell.usesSingleLineMode = true
+        titleEditor.cell = centeredCell
         titleEditor.wantsLayer = true
         titleEditor.layer?.cornerRadius = 5
         titleEditor.layer?.masksToBounds = true
@@ -2990,8 +3023,16 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         titleEditor.stringValue = titleBeforeRename
         titleLabel.isHidden = true
         titleEditor.isHidden = false
+        caretToEndOnBegin = true
         window?.makeFirstResponder(titleEditor)
-        titleEditor.currentEditor()?.selectAll(nil)
+    }
+
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        guard obj.object as? NSTextField === titleEditor, caretToEndOnBegin else { return }
+        caretToEndOnBegin = false
+        // No select-all: a selection would read as a user text selection to
+        // our own monitors; the caret goes to the end (I-beam at the tail).
+        (obj.userInfo?["NSFieldEditor"] as? NSText)?.moveToEndOfDocument(nil)
     }
 
     private func endRenaming() {
