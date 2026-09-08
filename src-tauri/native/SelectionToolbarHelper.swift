@@ -2873,10 +2873,14 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         addSubview(contentLabel)
 
         titleEditor.isEditable = true
-        titleEditor.isBordered = true
+        titleEditor.isBordered = false
         titleEditor.font = .systemFont(ofSize: 13, weight: .semibold)
         titleEditor.lineBreakMode = .byTruncatingTail
         titleEditor.cell?.wraps = false
+        titleEditor.wantsLayer = true
+        titleEditor.layer?.cornerRadius = 5
+        titleEditor.layer?.masksToBounds = true
+        titleEditor.focusRingType = .exterior
         titleEditor.isHidden = true
         titleEditor.delegate = self
         addSubview(titleEditor)
@@ -2907,6 +2911,15 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
             : themeColors.secondaryText
         iconView.contentTintColor = selected ? .white : themeColors.secondaryText
         deleteButton?.contentTintColor = selected ? .white : themeColors.secondaryText
+
+        // Rename editor: the card's input surface, readable on the
+        // selection capsule too.
+        titleEditor.textColor = selected ? .white : themeColors.foreground
+        titleEditor.backgroundColor = selected
+            ? NSColor.white.withAlphaComponent(0.14)
+            : themeColors.inputFill
+        titleEditor.layer?.borderColor = themeColors.hairline.cgColor
+        titleEditor.layer?.borderWidth = 1
     }
 
     override var backgroundStyle: NSView.BackgroundStyle {
@@ -2975,7 +2988,6 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         titleBeforeRename = titleLabel.stringValue
         renameCancelled = false
         titleEditor.stringValue = titleBeforeRename
-        titleEditor.frame = titleLabel.frame
         titleLabel.isHidden = true
         titleEditor.isHidden = false
         window?.makeFirstResponder(titleEditor)
@@ -3014,7 +3026,12 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         super.layout()
         let w = bounds.width
         titleLabel.frame = NSRect(x: 36, y: 38, width: w - 70, height: 18)
-        titleEditor.frame = titleLabel.frame
+        titleEditor.frame = NSRect(
+            x: titleLabel.frame.minX - 4,
+            y: titleLabel.frame.minY - 3,
+            width: titleLabel.frame.width + 8,
+            height: 24
+        )
         contentLabel.frame = NSRect(x: 36, y: 6, width: w - 70, height: 30)
         iconView.frame = NSRect(x: 10, y: 23, width: 18, height: 18)
         deleteButton?.frame = NSRect(x: w - 28, y: 24, width: 20, height: 16)
