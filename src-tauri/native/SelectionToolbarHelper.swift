@@ -708,6 +708,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var resultTextView: NSTextView!
     private var resultLoadingIndicator: NSView!
     private var resultLoadingLabel: NSTextField!
+    private var translateIdleView: NSView!
     private var resultIdleLabel: NSTextField!
     private var resultIdleHint: NSTextField!
     private var resultIdleIcon: NSImageView!
@@ -1267,26 +1268,32 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultLoadingLabel.frame = NSRect(x: 36, y: 100, width: 200, height: 18)
         resultContainer.addSubview(resultLoadingLabel)
 
+        // Translate tab's idle placeholder — a content-area view exactly like
+        // cardNotesClip (notes) and reviewCardView (review): switching tabs
+        // hides it wholesale, no per-control isHidden bookkeeping.
+        translateIdleView = NSView(frame: NSRect(x: 0, y: 70, width: resultCardWidth, height: 130))
+        translateIdleView.isHidden = true
+        resultContainer.addSubview(translateIdleView)
+
+        resultIdleIcon = NSImageView(frame: NSRect(x: resultCardWidth / 2 - 8, y: 32, width: 16, height: 16))
+        resultIdleIcon.image = lucideImage(for: "sparkles", title: "Idle")
+        resultIdleIcon.contentTintColor = .controlAccentColor
+        resultIdleIcon.imageScaling = .scaleProportionallyDown
+        translateIdleView.addSubview(resultIdleIcon)
+
         resultIdleLabel = NSTextField(labelWithString: "Enter text, then choose an action.")
         resultIdleLabel.font = .systemFont(ofSize: 13)
         resultIdleLabel.textColor = .secondaryLabelColor
         resultIdleLabel.alignment = .center
-        resultIdleLabel.frame = NSRect(x: 10, y: 96, width: resultCardWidth - 20, height: 18)
-        resultContainer.addSubview(resultIdleLabel)
+        resultIdleLabel.frame = NSRect(x: 10, y: 26, width: resultCardWidth - 20, height: 18)
+        translateIdleView.addSubview(resultIdleLabel)
 
         resultIdleHint = NSTextField(labelWithString: "⏎ Run default")
         resultIdleHint.font = .systemFont(ofSize: 11)
         resultIdleHint.textColor = .tertiaryLabelColor
         resultIdleHint.alignment = .center
-        resultIdleHint.frame = NSRect(x: 10, y: 76, width: resultCardWidth - 20, height: 14)
-
-        resultIdleIcon = NSImageView(frame: NSRect(x: resultCardWidth / 2 - 8, y: 102, width: 16, height: 16))
-        resultIdleIcon.image = lucideImage(for: "sparkles", title: "Idle")
-        resultIdleIcon.contentTintColor = .controlAccentColor
-        resultIdleIcon.imageScaling = .scaleProportionallyDown
-        resultIdleIcon.isHidden = true
-        resultContainer.addSubview(resultIdleIcon)
-        resultContainer.addSubview(resultIdleHint)
+        resultIdleHint.frame = NSRect(x: 10, y: 6, width: resultCardWidth - 20, height: 14)
+        translateIdleView.addSubview(resultIdleHint)
 
         // Action bar: EntryTypeTags + Copy + Save (ready runs).
         resultActionBar = NSView(frame: NSRect(x: 10, y: 36, width: resultCardWidth - 20, height: 32))
@@ -1822,10 +1829,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             spinnerStop()
         }
         resultLoadingLabel.isHidden = status != "loading"
-        let idleVisible = activePanel == "translate" && run == nil
-        resultIdleLabel.isHidden = !idleVisible
-        resultIdleHint.isHidden = !idleVisible
-        resultIdleIcon.isHidden = !idleVisible
+        translateIdleView.isHidden = activePanel != "translate" || run != nil
         resultScrollView.isHidden = !(status == "streaming" || status == "ready" || status == "error")
         resultActionBar.isHidden = status != "ready"
 
@@ -2022,11 +2026,11 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultLoadingLabel.isHidden = !isTranslate || status != "loading"
         resultLoadingIndicator.frame.origin = NSPoint(x: 14, y: contentY + contentFinal / 2 - 8)
         resultLoadingLabel.frame.origin = NSPoint(x: 36, y: contentY + contentFinal / 2 - 9)
-        resultIdleLabel.isHidden = !isTranslate || activeRun != nil
-        resultIdleHint.isHidden = !isTranslate || activeRun != nil
-        resultIdleLabel.frame = NSRect(x: 10, y: contentY + contentFinal / 2, width: width - 20, height: 18)
-        resultIdleHint.frame = NSRect(x: 10, y: contentY + contentFinal / 2 - 20, width: width - 20, height: 14)
-        resultIdleIcon.frame = NSRect(x: width / 2 - 8, y: contentY + contentFinal / 2 + 24, width: 16, height: 16)
+        translateIdleView.isHidden = !isTranslate || activeRun != nil
+        translateIdleView.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
+        resultIdleLabel.frame = NSRect(x: 10, y: contentFinal / 2 - 6, width: width - 20, height: 18)
+        resultIdleHint.frame = NSRect(x: 10, y: contentFinal / 2 - 26, width: width - 20, height: 14)
+        resultIdleIcon.frame = NSRect(x: width / 2 - 8, y: contentFinal / 2 + 18, width: 16, height: 16)
 
         cardNotesClip.isHidden = activePanel != "notes"
         cardNotesClip.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
