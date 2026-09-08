@@ -838,6 +838,12 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var cardNotesClip: HorizontalOnlyClip!
 
     private var notesTableView: NotesTable!
+    private var noteSearchField: NSTextField!
+    private var noteTagBar: NSView!
+    private var noteTagButtons: [NSButton] = []
+    private var noteSearchText = ""
+    private var noteActiveTag = "all"
+    private var displayedNotes: [CardNotesPayload.Note] = []
     private var cardNotesItems: [CardNotesPayload.Note] = []
     private var reviewCardView: NSView!
     private var reviewWordLabel: NSTextField!
@@ -1505,16 +1511,19 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         cardNotesClip.scrollerStyle = .overlay
         notesTableView = NotesTable(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
         notesTableView.onDoubleClickRow = { [weak self] row in
-            guard let self, row >= 0, row < self.cardNotesItems.count else { return }
+            guard let self, row >= 0, row < self.displayedNotes.count else { return }
             if let cell = self.notesTableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NoteRowCell {
                 cell.beginRenaming()
             }
         }
         notesTableView.onEnterKey = { [weak self] in
             guard let self, self.notesTableView.selectedRow >= 0 else { return }
-            // Reuses the Rust "notes-click" pipeline: set selection, inject
-            // at the source caret, mirror clipboard, hide panels.
-            self.postAction(action: "notes-click", text: String(self.notesTableView.selectedRow))
+            // Injects by note id: the visible list is filtered, so display
+            // indexes must never cross into the Rust snapshot.
+            let row = self.notesTableView.selectedRow
+            guard row >= 0, row < self.displayedNotes.count,
+                  let id = self.displayedNotes[row].id else { return }
+            self.postAction(action: "notes-click", text: String(id))
         }
         notesTableView.headerView = nil
         notesTableView.rowHeight = 64
@@ -1538,6 +1547,19 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         )
         cardNotesClip.documentView = notesTableView
         resultContainer.addSubview(cardNotesClip)
+
+        // Notes toolbar: live title search + tag filter chips.
+        noteSearchField = NSTextField()
+        noteSearchField.placeholderString = "Search notes"
+        noteSearchField.font = .systemFont(ofSize: 12)
+        noteSearchField.wantsLayer = true
+        noteSearchField.layer?.cornerRadius = 6
+        noteSearchField.layer?.borderWidth = 1
+        noteSearchField.delegate = self
+        resultContainer.addSubview(noteSearchField)
+
+        noteTagBar = NSView(frame: .zero)
+        resultContainer.addSubview(noteTagBar)
 
         // Review tab: word card + reveal + SM-2 grade buttons.
         reviewCardView = NSView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
@@ -1694,6 +1716,70 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         showPanelTab(panelDefs[index].id)
     }
 
+    private func applyNoteFilters() {
+        let query = noteSearchText.trimmingCharacters(in: .whitespaces).lowercased()
+        displayedNotes = cardNotesItems.filter { note in
+            let title = (note.name.isEmpty ? note.content : note.name).lowercased()
+            let matchesQuery = query.isEmpty || title.contains(query)
+            let matchesTag = noteActiveTag == "all" || (note.tags ?? []).contains(noteActiveTag)
+            return matchesQuery && matchesTag
+        }
+        notesTableView.reloadData()
+        if !displayedNotes.isEmpty {
+            notesTableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        }
+        layoutResultCard()
+    }
+
+    private func rebuildNoteTagBar() {
+        noteTagButtons.forEach { $0.removeFromSuperview() }
+        noteTagButtons.removeAll()
+        var tags = Set<String>()
+        for note in cardNotesItems {
+            (note.tags ?? []).forEach { tags.insert($0) }
+        }
+        for name in ["all"] + tags.sorted() {
+            let button = NSButton(title: name.capitalized, target: self, action: #selector(noteTagClicked(_:)))
+            button.isBordered = false
+            button.font = .systemFont(ofSize: 11, weight: .medium)
+            button.bezelStyle = .texturedRounded
+            button.toolTip = name == "all" ? "All notes" : "Filter: \(name)"
+            button.identifier = NSUserInterfaceItemIdentifier(name)
+            noteTagBar.addSubview(button)
+            noteTagButtons.append(button)
+        }
+        styleNoteTagButtons()
+        layoutResultCard()
+    }
+
+    private func layoutNoteTagButtons() {
+        var x: CGFloat = 0
+        for button in noteTagButtons {
+            button.sizeToFit()
+            let w = max(button.frame.width + 18, 40)
+            button.frame = NSRect(x: x, y: 2, width: w, height: 20)
+            x += w + 6
+        }
+    }
+
+    private func styleNoteTagButtons() {
+        for button in noteTagButtons {
+            let active = button.identifier?.rawValue == noteActiveTag
+            button.contentTintColor = active ? cardTheme.foreground : cardTheme.secondaryText
+            button.layer?.backgroundColor = active
+                ? cardTheme.selectedFill.cgColor
+                : NSColor.clear.cgColor
+            button.wantsLayer = true
+            button.layer?.cornerRadius = 9
+        }
+    }
+
+    @objc private func noteTagClicked(_ sender: NSButton) {
+        noteActiveTag = sender.identifier?.rawValue ?? "all"
+        styleNoteTagButtons()
+        applyNoteFilters()
+    }
+
     private func cyclePanelTab() {
         let ids = panelDefs.map { $0.id }
         guard !ids.isEmpty, let current = ids.firstIndex(of: activePanel) else { return }
@@ -1738,6 +1824,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             notesTableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
             notesTableView.scrollRowToVisible(0)
         }
+        rebuildNoteTagBar()
+        applyNoteFilters()
         FileLog.write("NOTES loaded count=\(cardNotesItems.count) selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden)")
         layoutResultCard()
         FileLog.write("NOTES post-layout selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden) panel=\(activePanel)")
@@ -2022,7 +2110,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let status = activeRun?.status
         var contentH: CGFloat = 76 // idle
         if activePanel == "notes" {
-            contentH = min(CGFloat(max(cardNotesItems.count, 1)) * 64 + 12, 420)
+            let listH = min(CGFloat(max(displayedNotes.count, 1)) * 64 + 12, 420)
+            contentH = 28 + 8 + 24 + 6 + listH // search + gap + chips + gap + list
         } else if activePanel == "review" {
             contentH = 200
         } else if status == "loading" {
@@ -2094,8 +2183,24 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultIdleHint.frame = NSRect(x: 10, y: contentFinal / 2 - 26, width: width - 20, height: 14)
         resultIdleIcon.frame = NSRect(x: width / 2 - 8, y: contentFinal / 2 + 18, width: 16, height: 16)
 
-        cardNotesClip.isHidden = activePanel != "notes"
-        cardNotesClip.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
+        let notesUIVisible = activePanel == "notes"
+        let searchH: CGFloat = 28
+        let chipsH: CGFloat = 24
+        noteSearchField.isHidden = !notesUIVisible
+        noteTagBar.isHidden = !notesUIVisible
+        cardNotesClip.isHidden = !notesUIVisible
+        if notesUIVisible {
+            let listTop = contentY + contentFinal
+            noteSearchField.frame = NSRect(x: 10, y: listTop - searchH, width: width - 20, height: searchH)
+            noteTagBar.frame = NSRect(x: 10, y: listTop - searchH - 8 - chipsH, width: width - 20, height: chipsH)
+            layoutNoteTagButtons()
+            cardNotesClip.frame = NSRect(
+                x: 0,
+                y: contentY,
+                width: width,
+                height: max(contentFinal - searchH - 8 - chipsH - 6, 64)
+            )
+        }
 
         reviewCardView.isHidden = activePanel != "review"
         reviewCardView.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
@@ -3193,6 +3298,7 @@ private struct CardNotesPayload: Decodable {
     struct Note: Decodable {
         let id: Int64?
         let name: String
+        let tags: [String]?
         let content: String
     }
     let notes: [Note]
@@ -3607,19 +3713,42 @@ extension SelectionToolbarApp {
     }
 }
 
+extension SelectionToolbarApp: NSTextFieldDelegate {
+    func controlTextDidChange(_ obj: Notification) {
+        guard obj.object as? NSTextField === noteSearchField else { return }
+        noteSearchText = noteSearchField.stringValue
+        applyNoteFilters()
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === noteSearchField else { return false }
+        if commandSelector == NSSelectorFromString("cancelOperation:") {
+            if !noteSearchField.stringValue.isEmpty {
+                noteSearchField.stringValue = ""
+                noteSearchText = ""
+                applyNoteFilters()
+            } else {
+                notesTableView.window?.makeFirstResponder(notesTableView)
+            }
+            return true
+        }
+        return false
+    }
+}
+
 extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int {
-        cardNotesItems.count
+        displayedNotes.count
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard row >= 0, row < cardNotesItems.count else { return nil }
+        guard row >= 0, row < displayedNotes.count else { return nil }
         let cell = tableView.makeView(
             withIdentifier: NSUserInterfaceItemIdentifier("NoteRow"),
             owner: self
         ) as? NoteRowCell ?? NoteRowCell(frame: .zero)
         cell.identifier = NSUserInterfaceItemIdentifier("NoteRow")
-        let note = cardNotesItems[row]
+        let note = displayedNotes[row]
         cell.configure(note: note, dark: theme == .dark,
                        onDelete: { [weak self] id in
                            self?.noteDeleteClickedId(id)
@@ -3647,10 +3776,10 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
     func tableViewSelectionDidChange(_ notification: Notification) {
         FileLog.write("SEL didChange row=\(notesTableView.selectedRow)")
         let selected = notesTableView.selectedRow
-        if selected >= 0, selected < cardNotesItems.count {
+        if selected >= 0, selected < displayedNotes.count {
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
-            pasteboard.setString(cardNotesItems[selected].content, forType: .string)
+            pasteboard.setString(displayedNotes[selected].content, forType: .string)
         }
     }
 }

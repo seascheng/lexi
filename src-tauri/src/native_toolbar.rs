@@ -533,25 +533,30 @@ fn default_toolbar_tools_json() -> Vec<serde_json::Value> {
 
 #[derive(Clone, Serialize, serde::Deserialize)]
 struct NoteRow {
+    #[serde(default)]
+    id: Option<i64>,
     name: String,
     content: String,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 
 static NOTES_SNAPSHOT: std::sync::LazyLock<Mutex<Vec<NoteRow>>> =
     std::sync::LazyLock::new(|| Mutex::new(Vec::new()));
-static NOTES_SELECTED: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+static NOTES_SELECTED_NOTE_ID: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
 
 
 
 
 /// Insert the highlighted note at the source app's caret, then hide the panel.
 fn notes_enter() {
-    let index = NOTES_SELECTED.load(std::sync::atomic::Ordering::Relaxed);
-    let text = NOTES_SNAPSHOT
-        .lock()
-        .ok()
-        .and_then(|cell| cell.get(index.max(0) as usize).cloned());
+    let wanted_id = NOTES_SELECTED_NOTE_ID.load(std::sync::atomic::Ordering::Relaxed);
+    let text = NOTES_SNAPSHOT.lock().ok().and_then(|cell| {
+        cell.iter()
+            .find(|note| note.id == Some(wanted_id))
+            .cloned()
+    });
     let Some(note) = text.filter(|n| !n.content.trim().is_empty()) else {
         log_native("notes Enter: nothing selected");
         return;
@@ -2825,8 +2830,8 @@ fn dispatch_toolbar_action(
     // Row click on the native notes panel: select that row and run the same
     // Enter pipeline (insert at the source app's caret).
     if action.action == "notes-click" {
-        if let Ok(index) = action.text.trim().parse::<i32>() {
-            NOTES_SELECTED.store(index, std::sync::atomic::Ordering::Relaxed);
+        if let Ok(id) = action.text.trim().parse::<i64>() {
+            NOTES_SELECTED_NOTE_ID.store(id, std::sync::atomic::Ordering::Relaxed);
             thread::spawn(notes_enter);
         }
         return Ok(());
@@ -2934,7 +2939,9 @@ fn dispatch_toolbar_action(
 fn send_card_notes(app: &tauri::AppHandle) -> Result<(), String> {
     let rows = sqlite_query_json(
         app,
-        "SELECT id, IFNULL(name, '') AS name, content FROM notes ORDER BY created_at DESC, id DESC LIMIT 50;",
+        "SELECT n.id, IFNULL(n.name, '') AS name, n.content, \
+         (SELECT GROUP_CONCAT(t.name) FROM note_tags nt JOIN tags t ON t.id = nt.tag_id WHERE nt.note_id = n.id) AS tags \
+         FROM notes n ORDER BY n.created_at DESC, n.id DESC LIMIT 50;",
     )
     .unwrap_or_else(|| "[]".to_string());
     // Arm keyboard navigation: ArrowUp/Down move the highlight, Enter injects
@@ -2943,7 +2950,7 @@ fn send_card_notes(app: &tauri::AppHandle) -> Result<(), String> {
         if let Ok(mut cell) = NOTES_SNAPSHOT.lock() {
             *cell = parsed;
         }
-        NOTES_SELECTED.store(0, std::sync::atomic::Ordering::Relaxed);
+        NOTES_SELECTED_NOTE_ID.store(-1, std::sync::atomic::Ordering::Relaxed);
     }
     let Some(port) = toolbar_port() else { return Ok(()) };
     let body = format!("{{\"notes\":{rows}}}");
