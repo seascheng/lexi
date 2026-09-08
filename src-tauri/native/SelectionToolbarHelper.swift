@@ -1416,7 +1416,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         notesTableView.doubleAction = #selector(notesTableClicked(_:))
         notesTableView.action = #selector(notesTableClicked(_:))
         notesTableView.sizeLastColumnToFit()
-        cardNotesClip.contentView.postsBoundsChangedNotification = true
         NotificationCenter.default.addObserver(
             self, selector: #selector(notesClipScrolled),
             name: NSView.boundsDidChangeNotification, object: cardNotesClip.contentView
@@ -3328,44 +3327,6 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
             pasteboard.setString(cardNotesItems[selected].content, forType: .string)
-        }
-    }
-
-    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        if let reused = tableView.makeView(
-            withIdentifier: NSUserInterfaceItemIdentifier("NoteRowView"),
-            owner: self
-        ) as? NoteRowView {
-            return reused
-        }
-        let view = NoteRowView(frame: .zero)
-        view.identifier = NSUserInterfaceItemIdentifier("NoteRowView")
-        return view
-    }
-
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        let selected = notesTableView.selectedRow
-        // Selected => its content goes to the clipboard (panel stays).
-        // Enter (Rust side) injects + hides. This covers every selection
-        // source: the initial first row, ↑/↓, and mouse clicks.
-        if selected >= 0, selected < cardNotesItems.count {
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(cardNotesItems[selected].content, forType: .string)
-        }
-        // Repaint one frame later, FORCING cell materialization: during
-        // reloadData-driven selection changes the rows aren't instantiated
-        // yet when didChange fires, and stale timing is what made the
-        // selection "flash then disappear".
-        let selectedRow = selected
-        DispatchQueue.main.async {
-            guard selectedRow == self.notesTableView.selectedRow else { return }
-            for row in 0..<self.cardNotesItems.count {
-                guard let cell = self.notesTableView.view(
-                    atColumn: 0, row: row, makeIfNecessary: true
-                ) as? NoteRowCell else { continue }
-                cell.setEmphasized(row == selectedRow)
-            }
         }
     }
 }
