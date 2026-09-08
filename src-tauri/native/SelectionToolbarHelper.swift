@@ -579,6 +579,11 @@ private final class HorizontalOnlyClip: NSScrollView {
             }
             return // never bounce vertically
         }
+        // No horizontal overflow: swallow the gesture entirely — a
+        // rubber-banding one-line strip displaces the very buttons the
+        // user is trying to click.
+        let docW = documentView?.frame.width ?? 0
+        if docW <= bounds.width + 0.5 { return }
         super.scrollWheel(with: event)
     }
 }
