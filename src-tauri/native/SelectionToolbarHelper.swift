@@ -2045,8 +2045,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         cardNotesClip.isHidden = activePanel != "notes"
         cardNotesClip.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
+        relayoutNotesRows(width: width)
         reviewCardView.isHidden = activePanel != "review"
         reviewCardView.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
+        relayoutReview(width: width)
 
         resultActionBar.isHidden = actionH == 0
         resultActionBar.frame = NSRect(x: side, y: actionY, width: contentWidth, height: actionH)
@@ -2158,13 +2160,42 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         cardModelHeight = resultPanel.frame.height
     }
 
+    /// Re-fit notes rows to the current card width (user resize).
+    private func relayoutNotesRows(width: CGFloat) {
+        let rowW = width - 16
+        for (i, row) in cardNoteRowViews.enumerated() {
+            row.frame.size.width = rowW
+            for case let label as NSTextField in row.subviews {
+                label.frame.size.width = rowW - 84
+            }
+        }
+        if let doc = cardNotesClip.documentView {
+            doc.frame.size.width = rowW + 8
+        }
+    }
+
+    /// Re-fit the review card's fixed chrome to the current card width.
+    private func relayoutReview(width: CGFloat) {
+        reviewWordLabel.frame = NSRect(x: 10, y: 120, width: width - 20, height: 28)
+        reviewAnswerLabel.frame = NSRect(x: 20, y: 88, width: width - 40, height: 18)
+        reviewRevealButton.frame.origin.x = width / 2 - 40
+        for (index, grade) in reviewGradeButtons.enumerated() {
+            grade.frame.origin.x = 20 + CGFloat(index) * 98
+        }
+        reviewEmptyLabel.frame = NSRect(x: 10, y: 90, width: width - 20, height: 18)
+    }
+
     private func placeResultCard() {
         let point = NSEvent.mouseLocation
         var origin = NSPoint(x: point.x + 16, y: point.y - 40)
         if let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main {
             let frame = screen.visibleFrame
             origin.x = min(max(origin.x, frame.minX + 8), frame.maxX - (cardUserWidth ?? resultCardWidth) - 8)
-            origin.y = min(max(origin.y, frame.minY + 8), frame.maxY - 300 - 8)
+            // Guarantee vertical room below the card (~7 note rows + chrome).
+            // A low cursor used to starve maxTotal and the notes list showed
+            // a single squeezed row.
+            let room = min(560, frame.height - 16)
+            origin.y = min(max(origin.y, frame.minY + room), frame.maxY - 300 - 8)
         }
         programmaticFrame = true
         resultPanel.setFrameOrigin(origin)
