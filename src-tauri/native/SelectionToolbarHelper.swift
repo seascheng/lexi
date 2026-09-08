@@ -1679,6 +1679,15 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         rebuildRunTabs()
         renderActiveRun()
         layoutResultCard()
+        // Translate page = the input is the point: hand it first responder
+        // (webview parity — the AiForm autofocused). Without this, a table
+        // that was first responder on the Notes tab leaves the window with
+        // no text target and every keystroke beeps.
+        if id == "translate", !cardRuns.isEmpty || true {
+            DispatchQueue.main.async {
+                self.inputTextView.window?.makeFirstResponder(self.inputTextView)
+            }
+        }
         guard notify else { return }
         if id == "notes" {
             postAction(action: "panel-notes", text: "-")
