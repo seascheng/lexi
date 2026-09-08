@@ -1523,7 +1523,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         notesTableView.dataSource = self
         notesTableView.delegate = self
         notesTableView.target = self
-        notesTableView.doubleAction = #selector(notesTableClicked(_:))
+        notesTableView.doubleAction = #selector(notesDoubleClicked(_:))
         notesTableView.action = #selector(notesTableClicked(_:))
         notesTableView.sizeLastColumnToFit()
         NotificationCenter.default.addObserver(
@@ -1739,6 +1739,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     /// Mouse click on a row: select it (selectionDidChange copies the
     /// content) and arm the card for Enter. Injection happens on Enter only.
+    @objc private func notesDoubleClicked(_ sender: NSTableView) {
+        let row = sender.clickedRow
+        guard row >= 0, row < cardNotesItems.count else { return }
+        if let cell = sender.view(atColumn: 0, row: row, makeIfNecessary: false) as? NoteRowCell {
+            cell.beginRenaming()
+        }
+    }
+
     @objc private func notesTableClicked(_ sender: NSTableView) {
         FileLog.write("SEL clicked row=\(sender.clickedRow)")
         postAction(action: "card-key", text: "1")
@@ -1753,6 +1761,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func noteDeleteClickedId(_ id: Int64) {
         postAction(action: "note-delete", text: String(id))
+    }
+
+    private func noteRenamed(id: Int64, name: String) {
+        let payload: [String: Any] = ["id": id, "name": name]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let body = String(data: data, encoding: .utf8) else { return }
+        postAction(action: "note-rename", text: body)
     }
 
     @objc private func noteDeleteClicked(_ sender: NSButton) {
@@ -2838,18 +2853,33 @@ private struct CardActionsPayload: Decodable {
 /// One notes-table row (view-based NSTableView cell). The system provides
 /// selection (accent capsule), row height, scrolling, and width tracking;
 /// this cell only lays out its subviews and retints on selection/hover.
-private final class NoteRowCell: NSTableCellView {
+private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     let iconView = NSImageView(frame: NSRect(x: 10, y: 23, width: 18, height: 18))
     let titleLabel = NSTextField(labelWithString: "")
     let contentLabel = NSTextField(labelWithString: "")
+    /// Inline rename editor: hidden until a double-click swaps it in.
+    let titleEditor = NSTextField()
     var deleteButton: NSButton?
     private var onDelete: ((Int64) -> Void)?
+    private var onRename: ((Int64, String) -> Void)?
+    private var noteId: Int64?
+    private var renameCancelled = false
+    private var titleBeforeRename = ""
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         addSubview(iconView)
         addSubview(titleLabel)
         addSubview(contentLabel)
+
+        titleEditor.isEditable = true
+        titleEditor.isBordered = true
+        titleEditor.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleEditor.lineBreakMode = .byTruncatingTail
+        titleEditor.cell?.wraps = false
+        titleEditor.isHidden = true
+        titleEditor.delegate = self
+        addSubview(titleEditor)
     }
 
     required init?(coder: NSCoder) { fatalError("not supported") }
@@ -2884,12 +2914,18 @@ private final class NoteRowCell: NSTableCellView {
     }
 
     func configure(note: CardNotesPayload.Note, dark: Bool,
-                   onDelete: ((Int64) -> Void)?) {
+                   onDelete: ((Int64) -> Void)?,
+                   onRename: ((Int64, String) -> Void)? = nil) {
         iconView.image = lucideImage(for: "file-text", title: note.name)
         iconView.imageScaling = .scaleProportionallyDown
 
+        noteId = note.id
+        self.onRename = onRename
         let titleText = note.name.isEmpty ? String(note.content.prefix(40)) : note.name
         titleLabel.stringValue = titleText
+        if titleEditor.isHidden {
+            titleEditor.stringValue = titleText
+        }
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.maximumNumberOfLines = 1
@@ -2932,10 +2968,53 @@ private final class NoteRowCell: NSTableCellView {
         }
     }
 
+    /// Double-click → the title becomes an input; Enter or losing focus
+    /// commits, Esc cancels.
+    func beginRenaming() {
+        guard noteId != nil else { return }
+        titleBeforeRename = titleLabel.stringValue
+        renameCancelled = false
+        titleEditor.stringValue = titleBeforeRename
+        titleEditor.frame = titleLabel.frame
+        titleLabel.isHidden = true
+        titleEditor.isHidden = false
+        window?.makeFirstResponder(titleEditor)
+        titleEditor.currentEditor()?.selectAll(nil)
+    }
+
+    private func endRenaming() {
+        titleEditor.isHidden = true
+        titleLabel.isHidden = false
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard obj.object as? NSTextField === titleEditor else { return }
+        let committed = !renameCancelled
+        endRenaming()
+        guard committed, let id = noteId else { return }
+        let newValue = titleEditor.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !newValue.isEmpty, newValue != titleBeforeRename {
+            onRename?(id, newValue)
+        } else {
+            titleEditor.stringValue = titleBeforeRename
+        }
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === titleEditor else { return false }
+        if commandSelector == NSSelectorFromString("cancelOperation:") {
+            renameCancelled = true
+            window?.makeFirstResponder(nil)
+            return true
+        }
+        return false
+    }
+
     override func layout() {
         super.layout()
         let w = bounds.width
         titleLabel.frame = NSRect(x: 36, y: 38, width: w - 70, height: 18)
+        titleEditor.frame = titleLabel.frame
         contentLabel.frame = NSRect(x: 36, y: 6, width: w - 70, height: 30)
         iconView.frame = NSRect(x: 10, y: 23, width: 18, height: 18)
         deleteButton?.frame = NSRect(x: w - 28, y: 24, width: 20, height: 16)
@@ -3454,9 +3533,13 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
         ) as? NoteRowCell ?? NoteRowCell(frame: .zero)
         cell.identifier = NSUserInterfaceItemIdentifier("NoteRow")
         let note = cardNotesItems[row]
-        cell.configure(note: note, dark: theme == .dark) { [weak self] id in
-            self?.noteDeleteClickedId(id)
-        }
+        cell.configure(note: note, dark: theme == .dark,
+                       onDelete: { [weak self] id in
+                           self?.noteDeleteClickedId(id)
+                       },
+                       onRename: { [weak self] id, name in
+                           self?.noteRenamed(id: id, name: name)
+                       })
         cell.themeColors = cardTheme
         return cell
     }

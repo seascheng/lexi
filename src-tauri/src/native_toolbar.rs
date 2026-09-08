@@ -2817,6 +2817,24 @@ fn dispatch_toolbar_action(
         });
         return Ok(());
     }
+    if action.action == "note-rename" {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&action.text) {
+            if let (Some(id), Some(name)) = (value["id"].as_i64(), value["name"].as_str()) {
+                let trimmed = name.trim();
+                if !trimmed.is_empty() {
+                    let _ = sqlite_query_json(
+                        app,
+                        &format!(
+                            "UPDATE notes SET name = '{}' WHERE id = {id};",
+                            trimmed.replace('\'', "''")
+                        ),
+                    );
+                    let _ = app.emit("lexi://notes-changed", ());
+                }
+            }
+        }
+        return send_card_notes(app);
+    }
     if action.action == "note-delete" {
         if let Ok(id) = action.text.trim().parse::<i64>() {
             let _ = sqlite_query_json(app, &format!("DELETE FROM notes WHERE id = {id};"));
