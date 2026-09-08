@@ -733,7 +733,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var resultCopyButton: NSButton!
     private var resultSaveButton: NSButton!
     private var inputContainer: NSView!
-    private var inputTextView: NSTextView!
+    private var inputTextView: CardInputTextView!
     private var inputPlaceholder: NSTextField!
     private var runsSeparator: NSView!
     private var inputButtonsRow: NSView!
@@ -1372,6 +1372,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         inputTextView.isAutomaticQuoteSubstitutionEnabled = false
         inputTextView.isAutomaticDashSubstitutionEnabled = false
         inputTextView.delegate = self
+        inputTextView.onBecameFocus = { [weak self] in
+            self?.postAction(action: "card-key", text: "1")
+        }
         inputTextView.textContainer?.lineFragmentPadding = 0
         inputContainer.addSubview(inputTextView)
 
@@ -1601,8 +1604,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     /// Mouse click on a row: select it (selectionDidChange copies the
-    /// content). Injection happens on Enter only.
-    @objc private func notesTableClicked(_ sender: NSTableView) {}
+    /// content) and arm the card for Enter. Injection happens on Enter only.
+    @objc private func notesTableClicked(_ sender: NSTableView) {
+        postAction(action: "card-key", text: "1")
+    }
 
     @objc private func noteInsertClicked(_ sender: NSButton) {
         guard let content = sender.identifier?.rawValue, !content.isEmpty else { return }
@@ -3060,7 +3065,15 @@ private final class RunChipView: NSView {
 
 /// NSTextView subclass is not needed for behavior — the delegate handles
 /// Enter/Esc — but a distinct type keeps the firstResponder check readable.
-private final class CardInputTextView: NSTextView {}
+private final class CardInputTextView: NSTextView {
+    var onBecameFocus: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { onBecameFocus?() }
+        return ok
+    }
+}
 
 /// Lightweight Markdown → NSAttributedString for the result card.
 /// Supports headings, lists, quotes, fenced code, bold/italic/inline code —

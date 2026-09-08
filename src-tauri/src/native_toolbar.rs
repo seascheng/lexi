@@ -1893,6 +1893,13 @@ fn handle_system_event(
                 return CallbackResult::Drop;
             }
             if CARD_NOTES_MODE.load(std::sync::atomic::Ordering::Relaxed) {
+                if keycode == 36 || keycode == 52 {
+                    log_native(&format!(
+                        "notes Enter key: focus={} snapshot={}",
+                        CARD_NOTES_FOCUS.load(std::sync::atomic::Ordering::Relaxed),
+                        NOTES_SNAPSHOT.lock().map(|c| c.len()).unwrap_or(0)
+                    ));
+                }
                 match keycode {
                     125 | 126 => {
                         let delta = if keycode == 125 { 1 } else { -1 };
@@ -3146,7 +3153,9 @@ fn dispatch_toolbar_action(
     }
 
     if action.action == "card-key" {
-        CARD_NOTES_FOCUS.store(action.text.trim() == "1", std::sync::atomic::Ordering::Relaxed);
+        let focused = action.text.trim() == "1";
+        CARD_NOTES_FOCUS.store(focused, std::sync::atomic::Ordering::Relaxed);
+        log_native(&format!("card-key focus={focused}"));
         return Ok(());
     }
     if action.action == "panel-notes" {
