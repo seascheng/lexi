@@ -1,6 +1,7 @@
 import { emit, listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Search, Trash2 } from "lucide-react";
+import { CornerDownLeft, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NoteEntry } from "../../types";
 import { deleteNote, listNotes } from "../../lib/database";
@@ -40,6 +41,14 @@ export function NotesPanel({ isPinned }: PanelProps) {
 
   useEffect(() => { notesRef.current = filteredNotes; }, [filteredNotes]);
   useEffect(() => { selectedRef.current = selectedIdx; }, [selectedIdx]);
+
+  // Keep the backend's pending-note in sync so the tap's Enter can insert the
+  // highlighted note without relying on the throttled webview key path.
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const note = selectedIdx >= 0 ? filteredNotes[selectedIdx] : undefined;
+    void invoke("set_pending_note", { text: note?.content ?? null });
+  }, [filteredNotes, selectedIdx]);
   useEffect(() => { pinnedRef.current = isPinned ?? true; }, [isPinned]);
 
   // Reset selection when filter changes
@@ -58,6 +67,24 @@ export function NotesPanel({ isPinned }: PanelProps) {
     await copyText(note.content);
     if (!pinnedRef.current && isTauriRuntime()) {
       await getCurrentWindow().hide();
+      await invoke("set_popup_up", { visible: false });
+    }
+  }, []);
+
+  /// Hapigo-style: type the note straight into the input the popup was
+  /// summoned from. The backend reactivates that app (the caret survives as
+  /// first responder) and inserts at the caret.
+  const insertNoteContent = useCallback(async (note: NoteEntry) => {
+    if (!isTauriRuntime()) return;
+    try {
+      await invoke("insert_at_focus", { text: note.content });
+      if (!pinnedRef.current) {
+        await getCurrentWindow().hide();
+        await invoke("set_popup_up", { visible: false });
+      }
+    } catch (error) {
+      // Panel stays up on failure — the user can still copy (⌘C) by hand.
+      console.warn("insert_at_focus failed", error);
     }
   }, []);
 
@@ -66,6 +93,12 @@ export function NotesPanel({ isPinned }: PanelProps) {
     if (!note) return;
     await copyNoteContent(note);
   }, [copyNoteContent, selectedNote]);
+
+  const insertSelectedNote = useCallback(async () => {
+    const note = selectedNote();
+    if (!note) return;
+    await insertNoteContent(note);
+  }, [insertNoteContent, selectedNote]);
 
   useEffect(() => {
     void loadNotes();
@@ -99,7 +132,11 @@ export function NotesPanel({ isPinned }: PanelProps) {
           selectedRef.current = next;
           return next;
         });
-      } else if (e.key === "Enter" || e.key === "Copy" || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c")) {
+      } else if (e.key === "Enter") {
+        if (!selectedNote()) return;
+        e.preventDefault();
+        void insertSelectedNote();
+      } else if (e.key === "Copy" || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c")) {
         if (!selectedNote()) return;
         e.preventDefault();
         void copySelectedNote();
@@ -108,7 +145,7 @@ export function NotesPanel({ isPinned }: PanelProps) {
 
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [copySelectedNote, selectedNote]);
+  }, [insertSelectedNote, copySelectedNote, selectedNote]);
 
   useEffect(() => {
     function onCopy(event: ClipboardEvent) {
@@ -145,7 +182,7 @@ export function NotesPanel({ isPinned }: PanelProps) {
 
   return (
     <div className="flex min-h-0 flex-col gap-1.5 p-2">
-      <div className="flex shrink-0 items-center rounded-lg border border-strong/10 bg-input p-1">
+      <div className="flex shrink-0 items-center rounded-lg border border-border bg-surface/60 p-1 transition-colors focus-within:border-accent/60">
         <Search size={13} className="ml-1.5 shrink-0 text-muted/60" />
         <input
           ref={searchRef}
@@ -173,7 +210,7 @@ export function NotesPanel({ isPinned }: PanelProps) {
               const note = selectedIdx >= 0 ? filteredNotes[selectedIdx] : undefined;
               if (note) {
                 e.preventDefault();
-                void copyNoteContent(note);
+                void insertNoteContent(note);
               }
             }
           }}
@@ -198,7 +235,7 @@ export function NotesPanel({ isPinned }: PanelProps) {
                 setSelectedIdx(index);
                 selectedRef.current = index;
               }}
-              onDoubleClick={() => void copyNoteContent(note)}
+              onDoubleClick={() => void insertNoteContent(note)}
               role="button"
               tabIndex={0}
             >
@@ -208,6 +245,13 @@ export function NotesPanel({ isPinned }: PanelProps) {
                 )}
                 <span className="text-sm">{note.content}</span>
               </div>
+              <Button
+                aria-label="Insert note at cursor"
+                onClick={(e) => { e.stopPropagation(); void insertNoteContent(note); }}
+                variant="ghost"
+                icon={<CornerDownLeft size={13} />}
+                className="h-6 min-h-6 w-6 shrink-0 px-0 text-muted hover:text-strong"
+              />
               <Button
                 aria-label="Delete note"
                 onClick={(e) => { e.stopPropagation(); void removeNote(note.id); }}

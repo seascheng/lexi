@@ -41,33 +41,34 @@ echo "Generating icons from logo.svg..."
 rsvg-convert -w 512 -h 512 "$SVG_FILE" -o "$ICONS_DIR/icon.png"
 echo "  [OK] src-tauri/icons/icon.png  (512x512, full color)"
 
-# 2. macOS tray icon — 32x32, monochrome black on transparent
-#    macOS template mode uses this as a silhouette and auto-adapts to light/dark menu bar.
-rsvg-convert -w 32 -h 32 "$SVG_FILE" -o "$ICONS_DIR/tray_icon_template.png"
+# 2. macOS tray icon — supersample 256, LANCZOS downscale to 32, smooth alpha.
+#    No hard threshold: binary alpha was causing visible jaggies in the menu bar.
+#    macOS template mode tints the shape; only the alpha channel matters.
+rsvg-convert -w 256 -h 256 "$SVG_FILE" -o "$ICONS_DIR/.tray_256.png"
 
-python - "$ICONS_DIR/tray_icon_template.png" << 'PYEOF'
+python - "$ICONS_DIR/.tray_256.png" "$ICONS_DIR/tray_icon_template.png" << 'PYEOF'
 import sys
 from PIL import Image
 
-path = sys.argv[1]
-img = Image.open(path).convert('RGBA')
-pixels = img.load()
+src, dst = sys.argv[1], sys.argv[2]
+img = Image.open(src).convert('RGBA').resize((32, 32), Image.LANCZOS)
 
-for y in range(img.height):
-    for x in range(img.width):
-        r, g, b, a = pixels[x, y]
-        lum = 0.299 * r + 0.587 * g + 0.114 * b
-        # "Ink coverage" = opacity × darkness.
-        # High ink → part of the design → opaque black.
-        # Low ink  → background/gap → transparent.
-        ink = (a / 255.0) * (1.0 - lum / 255.0)
-        if ink > 0.25:
-            pixels[x, y] = (0, 0, 0, 255)
-        else:
-            pixels[x, y] = (0, 0, 0, 0)
-
-img.save(path)
+# ink coverage = opacity x darkness, then normalized so the darkest ink hits full alpha
+# (LANCZOS on non-premultiplied RGBA bleeds edge RGB toward black, so min-luminance
+# normalization is unreliable; normalize by max coverage instead.)
+cov = [
+    (a / 255.0) * (1 - (0.299 * r + 0.587 * g + 0.114 * b) / 255.0)
+    for r, g, b, a in img.get_flattened_data()
+]
+peak = max(cov)
+out = Image.new('RGBA', (32, 32))
+out.putdata([
+    (0, 0, 0, max(0, min(255, round(c / peak * 255))))
+    for c in cov
+])
+out.save(dst)
 PYEOF
+rm -f "$ICONS_DIR/.tray_256.png"
 
 echo "  [OK] src-tauri/icons/tray_icon_template.png  (32x32, monochrome template)"
 

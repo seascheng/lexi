@@ -1,6 +1,8 @@
+mod ax;
 mod commands;
 mod cursor;
 mod native_toolbar;
+mod text_injection;
 
 use commands::ai::{run_ai_prompt, run_ai_prompt_stream};
 use commands::speech::speak_text;
@@ -9,9 +11,12 @@ use commands::window::{set_popup_height, start_popup_resize};
 use cursor::cursor_position;
 use native_toolbar::{
     configure_native_toolbar, handoff_to_app_cmd, hide_native_toolbar, popup_position,
-    set_excluded_toolbar_apps, set_handoff_target, set_native_toolbar_actions, set_native_toolbar_enabled,
-    set_native_toolbar_theme, set_popup_shortcut,
+    set_excluded_toolbar_apps, set_handoff_target, set_native_toolbar_actions,
+    set_native_toolbar_enabled, set_native_toolbar_theme, set_popup_shortcut,
 };
+use native_toolbar::{set_popup_up, set_pending_note};
+use text_injection::insert_at_focus;
+
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, WindowEvent};
@@ -44,6 +49,9 @@ pub fn run() {
             set_native_toolbar_theme,
             set_popup_shortcut,
             speak_text,
+            set_popup_up,
+            set_pending_note,
+            insert_at_focus,
             set_popup_height,
             start_popup_resize
         ])
@@ -143,9 +151,8 @@ fn migrations() -> Vec<Migration> {
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Lexi", true, None::<&str>)?;
-    let open_panel = MenuItem::with_id(app, "open_panel", "Open Panel", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Lexi", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &open_panel, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &quit])?;
 
     TrayIconBuilder::new()
         .icon(tauri::image::Image::from_path(
@@ -157,7 +164,6 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
-            "open_panel" => show_popup_from_tray(app),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -171,17 +177,4 @@ fn show_main_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
-}
-
-fn show_popup_from_tray(app: &tauri::AppHandle) {
-    let Some(window) = app.get_webview_window("popup_card") else {
-        return;
-    };
-    if window.is_visible().unwrap_or(false) {
-        let _ = window.set_focus();
-        return;
-    }
-    let _ = window.center();
-    let _ = window.show();
-    let _ = window.set_focus();
 }

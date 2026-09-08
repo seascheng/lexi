@@ -312,6 +312,7 @@ export function TranslationWindow() {
 
     const timeoutId = window.setTimeout(() => {
       getCurrentWindow().hide();
+      void invoke("set_popup_up", { visible: false });
     }, 5000);
     return () => window.clearTimeout(timeoutId);
   }, [latestRun, isPinned]);
@@ -328,7 +329,7 @@ export function TranslationWindow() {
       if (resizeTimer) window.clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(() => {
         void resizePopupToContent(frame, page, content);
-      }, 60);
+      }, 140);
     };
     const observer = new ResizeObserver(scheduleResize);
 
@@ -345,7 +346,10 @@ export function TranslationWindow() {
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") getCurrentWindow().hide();
+      if (event.key === "Escape") {
+        getCurrentWindow().hide();
+        void invoke("set_popup_up", { visible: false });
+      }
     }
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
@@ -422,8 +426,9 @@ export function TranslationWindow() {
     });
 
     try {
+      // Appearance is applied at init and on settings-changed; re-applying here
+      // swaps window materials on a visible window and causes a visible flash.
       const settings = await loadSettings();
-      await applyAppearanceSettings(settings);
 
       await runAiFeatureStream(text, feature, settings, {
         onChunk: (accumulated) => {
@@ -558,6 +563,7 @@ export function TranslationWindow() {
 
   async function hidePopup() {
     await getCurrentWindow().hide();
+    await invoke("set_popup_up", { visible: false });
   }
 
   async function runFeatureFromInput(feature: AiFeature) {
@@ -669,7 +675,8 @@ async function resizePopupToContent(frame: HTMLElement, page: HTMLElement, conte
   const pageHeight = naturalContentHeight(page);
   const contentOverflow = Math.max(0, naturalContentHeight(content) - content.clientHeight);
   const targetHeight = clamp(Math.ceil(pageTop + pageHeight + contentOverflow + 18), 420, 900);
-  if (Math.abs(window.innerHeight - targetHeight) < 8) return;
+  // Larger dead-zone: growing in many small steps while streaming reads as flicker.
+  if (Math.abs(window.innerHeight - targetHeight) < 24) return;
 
   await invoke("set_popup_height", { height: targetHeight }).catch((error) => {
     console.warn("Failed to auto-size popup", error);
@@ -788,13 +795,13 @@ function RunTabs({
 }) {
   return (
     <div className="flex items-center gap-0.5 border-b border-strong/10 px-2 pt-1">
-      <div className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 overflow-x-auto">
         {runs.map((run) => (
           <button
-            className={`group flex shrink-0 items-center gap-1 px-2 py-[3px] text-[11px] transition ${
+            className={`group flex shrink-0 items-center gap-1 rounded-md px-2 py-[3px] text-[12px] transition-colors ${
               run.id === activeRunId
-                ? "text-strong border-b-[1.5px] border-strong/25"
-                : "text-muted hover:text-strong"
+                ? "bg-surfaceHover/80 text-strong"
+                : "text-muted hover:bg-surfaceHover/40 hover:text-strong"
             }`}
             key={run.id}
             onClick={() => onSelectRun(run.id)}
@@ -802,18 +809,18 @@ function RunTabs({
             type="button"
           >
             <span className={run.status === "loading" ? "opacity-50" : ""}>
-              <FeatureIcon icon={run.icon ?? "wand"} size={10} />
+              <FeatureIcon icon={run.icon ?? "wand"} size={11} />
             </span>
-            <span className="max-w-[80px] truncate">{run.title}</span>
+            <span className="max-w-[90px] truncate">{run.title}</span>
             <span
               aria-label="Close result"
-              className="grid h-3 w-3 shrink-0 place-items-center rounded text-muted hover:text-strong"
+              className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded text-muted hover:bg-surfaceHover hover:text-strong"
               onClick={(event) => { event.preventDefault(); event.stopPropagation(); onDismissRun(run.id); }}
               role="button"
               tabIndex={0}
               title="Close result"
             >
-              <X size={9} />
+              <X size={10} />
             </span>
           </button>
         ))}
@@ -904,7 +911,7 @@ function AiForm({
 
   return (
     <form className="px-2 pt-1" onSubmit={onSubmit}>
-      <div className={`flex gap-x-1 gap-y-1 rounded-lg border border-strong/10 bg-input p-1 ${isMultiline ? "flex-col" : "items-center"}`}>
+      <div className={`flex gap-x-1 gap-y-1 rounded-lg border border-border bg-surface/60 p-1 transition-colors focus-within:border-accent/60 ${isMultiline ? "flex-col" : "items-center"}`}>
         <textarea
           className={`max-h-[140px] min-h-[24px] min-w-0 resize-none border-0 bg-transparent px-1.5 py-1 text-sm leading-[1.3] text-strong outline-none placeholder:text-muted transition-[height] duration-150 ease-out ${isMultiline ? "" : "flex-1"}`}
           onChange={(event) => { onInputChange(event.target.value); resizeTextarea(event.currentTarget); }}
@@ -949,7 +956,7 @@ function AiFormActionButton({
     return (
       <button
         aria-label={`${item.tool.name} input text`}
-        className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-md border border-border bg-surface text-content hover:bg-surfaceHover hover:text-strong disabled:opacity-40"
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-content transition-colors hover:bg-surfaceHover hover:text-strong disabled:opacity-40"
         disabled={!inputText.trim()}
         onClick={() => onToolAction(item.tool.id)}
         title={`${item.tool.name} input text`}
@@ -963,7 +970,7 @@ function AiFormActionButton({
   return (
     <button
       aria-label={`${item.feature.name} input text`}
-      className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-md border border-border bg-surface text-content hover:bg-surfaceHover hover:text-strong disabled:opacity-40"
+      className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-content transition-colors hover:bg-surfaceHover hover:text-strong disabled:opacity-40"
       disabled={isLoading || !inputText.trim()}
       onClick={() => onRunFeatureInput(item.feature)}
       title={`${item.feature.name} input text`}
@@ -976,9 +983,12 @@ function AiFormActionButton({
 
 function IdleState({ hasActions }: { hasActions: boolean }) {
   return (
-    <p className="text-sm text-muted">
-      {hasActions ? "Enter text, then choose an action." : "No enabled AI actions."}
-    </p>
+    <div className="flex flex-col items-center gap-1.5 py-8 text-center">
+      <p className="text-sm text-muted">
+        {hasActions ? "Enter text, then choose an action." : "No enabled AI actions."}
+      </p>
+      {hasActions ? <p className="text-xs text-muted/70">⏎ Run default · Tab Switch panel</p> : null}
+    </div>
   );
 }
 
@@ -992,42 +1002,44 @@ function WorkspaceRunCard({
   onSave: () => void;
 }) {
   return (
-    <article className="grid min-w-0 gap-1.5 px-3 py-2">
+    <article className="mx-2.5 mb-2.5 mt-1 min-w-0 rounded-lg border border-border/60 bg-surface/45 p-3">
       {run.status === "loading" ? <LoadingRun title={run.title} /> : null}
       {run.status === "streaming" && run.streamingText != null ? (
-        <div className="leading-[1.65] tracking-[-0.01em] text-content">
+        <div className="min-w-0 leading-[1.65] tracking-[-0.01em] text-content">
           <MarkdownRenderer content={run.streamingText} />
         </div>
       ) : null}
       {run.status === "error" ? <ErrorRun title={run.title} message={run.message ?? "Action failed."} /> : null}
       {run.status === "ready" && run.result ? (
         <>
-          <div className="leading-[1.65] tracking-[-0.01em] text-content">
+          <div className="min-w-0 leading-[1.65] tracking-[-0.01em] text-content">
             <MarkdownRenderer content={run.result.outputText} />
           </div>
-          <div className="flex items-center justify-center gap-2">
+          <div className="mt-2.5 flex items-center justify-between gap-2">
             {run.learningEntry ? (
               <EntryTypeTags disabled={run.saved} entryType={run.learningEntry.entry_type ?? "phrase"} onEntryTypeChange={onEntryTypeChange} />
-            ) : null}
-            <button
-              aria-label="Copy result"
-              className="grid h-5 w-5 place-items-center rounded text-muted hover:bg-surfaceHover hover:text-strong transition-colors"
-              onClick={() => copyText(run.result?.outputText ?? "")}
-              title="Copy result"
-              type="button"
-            >
-              <Copy size={12} />
-            </button>
-            {run.learningEntry ? (
+            ) : <span />}
+            <div className="flex items-center gap-1">
               <button
-                disabled={run.saved}
-                className="rounded-md px-3 py-1 text-[11px] font-medium text-white bg-accent hover:bg-accentHover disabled:opacity-40 transition-colors"
-                onClick={onSave}
+                aria-label="Copy result"
+                className="grid h-6 w-6 place-items-center rounded-md text-muted transition-colors hover:bg-surfaceHover hover:text-strong"
+                onClick={() => copyText(run.result?.outputText ?? "")}
+                title="Copy result"
                 type="button"
               >
-                {run.saved ? "Saved" : "Save"}
+                <Copy size={13} />
               </button>
-            ) : null}
+              {run.learningEntry ? (
+                <button
+                  disabled={run.saved}
+                  className="h-6 rounded-md bg-accent px-2.5 text-xs font-medium text-accentForeground transition-colors hover:bg-accentHover disabled:opacity-40"
+                  onClick={onSave}
+                  type="button"
+                >
+                  {run.saved ? "Saved" : "Save"}
+                </button>
+              ) : null}
+            </div>
           </div>
         </>
       ) : null}

@@ -1,5 +1,6 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { BookOpen, Brain, NotebookPen, PanelLeft, PanelLeftClose, Settings, Sparkles } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppSettings, WordEntry } from "./types";
@@ -49,12 +50,24 @@ function MainWindow() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [words, setWords] = useState<WordEntry[]>([]);
   const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS);
+  const didShowWindowRef = useRef(false);
 
   useEffect(() => {
     if (!settings) return;
     settingsRef.current = settings;
-    void applyAppearanceSettings(settings).catch((error) => {
+    void applyAppearanceSettings(settings).then(() => {
+      // Show after the theme has been applied and the first frame painted,
+      // so the window never flashes an empty shell (visible:false in tauri.conf.json).
+      if (isTauriRuntime() && !didShowWindowRef.current) {
+        didShowWindowRef.current = true;
+        void revealMainWindow();
+      }
+    }).catch((error) => {
       console.error("Failed to apply appearance settings", error);
+      if (isTauriRuntime() && !didShowWindowRef.current) {
+        didShowWindowRef.current = true;
+        void revealMainWindow();
+      }
     });
     if (isTauriRuntime()) {
       void invoke("set_native_toolbar_theme", { theme: settings.theme }).catch(
@@ -187,13 +200,25 @@ function MainWindow() {
         </aside>
 
         <section className="app-content flex flex-col overflow-hidden md:h-screen">
-          <div className="min-h-0 flex-1 overflow-hidden p-4 md:p-5">
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-5">
             {pageContent}
           </div>
         </section>
       </div>
     </main>
   );
+}
+
+async function revealMainWindow() {
+  const win = getCurrentWindow();
+  // Wait for the activation-policy change (menu-bar-only) to settle:
+  // switching to Accessory orders out windows shown before the flip.
+  await new Promise((resolve) => window.setTimeout(resolve, 120));
+  await win.show();
+  // Safety net: if the policy flip landed after show(), re-show once.
+  window.setTimeout(() => {
+    void win.show().catch(() => {});
+  }, 350);
 }
 
 function returnEffect(cleanup: Promise<() => void>) {

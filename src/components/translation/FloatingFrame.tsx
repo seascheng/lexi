@@ -1,7 +1,6 @@
 import type { MouseEvent, ReactNode } from "react";
 import { Pin, PinOff, X } from "lucide-react";
 import { cn } from "../../lib/cn";
-import { Button } from "../ui/Button";
 import { FeatureIcon } from "../../lib/featureIcons";
 import type { Panel } from "../../types";
 
@@ -55,6 +54,8 @@ export function FloatingFrame({
     });
   }
 
+  const enabledPanels = panels?.filter((panel) => panel.enabled) ?? [];
+
   return (
     <section
       className={cn(
@@ -62,12 +63,60 @@ export function FloatingFrame({
         className,
       )}
     >
-      {/* Drag region: covers header gaps, buttons sit on top at same z-level */}
-      <div
-        aria-hidden="true"
-        className="absolute left-10 right-10 top-2 z-20 h-7 cursor-grab active:cursor-grabbing"
+      {/* Header: close | panel tabs | pin, draggable in the gaps */}
+      <header
+        className="relative z-20 flex h-9 shrink-0 items-center gap-1 border-b border-border/40 px-1.5"
         data-tauri-drag-region
-      />
+      >
+        {onClose ? (
+          <button
+            aria-label="Hide popup"
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-surfaceHover hover:text-strong"
+            onClick={() => void onClose()}
+            title="Hide popup"
+            type="button"
+          >
+            <X size={14} />
+          </button>
+        ) : null}
+        <div className="h-full min-w-2 flex-1" data-tauri-drag-region />
+        {enabledPanels.length > 1 ? (
+          <div className="flex shrink-0 items-center gap-0.5 rounded-md bg-surface/70 p-0.5">
+            {enabledPanels.map((panel) => (
+              <button
+                key={panel.id}
+                onClick={() => onPanelChange?.(panel.id)}
+                className={cn(
+                  "flex items-center gap-1 rounded px-2.5 py-1 text-xs font-medium transition-colors",
+                  activePanelId === panel.id
+                    ? "bg-accent text-accentForeground"
+                    : "text-muted hover:text-strong",
+                )}
+              >
+                <FeatureIcon icon={panel.icon} size={13} />
+                {panel.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <div className="h-full min-w-2 flex-1" data-tauri-drag-region />
+        {onTogglePin ? (
+          <button
+            aria-label={isPinned ? "Unpin popup" : "Pin popup"}
+            className={cn(
+              "grid h-6 w-6 shrink-0 place-items-center rounded-md transition-colors hover:bg-surfaceHover",
+              isPinned ? "text-strong" : "text-muted hover:text-strong",
+            )}
+            onClick={onTogglePin}
+            title={isPinned ? "Unpin popup" : "Pin popup"}
+            type="button"
+          >
+            {isPinned ? <Pin size={14} /> : <PinOff size={14} />}
+          </button>
+        ) : null}
+      </header>
+
+      {/* Resize handles */}
       {onStartResize ? (
         <>
           <div
@@ -112,53 +161,9 @@ export function FloatingFrame({
           />
         </>
       ) : null}
-      {/* Close button */}
-      {onClose ? (
-        <Button
-          aria-label="Hide popup"
-          className="absolute left-2 top-2 z-20 h-[22px] min-h-0 w-[22px] rounded-full bg-transparent p-0 text-muted hover:bg-surfaceHover hover:text-strong"
-          icon={<X size={13} />}
-          onClick={() => void onClose()}
-          title="Hide popup"
-          type="button"
-          variant="ghost"
-        />
-      ) : null}
-      {/* Panel Tabs */}
-      {panels && panels.filter(p => p.enabled).length > 1 ? (
-        <div className="absolute left-1/2 top-2 z-20 -translate-x-1/2">
-          <div className="flex items-center gap-0.5 rounded-md bg-surface p-0.5">
-            {panels.filter(p => p.enabled).map((panel) => (
-              <button
-                key={panel.id}
-                onClick={() => onPanelChange?.(panel.id)}
-                className={cn(
-                  "flex items-center gap-1 rounded-[4px] px-3 py-[3px] text-xs font-medium transition-colors",
-                  activePanelId === panel.id
-                    ? "bg-accent text-accentForeground"
-                    : "text-muted hover:text-strong",
-                )}
-              >
-                <FeatureIcon icon={panel.icon} size={13} />
-                {panel.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      {/* Pin button */}
-      {onTogglePin ? (
-        <Button
-          aria-label={isPinned ? "Unpin popup" : "Pin popup"}
-          className="absolute right-2 top-2 z-20 h-[22px] min-h-0 w-[22px] rounded-full bg-transparent p-0 text-muted hover:bg-surface hover:text-strong"
-          icon={isPinned ? <Pin size={13} /> : <PinOff size={13} />}
-          onClick={onTogglePin}
-          title={isPinned ? "Unpin popup" : "Pin popup"}
-          variant="ghost"
-        />
-      ) : null}
+
       {/* Content */}
-      <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden pt-8">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden">
         {children}
       </div>
     </section>

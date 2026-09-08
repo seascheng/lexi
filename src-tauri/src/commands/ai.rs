@@ -219,6 +219,7 @@ pub async fn run_ai_prompt_stream(
     tauri::async_runtime::spawn(async move {
         if let Err(error) = stream_completion(&app_clone, &run_id_clone, &request).await {
             log_ai(&format!("run_id={run_id_clone} stream returned error: {error}"));
+            crate::native_toolbar::forward_card_event(&run_id_clone, None, true, Some(&error), None, false);
             let _ = app_clone.emit("lexi://ai-stream-chunk", StreamChunkEvent {
                 run_id: run_id_clone,
                 chunk: None,
@@ -274,24 +275,32 @@ async fn stream_completion(
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         log_ai(&format!("run_id={run_id} non-success {status}: {}", body.chars().take(300).collect::<String>()));
-        return Err(format!("AI API returned {status}: {body}"));
+        let msg = format!("AI API returned {status}: {body}");
+        crate::native_toolbar::forward_card_event(run_id, None, true, Some(&msg), None, false);
+        return Err(msg);
     }
     log_ai(&format!("run_id={run_id} response ok, streaming"));
 
     let is_translation_json = request.output_mode == "translation_json";
     let mut stream = response.bytes_stream();
-    let mut buffer = String::new();
+    // Byte-level buffer: TCP segments split multi-byte UTF-8 characters mid-
+    // sequence, and from_utf8_lossy on each network chunk replaced the torn
+    // bytes with U+FFFD (the reported mojibake). '\n' can never appear inside
+    // a multi-byte sequence, so split LINES on raw bytes and only decode
+    // complete lines.
+    let mut buffer: Vec<u8> = Vec::new();
     let mut accumulated = String::new();
     let mut pending_emit = String::new();
     let mut last_emit = Instant::now();
 
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|error| format!("Stream read error: {error}"))?;
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        buffer.extend_from_slice(&chunk);
 
-        while let Some(newline_pos) = buffer.find('\n') {
-            let line = buffer[..newline_pos].trim().to_string();
-            buffer = buffer[newline_pos + 1..].to_string();
+        while let Some(newline_pos) = buffer.iter().position(|&b| b == b'\n') {
+            let line_bytes: Vec<u8> = buffer[..newline_pos].to_vec();
+            buffer.drain(..=newline_pos);
+            let line = String::from_utf8_lossy(&line_bytes).trim().to_string();
 
             if !line.starts_with("data: ") {
                 continue;
@@ -302,7 +311,7 @@ async fn stream_completion(
                 continue;
             }
 
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&data) {
                 if let Some(content) = parsed["choices"][0]["delta"]["content"].as_str() {
                     accumulated.push_str(content);
 
@@ -310,6 +319,7 @@ async fn stream_completion(
                     if !is_translation_json {
                         pending_emit.push_str(content);
                         if last_emit.elapsed() >= CHUNK_EMIT_INTERVAL {
+                            crate::native_toolbar::forward_card_event(run_id, Some(&pending_emit.clone()), false, None, None, false);
                             let _ = app.emit("lexi://ai-stream-chunk", StreamChunkEvent {
                                 run_id: run_id.to_string(),
                                 chunk: Some(std::mem::take(&mut pending_emit)),
@@ -330,7 +340,7 @@ async fn stream_completion(
     ));
 
     // Process any remaining buffer
-    let remaining = buffer.trim();
+    let remaining = String::from_utf8_lossy(&buffer).trim().to_string();
     if remaining.starts_with("data: ") && &remaining[6..] != "[DONE]" {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&remaining[6..]) {
             if let Some(content) = parsed["choices"][0]["delta"]["content"].as_str() {
@@ -344,6 +354,7 @@ async fn stream_completion(
 
     // Flush any coalesced remainder before the terminal event
     if !is_translation_json && !pending_emit.is_empty() {
+        crate::native_toolbar::forward_card_event(run_id, Some(&pending_emit.clone()), false, None, None, false);
         let _ = app.emit("lexi://ai-stream-chunk", StreamChunkEvent {
             run_id: run_id.to_string(),
             chunk: Some(std::mem::take(&mut pending_emit)),
@@ -358,6 +369,36 @@ async fn stream_completion(
         let translation = parse_translation(&accumulated)
             .map_err(|error| format!("Could not parse translation JSON: {error}"))?;
         let formatted = format_translation(&translation);
+
+        // Native card + auto-save parity with the WebView flow: a single-word
+        // selection with auto-save enabled lands in `words` automatically,
+        // and the card's Save button reflects the persisted state.
+        let mut saved = false;
+        if crate::native_toolbar::card_auto_save_enabled()
+            && crate::native_toolbar::is_single_word(&request.text)
+        {
+            crate::native_toolbar::save_word_entry(
+                &request.text,
+                &translation.translation,
+                &translation.pos,
+                &translation.definition,
+                &translation.example,
+                "word",
+            );
+            saved = true;
+            if let Err(error) = app.emit("lexi://words-changed", ()) {
+                log_ai(&format!("run_id={run_id} words-changed emit failed: {error}"));
+            }
+        }
+        crate::native_toolbar::forward_card_event(
+            run_id,
+            Some(&formatted),
+            true,
+            None,
+            Some(&serde_json::to_string(&translation).unwrap_or_default()),
+            saved,
+        );
+
         let _ = app.emit("lexi://ai-stream-chunk", StreamChunkEvent {
             run_id: run_id.to_string(),
             chunk: Some(formatted),
@@ -367,6 +408,7 @@ async fn stream_completion(
         });
     } else {
         let cleaned = clean_model_text(&accumulated).to_string();
+        crate::native_toolbar::forward_card_event(run_id, Some(&cleaned), true, None, None, false);
         let _ = app.emit("lexi://ai-stream-chunk", StreamChunkEvent {
             run_id: run_id.to_string(),
             chunk: Some(cleaned),

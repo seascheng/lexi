@@ -99,25 +99,7 @@ body {
   color: rgb(var(--color-strong));
 }
 
-/* Decorative gradient layer — gives backdrop-filter something to blur */
-.app-shell::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(ellipse 900px 600px at 0% 0%, rgb(100 120 255 / 0.12), transparent 70%),
-    radial-gradient(ellipse 700px 700px at 100% 100%, rgb(168 85 247 / 0.09), transparent 70%),
-    radial-gradient(ellipse 500px 400px at 50% 50%, rgb(59 130 246 / 0.05), transparent 60%);
-  pointer-events: none;
-  z-index: 0;
-}
-
-:root[data-theme="light"] .app-shell::before {
-  background:
-    radial-gradient(ellipse 900px 600px at 0% 0%, rgb(59 130 246 / 0.1), transparent 70%),
-    radial-gradient(ellipse 700px 700px at 100% 100%, rgb(168 85 247 / 0.07), transparent 70%),
-    radial-gradient(ellipse 500px 400px at 50% 50%, rgb(14 165 233 / 0.04), transparent 60%);
-}
+/* Decorative gradient removed: subtle background tints live in .app-shell/.app-content glass layers */
 
 /* Main window sidebar glass */
 .app-sidebar {

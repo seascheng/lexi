@@ -1,5 +1,15 @@
 use crate::cursor::{cursor_position, mouse_location, CursorPosition};
-use core_foundation::base::{CFRetain, CFRelease, CFType, CFTypeRef, TCFType};
+use crate::ax::{
+    accessibility_string_attribute, ax_children, ax_focused_application,
+    copy_ax_element_attribute, copy_marker_range, drain_autorelease_pool, frontmost_pid,
+    new_autorelease_pool, objc_getClass, objc_msgSend, sel_registerName, AX_ERROR_SUCCESS,
+    AXUIElementCopyAttributeValue, AXUIElementCopyElementAtPosition,
+    AXUIElementCopyParameterizedAttributeValue, AXUIElementCreateSystemWide,
+    AXUIElementPerformAction, AXValueGetValue, AXUIElementRef, CFArrayGetCount,
+    CFArrayGetValueAtIndex,
+};
+use crate::text_injection;
+use core_foundation::base::{CFRelease, CFType, CFTypeRef, TCFType};
 use core_foundation::runloop::CFRunLoop;
 use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::{
@@ -21,19 +31,13 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, LogicalPosition, LogicalSize, Manager};
 
-extern "C" {
-    fn objc_getClass(name: *const i8) -> *const std::ffi::c_void;
-    fn sel_registerName(str: *const i8) -> *const std::ffi::c_void;
-    fn objc_msgSend(
-        obj: *mut std::ffi::c_void,
-        sel: *const std::ffi::c_void,
-        ...
-    ) -> *mut std::ffi::c_void;
-}
 
-/// Show the popup window in front of all other windows and make it key (for
-/// focus-lost auto-hide), but without activating the application so the source
-/// app retains key status and its text selections stay highlighted.
+/// Show the popup window above all other apps' windows WITHOUT making it key
+/// (Hapigo-style): the source app stays active and its input caret keeps
+/// blinking, so Enter-insert lands at the live caret. Keyboard interaction
+/// with the popup is routed through the event tap (see handle_system_event);
+/// clicking into the popup makes it key normally (explicit intent to type),
+/// and clicking anywhere else dismisses it.
 fn show_window_without_focus(window: &tauri::WebviewWindow) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -50,16 +54,11 @@ fn show_window_without_focus(window: &tauri::WebviewWindow) {
             return;
         }
 
-        // Force window to front above all other apps' windows
+        // Force window to front above all other apps' windows. Never
+        // makeKeyWindow: a key window would steal the source app's caret.
         objc_msgSend(
             ns_window,
             sel_registerName(b"orderFrontRegardless\0".as_ptr() as *const i8),
-        );
-
-        // Make key so Tauri's onFocusChanged fires on focus loss (auto-hide).
-        objc_msgSend(
-            ns_window,
-            sel_registerName(b"makeKeyWindow\0".as_ptr() as *const i8),
         );
     }
 }
@@ -144,13 +143,11 @@ fn configure_window_all_spaces(window: &tauri::WebviewWindow) {
 const DEFAULT_POPUP_SIZE: f64 = 420.0;
 const IPC_HOST: &str = "127.0.0.1";
 const LOG_PATH: &str = "/tmp/lexi-native-toolbar.log";
-const AX_ERROR_SUCCESS: i32 = 0;
 /// Fixed port the Chrome extension POSTs selected text to. Hardcoded so the
 /// extension doesn't have to discover a dynamic port. Collisions are unlikely
 /// (nothing else commonly uses 47xxx range).
 const EXTENSION_PORT: u16 = 47291;
 
-type AXUIElementRef = *const std::ffi::c_void;
 
 static TOOLBAR_PORT: OnceLock<Mutex<Option<u16>>> = OnceLock::new();
 static TOOLBAR_ACTIONS: OnceLock<Mutex<Vec<ToolbarActionItem>>> = OnceLock::new();
@@ -159,6 +156,575 @@ static POPUP_SHORTCUT: OnceLock<Mutex<ShortcutMode>> = OnceLock::new();
 static LAST_CTRL_PRESS: Mutex<Option<Instant>> = Mutex::new(None);
 static HANDOFF_TARGET_APP: OnceLock<Mutex<String>> = OnceLock::new();
 static EXCLUDED_TOOLBAR_APPS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+
+/// The app the user's last selection/popup gesture came from — the write-back
+/// target for text injection. Captured while the source app is still frontmost
+/// (the popup shows without activating lexi, so this usually stays valid).
+#[derive(Clone)]
+pub(crate) struct SelectionTarget {
+    pub(crate) pid: i32,
+    pub(crate) bundle_id: String,
+    pub(crate) captured_at: Instant,
+}
+
+/// How long after capture a selection target still accepts write-back.
+const SELECTION_TARGET_FRESH_SECS: u64 = 60;
+
+static SELECTION_TARGET: std::sync::LazyLock<Mutex<Option<SelectionTarget>>> =
+    std::sync::LazyLock::new(|| Mutex::new(None));
+
+/// Remember the frontmost app as the write-back target (skips lexi itself).
+pub(crate) fn capture_selection_target() {
+    unsafe {
+        let Some(pid) = frontmost_pid() else { return };
+        if pid == std::process::id() as i32 {
+            return;
+        }
+        let bundle_id = frontmost_bundle_id().unwrap_or_default();
+        log_native(&format!("selection target captured pid={pid} bundle={bundle_id}"));
+        if let Ok(mut cell) = SELECTION_TARGET.lock() {
+            *cell = Some(SelectionTarget {
+                pid,
+                bundle_id,
+                captured_at: Instant::now(),
+            });
+        }
+    }
+}
+
+/// The captured target, if still fresh.
+pub(crate) fn current_selection_target() -> Option<SelectionTarget> {
+    let target = SELECTION_TARGET.lock().ok()?.clone()?;
+    (target.captured_at.elapsed().as_secs() <= SELECTION_TARGET_FRESH_SECS).then_some(target)
+}
+
+
+/// Popup-on-screen flag, read by the event tap. MUST stay an O(1) atomic —
+/// querying the window from the tap hops to the main thread, and a busy main
+/// thread stalls the tap until macOS kills it (kCGEventTapDisabledByTimeout),
+/// which turned arrow keys into "every other one works". The frontend reports
+/// hides via the `set_popup_up` command; Rust sets it on show/Esc/outside-click.
+static POPUP_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[tauri::command]
+pub fn set_popup_up(visible: bool) -> Result<(), String> {
+    mark_popup_up(visible);
+    Ok(())
+}
+
+fn mark_popup_up(visible: bool) {
+    POPUP_UP.store(visible, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Global handle for deferred native-card work (sqlite access from workers).
+static CURRENT_APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+/// The note the frontend currently has highlighted in the popup's NotesPanel,
+/// synced eagerly by `set_pending_note` so the tap's Enter can insert it
+/// without touching the (throttled) webview.
+static PENDING_NOTE: std::sync::LazyLock<Mutex<Option<String>>> =
+    std::sync::LazyLock::new(|| Mutex::new(None));
+
+#[tauri::command]
+pub fn set_pending_note(text: Option<String>) -> Result<(), String> {
+    if let Ok(mut cell) = PENDING_NOTE.lock() {
+        *cell = text.filter(|t| !t.trim().is_empty());
+    }
+    Ok(())
+}
+
+
+// ---------------------------------------------------------------------------
+// Native result card (Phase 2) — the helper renders AI results with AppKit
+// (zero webview throttling). The AI stream in commands/ai.rs mirrors every
+// chunk/done/error here via `forward_card_event`; Rust owns the run.
+// ---------------------------------------------------------------------------
+
+static CARD_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static CARD_AUTO_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn forward_card_event(
+    run_id: &str,
+    chunk: Option<&str>,
+    done: bool,
+    error: Option<&str>,
+    translation_json: Option<&str>,
+    saved: bool,
+) {
+    if !CARD_UP.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let Some(port) = toolbar_port() else { return };
+    let payload = serde_json::json!({
+        "runId": run_id,
+        "chunk": chunk,
+        "done": done,
+        "error": error,
+        "translationJson": translation_json,
+        "saved": saved,
+    });
+    if let Ok(body) = serde_json::to_string(&payload) {
+        let _ = post_to_helper(port, "/result-event", &body);
+    }
+}
+
+pub(crate) fn card_auto_save_enabled() -> bool {
+    CARD_AUTO_SAVE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn is_single_word(text: &str) -> bool {
+    let word = text.trim().trim_matches(|c: char| !c.is_ascii_alphabetic());
+    !word.is_empty()
+        && word.chars().all(|c| c.is_ascii_alphabetic() || c == '-' || c == '\'')
+}
+
+/// Persist a learned entry (parity with the WebView flow's Save button).
+pub(crate) fn save_word_entry(
+    word: &str,
+    translation: &str,
+    pos: &str,
+    definition: &str,
+    example: &str,
+    entry_type: &str,
+) {
+    if let Some(db) = current_app()
+        .and_then(|app| app.path().app_data_dir().ok())
+        .map(|dir| dir.join("lexi.db"))
+    {
+        let _ = Command::new("sqlite3")
+            .arg(&db)
+            .arg(format!(
+                "INSERT INTO words (word, translation, pos, definition, example, status, entry_type, source_text) VALUES ('{}', '{}', '{}', '{}', '{}', 'new', '{}', '{}');",
+                word.replace('\'', "''"),
+                translation.replace('\'', "''"),
+                pos.replace('\'', "''"),
+                definition.replace('\'', "''"),
+                example.replace('\'', "''"),
+                entry_type.replace('\'', "''"),
+                word.replace('\'', "''"),
+            ));
+    }
+}
+
+fn toolbar_port() -> Option<u16> {
+    TOOLBAR_PORT
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .ok()
+        .and_then(|cell| *cell)
+}
+
+fn current_app() -> Option<&'static tauri::AppHandle> {
+    CURRENT_APP.get()
+}
+
+/// Read query results as a JSON string via `sqlite3 -json`.
+fn sqlite_query_json(app: &tauri::AppHandle, query: &str) -> Option<String> {
+    let db = app.path().app_data_dir().ok()?.join("lexi.db");
+    if !db.exists() {
+        return None;
+    }
+    let output = Command::new("sqlite3")
+        .arg("-json")
+        .arg(&db)
+        .arg(query)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stdout.is_empty() {
+        None
+    } else {
+        Some(stdout)
+    }
+}
+
+/// Open the native result card and stream `feature_id`'s AI run into it.
+fn show_result_card(app: &tauri::AppHandle, text: &str, feature_id: &str) {
+    let escaped_id = feature_id.replace('\'', "''");
+    let Some(rows) = sqlite_query_json(
+        app,
+        &format!(
+            "SELECT name, prompt_template, output_mode, IFNULL(target_language,'') AS target_language, IFNULL(icon,'wand') AS icon, auto_save_to_vocabulary FROM ai_features WHERE id = '{escaped_id}';"
+        ),
+    ) else {
+        log_native("card: feature not found");
+        return;
+    };
+    let Some(feature) = serde_json::from_str::<serde_json::Value>(&rows)
+        .ok()
+        .and_then(|v| v.as_array().and_then(|a| a.first()).cloned())
+    else {
+        log_native("card: feature parse failed");
+        return;
+    };
+
+    let Some(settings) = sqlite_query_json(
+        app,
+        "SELECT key, value FROM settings WHERE key IN ('apiBaseUrl','apiKey','model');",
+    ) else {
+        log_native("card: settings unavailable");
+        return;
+    };
+    let mut api_base_url = String::new();
+    let mut api_key = String::new();
+    let mut model = String::new();
+    if let Ok(entries) = serde_json::from_str::<serde_json::Value>(&settings) {
+        if let Some(list) = entries.as_array() {
+            for entry in list {
+                match entry["key"].as_str().unwrap_or("") {
+                    "apiBaseUrl" => api_base_url = entry["value"].as_str().unwrap_or("").to_string(),
+                    "apiKey" => api_key = entry["value"].as_str().unwrap_or("").to_string(),
+                    "model" => model = entry["value"].as_str().unwrap_or("").to_string(),
+                    _ => {}
+                }
+            }
+        }
+    }
+    if api_base_url.is_empty() || model.is_empty() {
+        log_native("card: API settings missing");
+        return;
+    }
+
+    let title = feature["name"].as_str().unwrap_or("AI").to_string();
+    let icon = feature["icon"].as_str().unwrap_or("wand").to_string();
+    let auto_save = feature["auto_save_to_vocabulary"].as_i64().unwrap_or(0) == 1;
+    CARD_AUTO_SAVE.store(auto_save, std::sync::atomic::Ordering::Relaxed);
+
+    let run_id = format!(
+        "card-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    );
+    if !post_card_show(&run_id, feature_id, &title, &icon, auto_save, text) {
+        return;
+    }
+
+    let request = crate::commands::ai::AiRunRequest {
+        text: text.to_string(),
+        api_base_url,
+        api_key,
+        model,
+        prompt_template: feature["prompt_template"].as_str().unwrap_or("").to_string(),
+        output_mode: feature["output_mode"].as_str().unwrap_or("plain_text").to_string(),
+        target_language: Some(feature["target_language"].as_str().unwrap_or("").to_string())
+            .filter(|t| !t.is_empty()),
+    };
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = crate::commands::ai::run_ai_prompt_stream(app.clone(), request, run_id).await {
+            log_native(&format!("card: stream spawn failed: {error}"));
+        }
+    });
+}
+
+/// Show the card with no runs — the manual input surface (WebView parity:
+/// the popup opens on AiForm + IdleState, runs append as they start).
+fn show_idle_card(app: &tauri::AppHandle) {
+    if !post_card_show("", "", "", "", false, "") {
+        return;
+    }
+    log_native("card: idle input card shown");
+    let _ = app;
+}
+
+/// POST /result-show (+ /card-actions) and raise CARD_UP. Returns false when
+/// the helper is unreachable.
+fn post_card_show(run_id: &str, feature_id: &str, title: &str, icon: &str, auto_save: bool, input_text: &str) -> bool {
+    let Some(port) = toolbar_port() else { return false };
+    let payload = serde_json::json!({
+        "runId": run_id,
+        "featureId": feature_id,
+        "title": title,
+        "icon": icon,
+        "autoSave": auto_save,
+        "inputText": input_text,
+    });
+    let Ok(body) = serde_json::to_string(&payload) else { return false };
+    if post_to_helper(port, "/result-show", &body).is_err() {
+        log_native("card: helper not reachable");
+        return false;
+    }
+    // The input bar's action buttons mirror the WebView AiForm's panelItems:
+    // toolbar tools with panelEnabled (settings.toolbar_tools) + enabled AI
+    // features, merged by panel sort order — NOT the toolbar's action list.
+    let (actions, panels) = panel_config_items();
+    if let Ok(actions_body) = serde_json::to_string(&serde_json::json!({
+        "actions": actions,
+        "panels": panels,
+    })) {
+        let _ = post_to_helper(port, "/card-actions", &actions_body);
+    }
+    CARD_UP.store(true, std::sync::atomic::Ordering::Relaxed);
+    true
+}
+
+/// WebView AiForm panelItems + panel tabs, straight from the Panel Config
+/// surface: tools' panelEnabled (settings.toolbar_tools) and enabled AI
+/// features, ordered by their panel sort order.
+fn panel_config_items() -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
+    let Some(app) = current_app() else { return (vec![], vec![]) };
+
+    struct Item {
+        order: i64,
+        id: String,
+        name: String,
+        icon: String,
+        kind: &'static str,
+    }
+    let mut items: Vec<Item> = vec![];
+
+    // Tools: settings.toolbar_tools JSON (falls back to the built-in set the
+    // frontend seeds on first run).
+    let tools_json = sqlite_query_json(
+        app,
+        "SELECT value FROM settings WHERE key = 'toolbar_tools' LIMIT 1;",
+    )
+    // sqlite -json wraps rows: [{"value":"[{...tool...},...]"}] — the setting
+    // itself is a JSON array, so unwrap twice or every tool gets skipped.
+    .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+    .and_then(|rows| rows.as_array().and_then(|a| a.first()).cloned())
+    .and_then(|row| row["value"].as_str().map(str::to_string))
+    .and_then(|inner| serde_json::from_str::<serde_json::Value>(&inner).ok())
+    .and_then(|v| v.as_array().cloned());
+    let tools_list = tools_json.unwrap_or_else(default_toolbar_tools_json);
+    for tool in tools_list {
+        if tool["panelEnabled"].as_bool() != Some(true) {
+            continue;
+        }
+        let id = tool["id"].as_str().unwrap_or("").to_string();
+        if id.is_empty() {
+            continue;
+        }
+        items.push(Item {
+            order: tool["panelSortOrder"].as_i64().unwrap_or_else(|| tool["sortOrder"].as_i64().unwrap_or(100)),
+            id,
+            name: tool["name"].as_str().unwrap_or("Tool").to_string(),
+            icon: tool["icon"].as_str().unwrap_or("wand").to_string(),
+            kind: "tool",
+        });
+    }
+
+    // Features: ai_features has no panel_enabled column yet (the WebView
+    // default is panel-visible), so enabled features all count.
+    if let Some(rows) = sqlite_query_json(
+        app,
+        "SELECT id, name, IFNULL(icon, 'wand') AS icon, sort_order FROM ai_features WHERE enabled = 1;",
+    )
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+        .and_then(|v| v.as_array().cloned())
+    {
+        for feature in rows {
+            let id = feature["id"].as_str().unwrap_or("").to_string();
+            if id.is_empty() {
+                continue;
+            }
+            items.push(Item {
+                order: feature["sort_order"].as_i64().unwrap_or(0),
+                id,
+                name: feature["name"].as_str().unwrap_or("AI").to_string(),
+                icon: feature["icon"].as_str().unwrap_or("wand").to_string(),
+                kind: "feature",
+            });
+        }
+    }
+
+    items.sort_by_key(|item| item.order);
+    let actions = items
+        .into_iter()
+        .map(|item| serde_json::json!({ "id": item.id, "name": item.name, "icon": item.icon, "kind": item.kind }))
+        .collect();
+
+    // Panel tabs: panels table merged with the three built-ins (frontend
+    // withBuiltInPanels parity — missing ids are appended, not all-or-nothing).
+    let mut panels: Vec<serde_json::Value> = sqlite_query_json(
+        app,
+        "SELECT id, name, icon FROM panels WHERE enabled = 1 ORDER BY sort_order;",
+    )
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+        .and_then(|v| v.as_array().cloned())
+        .map(|rows| rows.to_vec())
+        .unwrap_or_default();
+    for (id, name, icon) in [
+        ("translate", "Actions", "file-text"),
+        ("notes", "Notes", "notebook-pen"),
+        ("review", "Review", "book-open"),
+    ] {
+        if !panels.iter().any(|p| p["id"].as_str() == Some(id)) {
+            panels.push(serde_json::json!({ "id": id, "name": name, "icon": icon }));
+        }
+    }
+
+    (actions, panels)
+}
+
+fn default_toolbar_tools_json() -> Vec<serde_json::Value> {
+    vec![
+        serde_json::json!({ "id": "copy", "name": "Copy", "icon": "copy", "panelEnabled": true, "panelSortOrder": 100 }),
+        serde_json::json!({ "id": "search", "name": "Search", "icon": "search", "panelEnabled": true, "panelSortOrder": 110 }),
+        serde_json::json!({ "id": "read", "name": "Read", "icon": "volume", "panelEnabled": true, "panelSortOrder": 120 }),
+        serde_json::json!({ "id": "note", "name": "Note", "icon": "notebook-pen", "panelEnabled": true, "panelSortOrder": 130 }),
+    ]
+}
+// ---------------------------------------------------------------------------
+// Native Notes panel (Phase D, option B) — the helper renders the list with
+// AppKit (zero webview throttling); Rust owns the snapshot and the selected
+// index, and the event tap routes ↑↓/Enter/Esc. This is the Hapigo-style
+// surface: the source app keeps its caret the whole time.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Serialize, serde::Deserialize)]
+struct NoteRow {
+    name: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct NotesShowPayload {
+    notes: Vec<NoteRow>,
+    selected: usize,
+}
+
+#[derive(Serialize)]
+struct NotesSelectPayload {
+    selected: usize,
+}
+
+static NOTES_SNAPSHOT: std::sync::LazyLock<Mutex<Vec<NoteRow>>> =
+    std::sync::LazyLock::new(|| Mutex::new(Vec::new()));
+static NOTES_SELECTED: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+static NOTES_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Show the native notes panel over the helper: load the latest notes, reset
+/// the selection, and hand the snapshot to the helper for rendering.
+fn show_notes_panel(app: &tauri::AppHandle) {
+    let Some(notes) = load_notes(app) else {
+        log_native("notes: could not read notes db");
+        return;
+    };
+    if notes.is_empty() {
+        log_native("notes: no notes to show");
+        return;
+    }
+    let count = notes.len();
+    if let Ok(mut cell) = NOTES_SNAPSHOT.lock() {
+        *cell = notes.clone();
+    }
+    NOTES_SELECTED.store(0, std::sync::atomic::Ordering::Relaxed);
+    NOTES_UP.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    let port = TOOLBAR_PORT
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .ok()
+        .and_then(|cell| *cell);
+    let Some(port) = port else {
+        log_native("notes: toolbar port not set");
+        return;
+    };
+    let Ok(body) = serde_json::to_string(&NotesShowPayload { notes, selected: 0 }) else {
+        return;
+    };
+    if post_to_helper(port, "/notes-show", &body).is_ok() {
+        log_native(&format!("notes panel shown rows={count}"));
+    }
+}
+
+/// Latest notes from SQLite via `sqlite3 -json` (handles newlines in content).
+fn load_notes(app: &tauri::AppHandle) -> Option<Vec<NoteRow>> {
+    let db = app.path().app_data_dir().ok()?.join("lexi.db");
+    if !db.exists() {
+        return None;
+    }
+    let output = Command::new("sqlite3")
+        .arg("-json")
+        .arg(&db)
+        .arg("SELECT id, IFNULL(name, '') AS name, content FROM notes ORDER BY created_at DESC, id DESC LIMIT 50;")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.trim().is_empty() {
+        return Some(Vec::new());
+    }
+    let rows: Vec<NoteRow> = serde_json::from_str(&stdout).ok()?;
+    Some(rows)
+}
+
+/// Move the native panel's highlight by `delta` rows (clamped).
+fn notes_navigate(delta: i32) {
+    let count = NOTES_SNAPSHOT.lock().map(|c| c.len()).unwrap_or(0);
+    if count == 0 {
+        return;
+    }
+    let current = NOTES_SELECTED.load(std::sync::atomic::Ordering::Relaxed).max(0);
+    let next = (current + delta).clamp(0, count as i32 - 1);
+    NOTES_SELECTED.store(next, std::sync::atomic::Ordering::Relaxed);
+
+    let port = TOOLBAR_PORT
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .ok()
+        .and_then(|cell| *cell);
+    let Some(port) = port else { return };
+    if let Ok(body) = serde_json::to_string(&NotesSelectPayload {
+        selected: next as usize,
+    }) {
+        let _ = post_to_helper(port, "/notes-select", &body);
+    }
+}
+
+/// Insert the highlighted note at the source app's caret, then hide the panel.
+fn notes_enter() {
+    let index = NOTES_SELECTED.load(std::sync::atomic::Ordering::Relaxed);
+    let text = NOTES_SNAPSHOT
+        .lock()
+        .ok()
+        .and_then(|cell| cell.get(index.max(0) as usize).cloned());
+    let Some(note) = text.filter(|n| !n.content.trim().is_empty()) else {
+        log_native("notes Enter: nothing selected");
+        return;
+    };
+    match text_injection::deliver_text(&note.content) {
+        Ok(tier) => {
+            log_native(&format!("notes Enter: inserted via {tier}"));
+            notes_hide();
+        }
+        Err(error) => {
+            // Panel stays up — Esc or an outside click still dismisses it.
+            log_native(&format!("notes Enter: insert failed: {error}"));
+        }
+    }
+}
+
+/// Dismiss the native panel and clear its flag.
+fn notes_hide() {
+    NOTES_UP.store(false, std::sync::atomic::Ordering::Relaxed);
+    let port = TOOLBAR_PORT
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .ok()
+        .and_then(|cell| *cell);
+    let Some(port) = port else { return };
+    let _ = post_to_helper(port, "/notes-hide", "{}");
+}
+
+/// The helper hid the panel itself (outside click) — clear our flag.
+pub(crate) fn mark_notes_hidden() {
+    NOTES_UP.store(false, std::sync::atomic::Ordering::Relaxed);
+}
+/// Whether the popup card is currently on screen — while it is, the toolbar
+/// never pops over it and keyboard navigation is routed into the popup.
+fn popup_card_visible(app: &tauri::AppHandle) -> bool {
+    app.get_webview_window("popup_card")
+        .map(|window| window.is_visible().unwrap_or(false))
+        .unwrap_or(false)
+}
 /// Last observed NSPasteboard.changeCount. Cmd+C detection compares against
 /// this — only fires the toolbar when the count actually increases.
 static LAST_PASTEBOARD_CHANGE_COUNT: OnceLock<Mutex<isize>> = OnceLock::new();
@@ -395,6 +961,10 @@ struct AiRequestPayload {
 #[derive(Clone, Serialize)]
 struct PopupShownPayload {
     mode: &'static str,
+    /// Panel the popup should open on: "translate" (selection flow) or
+    /// "notes" (hotkey with no selection — the pick-a-note-and-Enter flow,
+    /// which must not require clicking the popup and stealing focus).
+    panel: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -402,6 +972,12 @@ struct ToolbarShowPayload {
     text: String,
     x: i32,
     y: i32,
+    /// Mouse-down position (AppKit coords) for direction-aware placement.
+    /// `None` on non-drag paths — the helper falls back to above-the-cursor.
+    #[serde(rename = "downX")]
+    down_x: Option<i32>,
+    #[serde(rename = "downY")]
+    down_y: Option<i32>,
     pending: bool,
     actions: Vec<ToolbarActionItem>,
 }
@@ -426,6 +1002,9 @@ struct ToolbarActionRequest {
 
 pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
     log_native("setup native toolbar");
+    // Deferred native-card work (panel config reads, auto-save) needs an
+    // AppHandle without threading one through every helper call site.
+    let _ = CURRENT_APP.set(app.handle().clone());
     request_system_permissions();
     initialize_toolbar_enabled(app);
     initialize_popup_shortcut(app);
@@ -452,10 +1031,11 @@ pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
     ));
 
     spawn_action_server(listener, app_handle.clone());
-    launch_helper(app, action_port, toolbar_port)?;
+    launch_helper(&app_handle, action_port, toolbar_port)?;
     wait_for_helper(toolbar_port);
+    spawn_helper_watchdog(app_handle.clone(), action_port, toolbar_port);
     spawn_selection_monitor(app_handle.clone(), toolbar_port);
-    spawn_extension_server();
+    spawn_extension_server(&app_handle);
     Ok(())
 }
 
@@ -799,8 +1379,9 @@ fn spawn_action_server(listener: TcpListener, app: tauri::AppHandle) {
 /// Start the HTTP server the Chrome extension POSTs selected text to.
 /// Bound to 127.0.0.1 only (no external exposure). Fixed port so the
 /// extension can hardcode it — see EXTENSION_PORT.
-fn spawn_extension_server() {
-    thread::spawn(|| {
+fn spawn_extension_server(app_handle: &tauri::AppHandle) {
+    let app_handle = app_handle.clone();
+    thread::spawn(move || {
         let listener = match TcpListener::bind((IPC_HOST, EXTENSION_PORT)) {
             Ok(l) => {
                 log_native(&format!(
@@ -820,7 +1401,8 @@ fn spawn_extension_server() {
         };
 
         for stream in listener.incoming().flatten() {
-            thread::spawn(|| handle_extension_connection(stream));
+            let app = app_handle.clone();
+            thread::spawn(move || handle_extension_connection(app, stream));
         }
     });
 }
@@ -830,7 +1412,7 @@ struct ExtensionSelectionPayload {
     text: String,
 }
 
-fn handle_extension_connection(mut stream: TcpStream) {
+fn handle_extension_connection(app: tauri::AppHandle, mut stream: TcpStream) {
     let buffer = match read_http_request(&mut stream) {
         Ok(buffer) => buffer,
         Err(error) => {
@@ -904,7 +1486,7 @@ fn handle_extension_connection(mut stream: TcpStream) {
         // cursor_position(), whose flipped (top-left origin) value is meant for
         // Tauri/tao window positioning and would land the toolbar off-screen.
         let position = mouse_location();
-        show_toolbar(port, text, position, false);
+        show_toolbar(&app, port, text, position, false, None);
     });
 }
 
@@ -967,6 +1549,10 @@ struct ClickState {
     /// on mouse-up. Nothing else is captured here on purpose — see LeftMouseDown.
     down_x: f64,
     down_y: f64,
+    /// Selection snapshot taken at mouse-down (worker thread, off the tap):
+    /// `None` = still pending, `Some(None)` = no selection, `Some(Some(t))` =
+    /// the selected text. Compared on mouse-up to reject stale selections.
+    pre_selection: Arc<Mutex<Option<Option<String>>>>,
 }
 
 fn spawn_selection_monitor(app: tauri::AppHandle, toolbar_port: u16) {
@@ -982,11 +1568,10 @@ fn spawn_selection_monitor(app: tauri::AppHandle, toolbar_port: u16) {
         let result = CGEventTap::with_enabled(
             CGEventTapLocation::HID,
             CGEventTapPlacement::HeadInsertEventTap,
-            CGEventTapOptions::ListenOnly,
+            CGEventTapOptions::Default,
             events,
             move |_proxy, event_type, event| {
-                handle_system_event(&app, toolbar_port, &click_state, event_type, event);
-                CallbackResult::Keep
+                handle_system_event(&app, toolbar_port, &click_state, event_type, event)
             },
             CFRunLoop::run_current,
         );
@@ -1007,38 +1592,81 @@ fn handle_system_event(
     click_state: &Arc<Mutex<Option<ClickState>>>,
     event_type: CGEventType,
     event: &CGEvent,
-) {
+) -> CallbackResult {
     match event_type {
         CGEventType::LeftMouseDown => {
             // Record the down position ONLY — no Accessibility calls here. This
             // tap runs at HeadInsert, so any AX/osascript work in this callback
             // blocks the tap thread and delays every later event (keystrokes
             // included), which is what caused the typing/cursor lag. All slow
-            // work is deferred to the mouse-up worker thread.
+            // work is deferred to worker threads.
             let loc = event.location();
+            let pre_selection: Arc<Mutex<Option<Option<String>>>> = Arc::new(Mutex::new(None));
             if let Ok(mut state) = click_state.lock() {
                 *state = Some(ClickState {
                     down_x: loc.x,
                     down_y: loc.y,
+                    pre_selection: pre_selection.clone(),
                 });
             }
+
+            // Hapigo-style dismissal: with the popup up (it is never key), a
+            // click anywhere outside it closes it. Bounds checks run off the
+            // tap thread on the main thread.
+            let popup_app = app.clone();
+            let main = popup_app.clone();
+            let click = loc;
+            thread::spawn(move || {
+                let _ = main.run_on_main_thread(move || {
+                    if !popup_card_visible(&popup_app) {
+                        return;
+                    }
+                    let Some(popup) = popup_app.get_webview_window("popup_card") else {
+                        return;
+                    };
+                    let Ok(position) = popup.outer_position() else { return };
+                    let Ok(size) = popup.inner_size() else { return };
+                    let scale = popup.scale_factor().unwrap_or(1.0);
+                    let (px, py) = (position.x as f64 / scale, position.y as f64 / scale);
+                    let (w, h) = (size.width as f64 / scale, size.height as f64 / scale);
+                    let inside =
+                        click.x >= px && click.x <= px + w && click.y >= py && click.y <= py + h;
+                    if !inside {
+                        let _ = popup.hide();
+                        mark_popup_up(false);
+                    }
+                });
+            });
+            // Snapshot the selection NOW, before the app processes this
+            // mouse-down and mutates it — on mouse-up we compare against it so
+            // a stale selection (still shown by browsers after a plain click)
+            // doesn't pop the toolbar. Runs off the tap thread.
+            let app = app.clone();
+            thread::spawn(move || {
+                if !toolbar_enabled_for_app(&app) || active_toolbar_actions().is_none() {
+                    return;
+                }
+                let _selection = selection_read_guard();
+                let pre = read_selected_text_via_ax().map(|s| s.trim().to_string());
+                if let Ok(mut cell) = pre_selection.lock() {
+                    *cell = Some(pre);
+                }
+            });
         }
         CGEventType::LeftMouseUp => {
             let state = click_state.lock().ok().and_then(|mut s| s.take());
-            let Some(ClickState { down_x, down_y }) = state else {
-                return;
+            let Some(ClickState { down_x, down_y, pre_selection }) = state else {
+                return CallbackResult::Keep;
             };
 
             // Cheap, non-AX work only — see LeftMouseDown. Everything slow runs
             // on a worker thread so the tap never blocks.
             let position = appkit_position_from_event(event);
-            let selection_gesture = is_selection_gesture(down_x, down_y, event);
+            let click_count =
+                event.get_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE) as u64;
             // A bare click (no drag, single click) never triggers the toolbar.
-            // This gesture gate replaces the old pre/post AX-selection comparison
-            // — it prevents "every click pops a popup" without needing an AX
-            // call in the hot path.
-            if !selection_gesture {
-                return;
+            if !is_selection_gesture(down_x, down_y, event) {
+                return CallbackResult::Keep;
             }
 
             let app = app.clone();
@@ -1060,20 +1688,52 @@ fn handle_system_event(
                 // borrow/restore must not interleave with another worker.
                 let _selection = selection_read_guard();
 
+                // A real selection gesture starts on a text element. Window
+                // drags (title bar, toolbar, scroll bar, …) are drag gestures
+                // too — gate EVERY path here, including the menu/Cmd+C
+                // fallbacks, so they never pop the toolbar.
+                if !is_text_area_at_position(down_x, down_y) {
+                    return;
+                }
+
+                // The selection must be NEW: identical to what was selected
+                // before mouse-down means the gesture (click with jitter,
+                // window drag) didn't select anything — the app is just still
+                // showing the old selection. A multi-click re-selecting the
+                // same text is deliberate and still pops.
+                let pre = pre_selection
+                    .lock()
+                    .ok()
+                    .and_then(|mut s| s.take().flatten());
+
                 // AX path — only when the click landed on a text element, so we
                 // don't read a stale focused selection when clicking chrome.
-                if is_text_area_at_position(down_x, down_y) {
-                    let ax_result = read_selected_text_via_ax()
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty());
-                    if let Some(post_trimmed) = ax_result {
-                        log_native(&format!(
-                            "AX selection changed length={}",
-                            post_trimmed.len()
-                        ));
-                        show_toolbar(toolbar_port, post_trimmed, position, false);
+                if let Some(post) = read_selected_text_via_ax()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                {
+                    if pre.as_deref() == Some(post.as_str()) && click_count < 2 {
+                        log_native("AX selection unchanged since mouse-down; skipping");
                         return;
                     }
+                    log_native(&format!(
+                        "AX selection changed length={}",
+                        post.len()
+                    ));
+                    show_toolbar(&app, toolbar_port, post, position, false, Some((down_x, down_y)));
+                    return;
+                }
+
+                // Web-area fallback — browsers keep their selection in text
+                // markers instead of AXSelectedText (Chrome/Safari/Edge/Arc).
+                // Reads the live AX tree; no clipboard involvement.
+                if let Some(post) = read_selected_text_via_web_area()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                {
+                    log_native(&format!("web-area selection length={}", post.len()));
+                    show_toolbar(&app, toolbar_port, post, position, false, Some((down_x, down_y)));
+                    return;
                 }
 
                 // Menu fallback — apps AX can't read (Ghostty, Zed, ...).
@@ -1084,10 +1744,106 @@ fn handle_system_event(
                     .or_else(read_selected_text_via_cmd_c);
                 if let Some(t) = text {
                     log_native(&format!("fallback selection length={}", t.len()));
-                    show_toolbar(toolbar_port, t, position, false);
+                    show_toolbar(&app, toolbar_port, t, position, false, Some((down_x, down_y)));
                 }
             });
         }
+        CGEventType::KeyDown if POPUP_UP.load(std::sync::atomic::Ordering::Relaxed)
+            || NOTES_UP.load(std::sync::atomic::Ordering::Relaxed) =>
+        {
+            // The popup is up and is never key: navigation keys are consumed
+            // here. Enter and Escape now execute entirely on the Rust side —
+            // the webview is throttled while lexi is not the active app, so
+            // routing the critical action through eval→React→invoke proved
+            // unreliable. Arrow keys only move a highlight, so they still go
+            // through eval where a dropped frame costs nothing.
+            let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+            let key: &str = match keycode {
+                125 => "ArrowDown",
+                126 => "ArrowUp",
+                36 | 52 => "Enter",
+                53 => "Escape",
+                _ => return CallbackResult::Keep,
+            };
+            log_native(&format!("popup-key: {key}"));
+            // Native notes panel: keys act on Rust-owned state (snapshot +
+            // index); the helper only draws — zero webview involvement.
+            if NOTES_UP.load(std::sync::atomic::Ordering::Relaxed) {
+                match key {
+                    "Escape" => notes_hide(),
+                    "Enter" => {
+                        thread::spawn(notes_enter);
+                    }
+                    _ => {
+                        let delta = if key == "ArrowDown" { 1 } else { -1 };
+                        thread::spawn(move || notes_navigate(delta));
+                    }
+                }
+            }
+            let app = app.clone();
+            let main = app.clone();
+            match key {
+                "Enter" => thread::spawn(move || {
+                    let text = PENDING_NOTE.lock().ok().and_then(|mut cell| cell.take());
+                    let Some(text) = text.filter(|t| !t.trim().is_empty()) else {
+                        log_native("popup Enter: no pending note");
+                        return;
+                    };
+                    match text_injection::deliver_text(&text) {
+                        Ok(tier) => {
+                            log_native(&format!("popup Enter: inserted via {tier}"));
+                            let _ = main.run_on_main_thread(move || {
+                                if let Some(popup) = app.get_webview_window("popup_card") {
+                                    let _ = popup.hide();
+                                }
+                                mark_popup_up(false);
+                            });
+                        }
+                        Err(error) => {
+                            log_native(&format!("popup Enter: insert failed: {error}"));
+                        }
+                    }
+                }),
+                _ => thread::spawn(move || {
+                    let _ = main.run_on_main_thread(move || {
+                        let Some(popup) = app.get_webview_window("popup_card") else {
+                            return;
+                        };
+                        if !popup.is_visible().unwrap_or(false) {
+                            // Stale flag (frontend hid without reporting).
+                            mark_popup_up(false);
+                            return;
+                        }
+                        if key == "Escape" {
+                            let _ = popup.hide();
+                            mark_popup_up(false);
+                            return;
+                        }
+                        let script = format!(
+                            "document.dispatchEvent(new KeyboardEvent('keydown', {{key: '{}', bubbles: true}}));",
+                            key
+                        );
+                        let _ = popup.eval(&script);
+                    });
+                }),
+            };
+            // Swallow: navigation must not also land in the source document.
+            return CallbackResult::Drop;
+        }
+        CGEventType::KeyDown if CARD_UP.load(std::sync::atomic::Ordering::Relaxed) => {
+            // Card is up and not focused: Tab belongs to the card (cycles its
+            // panel tabs), mirroring the WebView popup consuming navigation
+            // keys while visible. Everything else passes through.
+            let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+            if keycode == 48 {
+                if let Some(port) = crate::native_toolbar::toolbar_port() {
+                    let _ = post_to_helper(port, "/card-tab-cycle", "{}");
+                }
+                return CallbackResult::Drop;
+            }
+            return CallbackResult::Keep;
+        }
+
         CGEventType::KeyDown if is_translate_shortcut(event) => {
             log_native("shortcut key detected");
             let app = app.clone();
@@ -1096,13 +1852,43 @@ fn handle_system_event(
             });
         }
         CGEventType::KeyDown if is_copy_command(event) => {
-            // User pressed Cmd+C. Schedule a check: if the pasteboard actually
-            // changes (i.e. there was a selection to copy), pop the toolbar.
-            // This is the browser fallback — AX can't read Chrome/Safari/Edge
-            // selections, so we rely on the user's explicit copy.
+            // User pressed Cmd+C. Record what they copied (fresh for 5s) —
+            // the browser fallback when AX/web-area can't read the selection.
             let app = app.clone();
             thread::spawn(move || {
                 handle_copy_for_toolbar(&app);
+            });
+        }
+        CGEventType::KeyDown if is_selection_gesture_key(event) => {
+            // Keyboard selection (⌘A / ⌘L / ⇧+arrows): same pipeline as a drag
+            // selection, minus the mouse-specific gates (no coordinates).
+            let position = cursor_position();
+            let app = app.clone();
+            thread::spawn(move || {
+                // Debounce: shift-arrow selections arrive as a stream of key
+                // events — wait for the gesture to settle, then read once.
+                thread::sleep(Duration::from_millis(150));
+                if !toolbar_enabled_for_app(&app) {
+                    return;
+                }
+                if active_toolbar_actions().is_none() {
+                    return;
+                }
+                let _selection = selection_read_guard();
+                // Lossless tiers only (AX / web-area): never synthesize Cmd+C
+                // on a plain keyboard gesture.
+                let text = read_selected_text_via_ax()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        read_selected_text_via_web_area()
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                    });
+                if let Some(text) = text {
+                    log_native(&format!("keyboard selection length={}", text.len()));
+                    show_toolbar(&app, toolbar_port, text, position, false, None);
+                }
             });
         }
         CGEventType::FlagsChanged => {
@@ -1110,26 +1896,9 @@ fn handle_system_event(
         }
         _ => {}
     }
+
+    CallbackResult::Keep
 }
-
-fn accessibility_string_attribute(
-    element: AXUIElementRef,
-    attribute: &'static str,
-) -> Option<String> {
-    unsafe {
-        let attribute = CFString::from_static_string(attribute);
-        let mut value: CFTypeRef = ptr::null();
-        let result =
-            AXUIElementCopyAttributeValue(element, attribute.as_concrete_TypeRef(), &mut value);
-        if result != AX_ERROR_SUCCESS || value.is_null() {
-            return None;
-        }
-
-        let value = CFType::wrap_under_create_rule(value);
-        value.downcast::<CFString>().map(|text| text.to_string())
-    }
-}
-
 /// Check if the given screen position is on a text-selectable element.
 /// Returns false for window chrome (title bar, toolbar, buttons, scroll bars, menus).
 fn is_text_area_at_position(x: f64, y: f64) -> bool {
@@ -1171,6 +1940,28 @@ fn is_text_area_at_position(x: f64, y: f64) -> bool {
             _ => true,
         }
     }
+}
+
+/// Keyboard selection gestures worth surfacing the toolbar: ⌘A (select all),
+/// ⌘L (select address bar / line), and ⇧/⌥⇧/⌘⇧ + arrows/Home/End/PageUp/
+/// PageDown. Gesture flags are intersected to the pure modifier bits first —
+/// capsLock and device bits (function/numericPad/help) never belong to the
+/// gesture (openclip `MacSelectionMonitor.isSelectionTrigger`).
+fn is_selection_gesture_key(event: &CGEvent) -> bool {
+    let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
+    let cmd = CGEventFlags::CGEventFlagCommand;
+    let shift = CGEventFlags::CGEventFlagShift;
+    let alt = CGEventFlags::CGEventFlagAlternate;
+    let gesture = event.get_flags() & (cmd | shift | alt);
+    if gesture == cmd {
+        // kVK_ANSI_A / kVK_ANSI_L — exact ⌘ plus the key, nothing else.
+        return keycode == 0x00 || keycode == 0x25;
+    }
+    if gesture.contains(shift) {
+        // left/right/down/up, home, end, page up, page down
+        return matches!(keycode, 0x7B..=0x7E | 0x73 | 0x77 | 0x74 | 0x79);
+    }
+    false
 }
 
 fn is_translate_shortcut(event: &CGEvent) -> bool {
@@ -1247,13 +2038,17 @@ fn handle_flags_changed(app: &tauri::AppHandle, event: &CGEvent) {
 
 /// Show popup and read selected text — shared by KeyDown and FlagsChanged shortcut handlers.
 fn trigger_popup_with_selection(app: &tauri::AppHandle) {
-    let _ = show_popup(app);
-    thread::sleep(Duration::from_millis(35));
+    // Capture the write-back target and read the selection BEFORE showing the
+    // popup. The popup's makeKeyWindow steals focus from the source app, and
+    // every read tier (AX, web-area markers, and the Cmd+C fallback's event
+    // target) needs the source app still frontmost — showing first left the
+    // shortcut path reading the wrong app (log: "shortcut no selected text").
+    capture_selection_target();
 
     // Serialize with the mouse-up selection worker — see selection_read_guard.
     let _selection = selection_read_guard();
 
-    // AX first — works for native macOS apps (Notes/TextEdit/Mail/Terminal/...).
+    // Chain: ax-text → ax-web-area → menu/cmd-c → last-copied(5s).
     let (text, source) = match read_selected_text_via_ax() {
         Some(s) => {
             let trimmed = s.trim().to_string();
@@ -1266,8 +2061,25 @@ fn trigger_popup_with_selection(app: &tauri::AppHandle) {
         None => (None, "none"),
     };
 
-    // Browser fallback: AX can't read Chrome/Safari/Edge selections, so use
-    // the text the user just Cmd+C'd, if it's still fresh.
+    // Browsers: web-area markers (no clipboard).
+    let (text, source) = match text {
+        Some(t) => (Some(t), source),
+        None => match read_selected_text_via_web_area().filter(|s| !s.trim().is_empty()) {
+            Some(s) => (Some(s.trim().to_string()), "web-area"),
+            None => (None, source),
+        },
+    };
+
+    // Terminals / custom-rendered editors: drive the app's own Edit → Copy.
+    let (text, source) = match text {
+        Some(t) => (Some(t), source),
+        None => match read_selected_text_via_menu().or_else(read_selected_text_via_cmd_c) {
+            Some(t) => (Some(t), "fallback"),
+            None => (None, source),
+        },
+    };
+
+    // Final courtesy: the text the user just Cmd+C'd, if still fresh.
     let (text, source) = match text {
         Some(t) => (Some(t), source),
         None => {
@@ -1291,31 +2103,15 @@ fn trigger_popup_with_selection(app: &tauri::AppHandle) {
         }
     };
 
-    // Last resort: apps that expose neither AX selection nor a fresh user copy
-    // (terminals, custom-rendered editors). Drive the app's own Edit → Copy.
-    let (text, source) = match text {
-        Some(t) => (Some(t), source),
-        None => match read_selected_text_via_menu().or_else(read_selected_text_via_cmd_c) {
-            Some(t) => (Some(t), "fallback"),
-            None => (None, source),
-        },
-    };
-
-    match text {
-        Some(t) => {
-            log_native(&format!("shortcut text length={} source={}", t.len(), source));
-            let _ = app.emit(
-                "lexi://ai-request",
-                AiRequestPayload {
-                    text: t,
-                    mode: "popup_card",
-                    feature_id: "translation".to_string(),
-                },
-            );
-        }
-        None => {
-            log_native(&format!("shortcut no selected text (source={})", source));
-        }
+    // Selection → native result card streaming the AI run directly (WebView
+    // popup_card no longer participates). No selection → native Notes panel:
+    // real AppKit rendering, keyboard routed through this tap, and the source
+    // app's caret never stops.
+    if let Some(selected) = &text {
+        show_result_card(app, selected, "translation");
+    } else {
+        show_notes_panel(app);
+        log_native(&format!("shortcut no selected text (source={})", source));
     }
 }
 
@@ -1392,7 +2188,7 @@ fn handle_copy_for_toolbar(_app: &tauri::AppHandle) {
 /// see crash log lexi-2026-08-25-134724). The clipboard borrow/restore contract
 /// also requires mutual exclusion, or two fallbacks interleave and clobber the
 /// user's clipboard. Inner read fns assume the CALLER holds this lock.
-fn selection_read_guard() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn selection_read_guard() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
     LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -1479,6 +2275,157 @@ fn read_selected_text_via_ax_range(element: AXUIElementRef) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
+// Web-area selection reading — browsers (WebKit and Chromium).
+//
+// Chrome/Safari/Edge/Arc don't expose `AXSelectedText` on their focused
+// element; web content keeps its selection in opaque text markers on the
+// AXWebArea. Reading it: the focused element's (or the web area's)
+// `AXSelectedTextMarkerRange`, resolved through the parameterized
+// `AXStringForTextMarkerRange` attribute — no Cmd+C, no clipboard, ~1ms.
+// Same technique as openclip's AXWebAreaStrategy.
+// ---------------------------------------------------------------------------
+
+/// Re-reads of a web selection that came back empty (the renderer may lag the
+/// selection gesture by a frame), and the wait between reads.
+const WEB_AREA_SETTLE_ATTEMPTS: usize = 3;
+const WEB_AREA_SETTLE_INTERVAL_MS: u64 = 50;
+/// Bounded ancestor walk when hunting the containing web area (openclip uses 25).
+const WEB_AREA_ANCESTOR_WALK_DEPTH: usize = 25;
+/// Bounded child search under the focused window when the focused element has
+/// no web-area ancestor (selecting static page text can leave focus at the
+/// window level).
+const WEB_AREA_CHILD_SEARCH_DEPTH: usize = 6;
+
+/// Read the frontmost browser's selection via text markers. `None` when the
+/// app has no web area or the web area exposes no selection.
+fn read_selected_text_via_web_area() -> Option<String> {
+    unsafe {
+        let app = ax_focused_application()?;
+        // `focused` is the caller's (not owned by us) until copied; both app
+        // and a copied focused element must be released on every exit path.
+        let mut focused: AXUIElementRef = ptr::null();
+        let result = web_area_selection(app, &mut focused);
+        if !focused.is_null() {
+            CFRelease(focused as CFTypeRef);
+        }
+        CFRelease(app as CFTypeRef);
+        result
+    }
+}
+
+unsafe fn web_area_selection(
+    app: AXUIElementRef,
+    focused_out: &mut AXUIElementRef,
+) -> Option<String> {
+    // The focused element comes from the application, never the system-wide
+    // element — the system-wide focused element is a classic stale-read source.
+    let focused = copy_ax_element_attribute(app, "AXFocusedUIElement")?;
+    *focused_out = focused;
+    let web_area = find_web_area_ancestor(focused)
+        .or_else(|| find_web_area_in_focused_window(app))?;
+    let selection = read_web_area_selection(focused, web_area);
+    CFRelease(web_area as CFTypeRef);
+    selection
+}
+
+/// Walk up from `element` (bounded) looking for the AXWebArea ancestor
+/// (retained). Web content renders under an AXWebArea role in both WebKit
+/// (Safari) and Chromium (Chrome/Edge/Arc/Electron).
+unsafe fn find_web_area_ancestor(element: AXUIElementRef) -> Option<AXUIElementRef> {
+    let mut current = element;
+    let mut owned = false;
+    for _ in 0..WEB_AREA_ANCESTOR_WALK_DEPTH {
+        let Some(parent) = copy_ax_element_attribute(current, "AXParent") else {
+            break;
+        };
+        if owned {
+            CFRelease(current as CFTypeRef);
+        }
+        current = parent;
+        owned = true;
+        if accessibility_string_attribute(current, "AXRole").as_deref() == Some("AXWebArea") {
+            return Some(current);
+        }
+    }
+    if owned {
+        CFRelease(current as CFTypeRef);
+    }
+    None
+}
+
+/// Find the focused window's first AXWebArea descendant (retained), searching
+/// depth-first and bounded.
+unsafe fn find_web_area_in_focused_window(app: AXUIElementRef) -> Option<AXUIElementRef> {
+    let window = copy_ax_element_attribute(app, "AXFocusedWindow")?;
+    let found = find_web_area_descendant(window, WEB_AREA_CHILD_SEARCH_DEPTH);
+    CFRelease(window as CFTypeRef);
+    found
+}
+
+/// Depth-first search for the first AXWebArea descendant (retained). Every
+/// visited child is released exactly once; ownership transfers only to the hit.
+unsafe fn find_web_area_descendant(element: AXUIElementRef, depth: usize) -> Option<AXUIElementRef> {
+    if depth == 0 {
+        return None;
+    }
+    let mut found: Option<AXUIElementRef> = None;
+    for child in ax_children(element) {
+        if found.is_some() {
+            CFRelease(child as CFTypeRef);
+            continue;
+        }
+        if accessibility_string_attribute(child, "AXRole").as_deref() == Some("AXWebArea") {
+            found = Some(child);
+            continue;
+        }
+        if let Some(deeper) = find_web_area_descendant(child, depth - 1) {
+            found = Some(deeper);
+        }
+        CFRelease(child as CFTypeRef);
+    }
+    found
+}
+
+/// Read the web selection, retrying briefly when the renderer hasn't caught up
+/// with the gesture yet (empty text right after mouse-up).
+unsafe fn read_web_area_selection(
+    focused: AXUIElementRef,
+    web_area: AXUIElementRef,
+) -> Option<String> {
+    for attempt in 0..WEB_AREA_SETTLE_ATTEMPTS {
+        if attempt > 0 {
+            thread::sleep(Duration::from_millis(WEB_AREA_SETTLE_INTERVAL_MS));
+        }
+        // The marker range lives on the focused element when it carries
+        // markers; the web area itself carries it otherwise.
+        let marker_range = copy_marker_range(focused).or_else(|| copy_marker_range(web_area));
+        let Some(range) = marker_range else {
+            continue;
+        };
+        let attr = CFString::from_static_string("AXStringForTextMarkerRange");
+        let mut value: CFTypeRef = ptr::null();
+        let result = AXUIElementCopyParameterizedAttributeValue(
+            web_area,
+            attr.as_concrete_TypeRef(),
+            range,
+            &mut value,
+        );
+        CFRelease(range as CFTypeRef);
+        if result != AX_ERROR_SUCCESS || value.is_null() {
+            continue;
+        }
+        let wrapped = CFType::wrap_under_create_rule(value);
+        if let Some(text) = wrapped.downcast::<CFString>() {
+            let text = text.to_string();
+            if !text.trim().is_empty() {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
 // Menu-action selection fallback — for apps where AX can't read the selection.
 //
 // Terminals (Ghostty), custom-rendered editors (Zed) and some Electron apps
@@ -1495,7 +2442,8 @@ fn read_selected_text_via_ax_range(element: AXUIElementRef) -> Option<String> {
 //   4. Guard on pasteboard `changeCount`: if Copy didn't change the pasteboard
 //      (no selection / disabled item) → return None (no popup, clipboard restored).
 //   5. The auto mouse-up path additionally requires a selection gesture (drag
-//      or multi-click), so a bare click never triggers a borrow.
+//      or multi-click) AND that the gesture started on a text element, so bare
+//      clicks and window drags never trigger a borrow.
 // ---------------------------------------------------------------------------
 
 /// Read the current selection by invoking the frontmost app's Edit → Copy menu
@@ -1571,7 +2519,7 @@ unsafe fn perform_menu_copy_and_read(
 
 /// Restore the pasteboard to what `read_pasteboard_string_via_pb` captured: put
 /// the original text back, or clear it if it was empty/whitespace.
-fn restore_pasteboard(pre_text: Option<&str>) {
+pub(crate) fn restore_pasteboard(pre_text: Option<&str>) {
     match pre_text.map(str::trim) {
         Some(t) if !t.is_empty() => {
             if let Err(e) = write_clipboard(t) {
@@ -1623,7 +2571,7 @@ fn read_selected_text_via_cmd_c() -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
-const CMD_KEYCODE: u16 = 0x37; // kVK_Command
+pub(crate) const CMD_KEYCODE: u16 = 0x37; // kVK_Command
 
 /// Post the full Cmd+C sequence to `pid`, wait for the pasteboard, read, restore.
 unsafe fn post_cmd_c_and_read(pid: i32, pre_text: Option<&str>) -> Option<String> {
@@ -1666,7 +2614,7 @@ unsafe fn post_cmd_c_and_read(pid: i32, pre_text: Option<&str>) -> Option<String
 
 /// A FlagsChanged event — used to press/release a modifier key (here, Cmd) so
 /// the target app's live modifier state actually reflects it.
-unsafe fn flags_changed_event(keycode: u16, flags: CGEventFlags) -> Option<CGEvent> {
+pub(crate) unsafe fn flags_changed_event(keycode: u16, flags: CGEventFlags) -> Option<CGEvent> {
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).ok()?;
     let event = CGEvent::new(source).ok()?;
     event.set_type(CGEventType::FlagsChanged);
@@ -1676,7 +2624,7 @@ unsafe fn flags_changed_event(keycode: u16, flags: CGEventFlags) -> Option<CGEve
 }
 
 /// A regular key-down/up event carrying the given modifier flags.
-unsafe fn key_event(keycode: u16, key_down: bool, flags: CGEventFlags) -> Option<CGEvent> {
+pub(crate) unsafe fn key_event(keycode: u16, key_down: bool, flags: CGEventFlags) -> Option<CGEvent> {
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).ok()?;
     let event = CGEvent::new_keyboard_event(source, keycode, key_down).ok()?;
     event.set_flags(flags);
@@ -1799,76 +2747,6 @@ fn is_copy_menu_title(title: &str) -> bool {
     )
 }
 
-/// `AXChildren` of an element as retained `AXUIElementRef`s (caller releases).
-unsafe fn ax_children(element: AXUIElementRef) -> Vec<AXUIElementRef> {
-    let mut value: CFTypeRef = ptr::null();
-    let attr = CFString::from_static_string("AXChildren");
-    if AXUIElementCopyAttributeValue(element, attr.as_concrete_TypeRef(), &mut value)
-        != AX_ERROR_SUCCESS
-        || value.is_null()
-    {
-        return Vec::new();
-    }
-    let count = CFArrayGetCount(value as *const std::ffi::c_void);
-    let mut out = Vec::with_capacity(count.max(0) as usize);
-    for i in 0..count {
-        let child =
-            CFArrayGetValueAtIndex(value as *const std::ffi::c_void, i) as AXUIElementRef;
-        if !child.is_null() {
-            CFRetain(child);
-            out.push(child);
-        }
-    }
-    CFRelease(value);
-    out
-}
-
-/// Focused application AXUIElement (retained; caller must `CFRelease`).
-unsafe fn ax_focused_application() -> Option<AXUIElementRef> {
-    // Use NSWorkspace's frontmost pid → AXUIElementCreateApplication. The
-    // `AXFocusedApplication` attribute on the system-wide element is unreliable:
-    // some apps (certain Tauri/Electron apps) report no focused application at
-    // all, which would silently kill the menu fallback.
-    let pid = frontmost_pid()?;
-    let app = AXUIElementCreateApplication(pid);
-    if app.is_null() {
-        return None;
-    }
-    Some(app)
-}
-
-/// pid of the current frontmost application (via NSWorkspace), wrapped in an
-/// autorelease pool because `frontmostApplication` returns an autoreleased
-/// NSRunningApplication.
-unsafe fn frontmost_pid() -> Option<i32> {
-    let pool = new_autorelease_pool();
-    let pid = frontmost_pid_inner();
-    drain_autorelease_pool(pool);
-    pid
-}
-
-unsafe fn frontmost_pid_inner() -> Option<i32> {
-    let cls = objc_getClass(b"NSWorkspace\0".as_ptr() as *const i8);
-    if cls.is_null() {
-        return None;
-    }
-    let shared_sel = sel_registerName(b"sharedWorkspace\0".as_ptr() as *const i8);
-    let workspace = objc_msgSend(cls as *mut std::ffi::c_void, shared_sel);
-    if workspace.is_null() {
-        return None;
-    }
-    let frontmost_sel = sel_registerName(b"frontmostApplication\0".as_ptr() as *const i8);
-    let running_app = objc_msgSend(workspace, frontmost_sel);
-    if running_app.is_null() {
-        return None;
-    }
-    let pid_sel = sel_registerName(b"processIdentifier\0".as_ptr() as *const i8);
-    let pid = objc_msgSend(running_app, pid_sel) as i32;
-    if pid <= 0 {
-        return None;
-    }
-    Some(pid)
-}
 
 /// Whether a mouse-up looks like a selection: the pointer dragged more than a
 /// few pixels, or it was a double/triple click (word / line select).
@@ -1885,7 +2763,7 @@ fn is_selection_gesture(down_x: f64, down_y: f64, up: &CGEvent) -> bool {
 
 /// Whether the general pasteboard is safe to temporarily borrow: it must carry
 /// no non-text data (images, files, …) that we couldn't faithfully restore.
-fn pasteboard_safe_to_borrow() -> bool {
+pub(crate) fn pasteboard_safe_to_borrow() -> bool {
     unsafe {
         let pool = new_autorelease_pool();
         let safe = pasteboard_has_only_text_types();
@@ -1933,10 +2811,8 @@ fn looks_like_non_text_uti(uti: &str) -> bool {
         || u == "public.pdf"
         || u == "com.adobe.pdf"
         || u == "public.file-url"
-        || u == "public.url"
         || u == "nsfilenamespboardtype"
         || u == "com.apple.pasteboard.promised-file-url"
-        || u == "public.audiovisual-content"
         || u == "public.movie"
         || u == "public.audio"
         || u.ends_with(".png")
@@ -1963,25 +2839,6 @@ fn clear_pasteboard() {
     }
 }
 
-unsafe fn new_autorelease_pool() -> *mut std::ffi::c_void {
-    let cls = objc_getClass(b"NSAutoreleasePool\0".as_ptr() as *const i8);
-    if cls.is_null() {
-        return ptr::null_mut();
-    }
-    let alloc = sel_registerName(b"alloc\0".as_ptr() as *const i8);
-    let obj = objc_msgSend(cls as *mut std::ffi::c_void, alloc);
-    let init = sel_registerName(b"init\0".as_ptr() as *const i8);
-    objc_msgSend(obj, init)
-}
-
-unsafe fn drain_autorelease_pool(pool: *mut std::ffi::c_void) {
-    if pool.is_null() {
-        return;
-    }
-    let drain = sel_registerName(b"drain\0".as_ptr() as *const i8);
-    objc_msgSend(pool, drain);
-}
-
 /// Returns the general NSPasteboard. Used to detect user-initiated Cmd+C
 /// (via changeCount) and read the resulting text — never to write.
 unsafe fn pasteboard_object() -> *mut std::ffi::c_void {
@@ -1996,7 +2853,7 @@ unsafe fn pasteboard_object() -> *mut std::ffi::c_void {
 /// NSPasteboard changeCount — increments every time the pasteboard is written.
 /// Used to detect that a real Cmd+C landed (vs. the user just pressing the
 /// shortcut with no selection).
-unsafe fn pasteboard_change_count() -> isize {
+pub(crate) unsafe fn pasteboard_change_count() -> isize {
     let pb = pasteboard_object();
     if pb.is_null() {
         return 0;
@@ -2009,7 +2866,7 @@ unsafe fn pasteboard_change_count() -> isize {
 /// Avoids direct ObjC `stringForType:` on background threads — that path was
 /// crashing the process (autoreleased NSString + reference-count subtleties).
 /// pbpaste is ~30-80ms, fine for our 150ms-delayed read.
-fn read_pasteboard_string_via_pb() -> Option<String> {
+pub(crate) fn read_pasteboard_string_via_pb() -> Option<String> {
     let output = Command::new("pbpaste")
         .env("LANG", "en_US.UTF-8")
         .output()
@@ -2025,7 +2882,7 @@ fn read_pasteboard_string_via_pb() -> Option<String> {
     }
 }
 
-fn write_clipboard(text: &str) -> Result<(), String> {
+pub(crate) fn write_clipboard(text: &str) -> Result<(), String> {
     write_clipboard_bytes(text.as_bytes())
 }
 
@@ -2067,16 +2924,34 @@ fn appkit_position_from_event(event: &CGEvent) -> CursorPosition {
     }
 }
 
-fn show_toolbar(toolbar_port: u16, text: String, position: CursorPosition, pending: bool) {
+fn show_toolbar(
+    app: &tauri::AppHandle,
+    toolbar_port: u16,
+    text: String,
+    position: CursorPosition,
+    pending: bool,
+    drag_origin: Option<(f64, f64)>,
+) {
+    // While the popup card is up, the toolbar never pops over it.
+    if popup_card_visible(app) {
+        log_native("toolbar show suppressed: popup visible");
+        return;
+    }
+    capture_selection_target();
     let Some(actions) = active_toolbar_actions() else {
         log_native("toolbar show ignored disabled or empty actions");
         return;
     };
 
+    // Down coordinates arrive in CG space (top-left origin); flip to the
+    // AppKit space the helper positions in, same as `appkit_position_from_event`.
+    let primary_height = CGDisplay::main().bounds().size.height as f64;
     let payload = ToolbarShowPayload {
         text,
         x: position.x,
         y: position.y,
+        down_x: drag_origin.map(|(x, _)| x as i32),
+        down_y: drag_origin.map(|(_, y)| (primary_height - y) as i32),
         pending,
         actions,
     };
@@ -2106,8 +2981,6 @@ fn wait_for_helper(toolbar_port: u16) {
         }
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
-    log_native(&format!("helper NOT ready on port {toolbar_port} after 5s"));
-    eprintln!("[toolbar] WARNING: helper did not respond on port {toolbar_port} after 5s");
 }
 
 fn post_to_helper(port: u16, path: &str, body: &str) -> std::io::Result<()> {
@@ -2124,6 +2997,70 @@ fn dispatch_toolbar_action(
     action: ToolbarActionRequest,
 ) -> Result<(), String> {
     let text = action.text.trim().to_string();
+    // The helper reports its own panel dismissal (outside click) so the tap's
+    // NOTES_UP flag never goes stale and swallows keys with no panel visible.
+    if action.action == "notes-hidden" {
+        mark_notes_hidden();
+        return Ok(());
+    }
+    // Row click on the native notes panel: select that row and run the same
+    // Enter pipeline (insert at the source app's caret).
+    if action.action == "notes-click" {
+        if let Ok(index) = action.text.trim().parse::<i32>() {
+            NOTES_SELECTED.store(index, std::sync::atomic::Ordering::Relaxed);
+            thread::spawn(notes_enter);
+        }
+        return Ok(());
+    }
+    // Native card lifecycle: the helper reports dismissal / run clears so
+    // CARD_UP never goes stale and swallows later stream events.
+    if action.action == "card-hidden" || action.action == "card-cleared" {
+        CARD_UP.store(false, std::sync::atomic::Ordering::Relaxed);
+        return Ok(());
+    }
+    // Manual input surface: open the card on AiForm + IdleState (no run).
+    if action.action == "card-input-mode" {
+        show_idle_card(app);
+        return Ok(());
+    }
+    // Save button on a finished run: text is the run's translation JSON
+    // (word/translation/pos/definition/example) plus the selected entryType.
+    if action.action == "save-vocab" {
+        return save_vocab_action(app, &action.text);
+    }
+    // AiForm submit: text is JSON {kind: "feature"|"tool", id, text}.
+    if action.action == "card-input" {
+        return card_input_action(app, &action.text);
+    }
+    // Panel tab data: notes list / next review word. The helper requests on
+    // tab switch; Rust owns the database.
+    // Notes tab row actions: insert at the source caret / delete the note.
+    if action.action == "note-insert" {
+        let app_handle = app.clone();
+        let text = action.text.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = crate::text_injection::insert_at_focus(text.clone());
+        });
+        return Ok(());
+    }
+    if action.action == "note-delete" {
+        if let Ok(id) = action.text.trim().parse::<i64>() {
+            let _ = sqlite_query_json(app, &format!("DELETE FROM notes WHERE id = {id};"));
+            let _ = app.emit("lexi://notes-changed", ());
+        }
+        return send_card_notes(app);
+    }
+
+    if action.action == "panel-notes" {
+        return send_card_notes(app);
+    }
+    if action.action == "panel-review" {
+        send_next_review_word(app);
+        return Ok(());
+    }
+    if action.action == "review-grade" {
+        return apply_review_grade(app, &action.text);
+    }
     if text.is_empty() {
         return Err("empty text".into());
     }
@@ -2144,9 +3081,189 @@ fn dispatch_toolbar_action(
             });
             Ok(())
         }
-        // Features (AI): open popup to run feature
-        _ => open_popup_with_feature(app, text, action_id),
+        // Features (AI): stream into the native result card
+        _ => {
+            show_result_card(app, &text, action_id);
+            Ok(())
+        }
     }
+}
+/// Notes tab: latest 50 notes, pushed to the card for browsing/copying.
+fn send_card_notes(app: &tauri::AppHandle) -> Result<(), String> {
+    let rows = sqlite_query_json(
+        app,
+        "SELECT IFNULL(name, '') AS name, content FROM notes ORDER BY created_at DESC, id DESC LIMIT 50;",
+    )
+    .unwrap_or_else(|| "[]".to_string());
+    let Some(port) = toolbar_port() else { return Ok(()) };
+    let body = format!("{{\"notes\":{rows}}}");
+    let _ = post_to_helper(port, "/card-notes", &body);
+    Ok(())
+}
+
+/// Review tab: one due word at a time (WebView ReviewPanel parity).
+fn send_next_review_word(app: &tauri::AppHandle) {
+    let rows = sqlite_query_json(
+        app,
+        "SELECT id, word, IFNULL(translation, '') AS translation, IFNULL(pos, '') AS pos, IFNULL(entry_type, 'word') AS entry_type FROM words WHERE status != 'mastered' AND (next_review IS NULL OR next_review <= date('now')) ORDER BY RANDOM() LIMIT 1;",
+    )
+    .unwrap_or_else(|| "[]".to_string());
+    let Some(port) = toolbar_port() else { return };
+    // Empty array means "nothing due" — send word: null.
+    let word = if rows == "[]" { "null".to_string() } else { rows.trim_start_matches('[').trim_end_matches(']').to_string() };
+    let _ = post_to_helper(port, "/card-review", &format!("{{\"word\":{word}}}"));
+}
+
+/// SM-2 scheduling (lib/sm2.ts parity) + persist + advance to the next word.
+fn apply_review_grade(app: &tauri::AppHandle, text: &str) -> Result<(), String> {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Err("invalid review payload".into());
+    };
+    let id = payload["id"].as_i64().unwrap_or(0);
+    let rating = payload["rating"].as_str().unwrap_or("good").to_string();
+    if id <= 0 {
+        return Err("invalid word id".into());
+    }
+
+    let row = sqlite_query_json(
+        app,
+        &format!("SELECT review_count, ease_factor, interval FROM words WHERE id = {id};"),
+    )
+    .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+    .and_then(|v| v.as_array().and_then(|a| a.first().cloned()));
+    let Some(row) = row else {
+        return Err("word not found".into());
+    };
+
+    let quality: f64 = match rating.as_str() {
+        "again" => 2.0,
+        "hard" => 3.0,
+        "easy" => 5.0,
+        _ => 4.0,
+    };
+    let ease = row["ease_factor"].as_f64().unwrap_or(2.5);
+    let interval = row["interval"].as_i64().unwrap_or(0);
+    let count = row["review_count"].as_i64().unwrap_or(0);
+
+    let next_ease = ((ease + (0.1 - (5.0 - quality) * (0.08 + (5.0 - quality) * 0.02))).max(1.3) * 100.0).round() / 100.0;
+    let next_interval: i64 = if quality < 3.0 || rating == "again" {
+        1
+    } else if rating == "hard" {
+        ((interval as f64) * 1.2).ceil().max(1.0) as i64
+    } else if count == 0 {
+        if rating == "easy" { 4 } else { 1 }
+    } else if count == 1 {
+        if rating == "easy" { 8 } else { 6 }
+    } else {
+        ((interval as f64) * next_ease).ceil() as i64
+    };
+    let next_count = count + 1;
+    let status = if rating == "again" || !(next_count >= 4 && next_interval >= 21) {
+        "learning"
+    } else {
+        "mastered"
+    };
+    let next_review = iso_date_plus_days(next_interval);
+
+    let _ = sqlite_query_json(
+        app,
+        &format!(
+            "UPDATE words SET status = '{status}', review_count = {next_count}, next_review = '{next_review}', ease_factor = {next_ease}, interval = {next_interval} WHERE id = {id};"
+        ),
+    );
+    let _ = app.emit("lexi://words-changed", ());
+    send_next_review_word(app);
+    Ok(())
+}
+
+/// ISO date (YYYY-MM-DD) `days` from today, epoch-days → civil (Hinnant).
+fn iso_date_plus_days(days: i64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let z = now.div_euclid(86400) + days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Save button on the native card: persist the run's translation JSON with
+/// the entry type the user picked on the card (WebView EntryTypeTags parity).
+fn save_vocab_action(app: &tauri::AppHandle, text: &str) -> Result<(), String> {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Err("invalid save payload".into());
+    };
+    let field = |key: &str| payload[key].as_str().unwrap_or("").to_string();
+    let word = field("word");
+
+    if word.trim().is_empty() {
+        return Err("empty word".into());
+    }
+    let entry_type = field("entryType");
+    let entry_type = if entry_type.is_empty() { "word".to_string() } else { entry_type };
+    save_word_entry(
+        &word,
+        &field("translation"),
+        &field("pos"),
+        &field("definition"),
+        &field("example"),
+        &entry_type,
+    );
+    let _ = app.emit("lexi://words-changed", ());
+    Ok(())
+}
+
+/// AiForm submit from the native card: run a feature (empty id = the first
+/// enabled feature) or a toolbar tool against the typed text.
+fn card_input_action(app: &tauri::AppHandle, text: &str) -> Result<(), String> {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Err("invalid input payload".into());
+    };
+    let kind = payload["kind"].as_str().unwrap_or("feature");
+    let id = payload["id"].as_str().unwrap_or("").to_string();
+    let input = payload["text"].as_str().unwrap_or("").trim().to_string();
+    if input.is_empty() {
+        return Err("empty input".into());
+    }
+
+    if kind == "tool" {
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = crate::commands::tools::execute_tool(app_handle, id, input).await {
+                eprintln!("[card] tool failed: {e}");
+            }
+        });
+        return Ok(());
+    }
+
+    let feature_id = if id.is_empty() {
+        let Some(rows) = sqlite_query_json(
+            app,
+            "SELECT id FROM ai_features WHERE enabled = 1 ORDER BY sort_order LIMIT 1;",
+        ) else {
+            return Err("no enabled feature".into());
+        };
+        serde_json::from_str::<serde_json::Value>(&rows)
+            .ok()
+            .and_then(|v| v.as_array().and_then(|a| a.first()).cloned())
+            .and_then(|row| row["id"].as_str().map(str::to_string))
+            .unwrap_or_default()
+    } else {
+        id
+    };
+    if feature_id.is_empty() {
+        return Err("no enabled feature".into());
+    }
+    show_result_card(app, &input, &feature_id);
+    Ok(())
 }
 
 fn open_popup_with_feature(
@@ -2154,6 +3271,7 @@ fn open_popup_with_feature(
     text: String,
     feature_id: &str,
 ) -> Result<(), String> {
+    capture_selection_target();
     show_popup(app)?;
     app.emit(
         "lexi://ai-request",
@@ -2167,12 +3285,16 @@ fn open_popup_with_feature(
 }
 
 fn show_popup(app: &tauri::AppHandle) -> Result<(), String> {
+    show_popup_with_panel(app, "translate")
+}
+
+fn show_popup_with_panel(app: &tauri::AppHandle, panel: &'static str) -> Result<(), String> {
     let handle = app.clone();
     let task_handle = handle.clone();
-
+    let panel = panel.to_string();
     handle
         .run_on_main_thread(move || {
-            if let Err(error) = show_popup_now(&task_handle) {
+            if let Err(error) = show_popup_now(&task_handle, &panel) {
                 log_native(&format!("Could not show popup: {error}"));
             }
         })
@@ -2181,7 +3303,7 @@ fn show_popup(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn show_popup_now(app: &tauri::AppHandle) -> Result<(), String> {
+fn show_popup_now(app: &tauri::AppHandle, panel: &str) -> Result<(), String> {
     let Some(window) = app.get_webview_window("popup_card") else {
         return Err("popup window was not found".into());
     };
@@ -2191,6 +3313,7 @@ fn show_popup_now(app: &tauri::AppHandle) -> Result<(), String> {
     if already_visible {
         // Bring to front without stealing focus from the source app
         show_window_without_focus(&window);
+        mark_popup_up(true);
         return Ok(());
     }
 
@@ -2207,12 +3330,16 @@ fn show_popup_now(app: &tauri::AppHandle) -> Result<(), String> {
     // Emit before show so content clears while window is still hidden
     app.emit(
         "lexi://popup-shown",
-        PopupShownPayload { mode: "popup_card" },
+        PopupShownPayload {
+            mode: "popup_card",
+            panel: panel.to_string(),
+        },
     )
     .map_err(|error| format!("Could not emit popup shown: {error}"))?;
 
     // Show without stealing focus — preserves text selection in the source app
     show_window_without_focus(&window);
+    mark_popup_up(true);
 
     Ok(())
 }
@@ -2287,41 +3414,20 @@ pub fn handoff_to_app_cmd(text: String, target_app: String) -> Result<(), String
     do_handoff(&text, &target_app)
 }
 
-fn do_handoff(text: &str, target_app: &str) -> Result<(), String> {
+pub(crate) fn do_handoff(text: &str, target_app: &str) -> Result<(), String> {
     let app = if target_app.is_empty() { "ChatGPT" } else { target_app };
     log_native(&format!("handoff: target={}, text_len={}", app, text.len()));
-
-    // Write text to clipboard
-    write_clipboard(text)?;
-
-    // AppleScript: activate target app, then paste
-    let script = format!(
-        r#"set the clipboard to "{}"
-tell application "{}" to activate
-delay 1.0
-tell application "System Events"
-    keystroke "v" using command down
-end tell"#,
-        text.replace('\\', "\\\\").replace('"', "\\\""),
-        app.replace('\\', "\\\\").replace('"', "\\\""),
-    );
-
-    log_native(&format!("handoff: script len={}", script.len()));
-
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output()
-        .map_err(|error| format!("Could not run handoff: {error}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        log_native(&format!("handoff: osascript failed: {}", stderr));
-        return Err(format!("osascript error: {}", stderr));
+    // Activate the target app natively (no osascript: no quoting pitfalls — the
+    // old script broke on any newline in the text — and no fixed 1s delay),
+    // wait for it to take the front, then paste through the pasteboard lease:
+    // the user's clipboard is restored afterwards.
+    let Some(pid) = text_injection::activate_app_by_bundle_id(app) else {
+        return Err(format!("App \"{app}\" is not running."));
+    };
+    if !text_injection::wait_for_frontmost(pid) {
+        return Err(format!("Could not bring \"{app}\" to the front."));
     }
-
-    log_native("handoff: completed successfully");
-    Ok(())
+    text_injection::paste_text(pid, text).map(|_| ())
 }
 
 fn read_http_request(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
@@ -2381,8 +3487,7 @@ fn write_response(stream: &mut TcpStream, status: u16, body: &str) -> std::io::R
     )
 }
 
-
-fn launch_helper(app: &tauri::App, action_port: u16, toolbar_port: u16) -> anyhow::Result<()> {
+fn launch_helper(app: &tauri::AppHandle, action_port: u16, toolbar_port: u16) -> anyhow::Result<()> {
     let helper_app = helper_app_path(app)?;
     if !helper_app.exists() {
         eprintln!(
@@ -2408,7 +3513,7 @@ fn launch_helper(app: &tauri::App, action_port: u16, toolbar_port: u16) -> anyho
     Ok(())
 }
 
-fn helper_app_path(app: &tauri::App) -> anyhow::Result<PathBuf> {
+fn helper_app_path(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
     if let Ok(resource_dir) = app.path().resource_dir() {
         let bundled = resource_dir.join("native/LexiSelectionHelper.app");
         if bundled.exists() {
@@ -2417,6 +3522,33 @@ fn helper_app_path(app: &tauri::App) -> anyhow::Result<PathBuf> {
     }
 
     Ok(env::current_dir()?.join("native/LexiSelectionHelper.app"))
+}
+
+/// The helper renders the toolbar, notes panel and result card. If it dies
+/// (crash, OOM, user kill), everything native silently disappears until the
+/// app restarts. Probe the toolbar port and relaunch when it goes away; the
+/// helper's own terminateOlderHelperInstances keeps a double-launch
+/// self-consistent.
+fn spawn_helper_watchdog(app: tauri::AppHandle, action_port: u16, toolbar_port: u16) {
+    thread::spawn(move || {
+        let mut last_launch = Instant::now();
+        loop {
+            thread::sleep(Duration::from_secs(10));
+            if TcpStream::connect((IPC_HOST, toolbar_port)).is_ok() {
+                continue;
+            }
+            // A freshly launched helper needs a moment to bind — don't
+            // stampede it with repeat launches during its startup window.
+            if last_launch.elapsed() < Duration::from_secs(30) {
+                continue;
+            }
+            log_native("watchdog: helper unreachable, relaunching");
+            if let Err(error) = launch_helper(&app, action_port, toolbar_port) {
+                log_native(&format!("watchdog: relaunch failed: {error}"));
+            }
+            last_launch = Instant::now();
+        }
+    });
 }
 
 fn request_system_permissions() {
@@ -2445,7 +3577,7 @@ fn request_system_permissions() {
     }
 }
 
-fn log_native(message: &str) {
+pub(crate) fn log_native(message: &str) {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
@@ -2466,37 +3598,9 @@ fn open_privacy_settings(pane: &str) {
 }
 
 #[link(name = "CoreGraphics", kind = "framework")]
-#[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn CGPreflightListenEventAccess() -> bool;
     fn CGRequestListenEventAccess() -> bool;
     fn CGPreflightPostEventAccess() -> bool;
     fn CGRequestPostEventAccess() -> bool;
-    fn AXUIElementCreateSystemWide() -> AXUIElementRef;
-    fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
-    fn AXUIElementCopyAttributeValue(
-        element: AXUIElementRef,
-        attribute: CFStringRef,
-        value: *mut CFTypeRef,
-    ) -> i32;
-    fn AXUIElementCopyElementAtPosition(
-        application: AXUIElementRef,
-        x: f32,
-        y: f32,
-        element: *mut AXUIElementRef,
-    ) -> i32;
-    fn AXValueGetValue(
-        value: CFTypeRef,
-        the_type: u32,
-        range_ptr: *mut std::ffi::c_void,
-    ) -> bool;
-    fn AXUIElementPerformAction(element: AXUIElementRef, action: CFStringRef) -> i32;
-}
-
-extern "C" {
-    fn CFArrayGetCount(the_array: *const std::ffi::c_void) -> isize;
-    fn CFArrayGetValueAtIndex(
-        the_array: *const std::ffi::c_void,
-        idx: isize,
-    ) -> *const std::ffi::c_void;
 }

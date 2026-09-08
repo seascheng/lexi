@@ -1,11 +1,11 @@
-import { Sun, Moon } from "lucide-react";
+import { Sun, Moon, Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AccentColor, AppSettings, BackgroundStyle, DockMode } from "../types";
 import { applyAppearanceSettings, normalizedOpacity } from "../lib/appearance";
 import { saveSettings } from "../lib/database";
 import { errorMessage } from "../lib/errors";
 import { isTauriRuntime } from "../lib/platform";
-import { Field, Input, Select } from "../components/ui/Field";
+import { Field, Input, Select, SettingsCard, FieldDivider, Textarea } from "../components/ui/Field";
 import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 
 interface SettingsPageProps {
@@ -94,155 +94,157 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
   const isCustomActive = draft.accentColor === "custom";
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <h2 className="text-base font-semibold">Appearance</h2>
-        <div className="grid items-start gap-2 sm:grid-cols-2">
-          <Field label="Theme">
-            <div className="flex gap-0.5 rounded-md bg-surface/30 p-0.5">
-              <ThemeButton
-                active={draft.theme === "dark"}
-                icon={<Moon size={16} />}
-                label="Dark"
-                onClick={() => setDraft({ ...draft, theme: "dark" })}
-              />
-              <ThemeButton
-                active={draft.theme === "light"}
-                icon={<Sun size={16} />}
-                label="Light"
-                onClick={() => setDraft({ ...draft, theme: "light" })}
-              />
-            </div>
-          </Field>
-          <Field label="Accent color">
-            <div className="flex items-center gap-1.5">
-              {ACCENT_OPTIONS.map(({ value, color }) => (
-                <button
-                  key={value}
-                  className={`h-6 w-6 rounded-full border-2 transition ${
-                    draft.accentColor === value ? "border-strong scale-110" : "border-transparent hover:scale-105"
-                  }`}
-                  style={{ backgroundColor: color }}
-                  onClick={() => setDraft({ ...draft, accentColor: value })}
-                  title={value}
-                  type="button"
-                />
-              ))}
-              <label
-                className={`relative flex h-6 w-6 items-center justify-center rounded-full border-2 transition ${
-                  isCustomActive ? "border-strong scale-110" : "border-transparent hover:scale-105"
-                }`}
-                style={isCustomActive ? { backgroundColor: draft.customAccentColor } : undefined}
-                title="Custom color"
-              >
-                {!isCustomActive && (
-                  <span className="text-[10px] leading-none text-muted">+</span>
-                )}
-                <input
-                  className="absolute inset-0 cursor-pointer opacity-0"
-                  onChange={(event) => setDraft({ ...draft, accentColor: "custom", customAccentColor: event.target.value })}
-                  type="color"
-                  value={draft.customAccentColor}
-                />
-              </label>
-            </div>
-          </Field>
-        </div>
-      </div>
-      <div className="space-y-2">
-        <h3 className="text-sm font-medium text-muted">Popup window</h3>
-        <div className="grid items-start gap-2 sm:grid-cols-2">
-          <Field label="Background" hint="Applied only to the translation popup and bar.">
-            <Select
-              onChange={(event) => setDraft({ ...draft, backgroundStyle: event.target.value as BackgroundStyle })}
-              value={draft.backgroundStyle}
-            >
-              <option value="solid">Solid</option>
-              <option value="transparent">Transparent</option>
-              <option value="macos_glass_clear">Liquid Glass</option>
-            </Select>
-          </Field>
-          <Field label={`Opacity: ${normalizedOpacity(draft.windowOpacity)}%`}>
-            <Input
-              max={100}
-              min={0}
-              onChange={(event) => setDraft({ ...draft, windowOpacity: Number(event.target.value) })}
-              step={5}
-              type="range"
-              value={normalizedOpacity(draft.windowOpacity)}
+    <div className="mx-auto max-w-2xl space-y-5">
+      <header className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold tracking-tight">Settings</h2>
+        <span className="text-xs text-muted">
+          {saveState === "saving" ? "Saving…" : "Autosaved"}
+        </span>
+      </header>
+
+      <SettingsCard title="Appearance" description="Theme, accent color and popup background.">
+        <Field label="Theme" inline>
+          <div className="flex gap-0.5 rounded-lg bg-surface/60 p-0.5">
+            <ThemeButton
+              active={draft.theme === "dark"}
+              icon={<Moon size={14} />}
+              label="Dark"
+              onClick={() => setDraft({ ...draft, theme: "dark" })}
             />
-          </Field>
-          <Field label="Shortcut" hint="Global shortcut to show the popup from any Space.">
-            <ShortcutRecorder
-              value={draft.popupShortcut}
-              onChange={(shortcut) => setDraft({ ...draft, popupShortcut: shortcut })}
+            <ThemeButton
+              active={draft.theme === "light"}
+              icon={<Sun size={14} />}
+              label="Light"
+              onClick={() => setDraft({ ...draft, theme: "light" })}
             />
-          </Field>
-          <Field label="App location" hint="Menu bar only hides the Dock icon.">
-            <Select
-              onChange={(event) => setDraft({ ...draft, dockMode: event.target.value as DockMode })}
-              value={draft.dockMode}
-            >
-              <option value="dock_and_menu_bar">Dock and menu bar</option>
-              <option value="menu_bar_only">Menu bar only</option>
-            </Select>
-          </Field>
-          <Field label="Launch at login" hint="Automatically start Lexi when you log in.">
-            <div className="flex items-center">
-              <ToggleSwitch
-                checked={draft.autoStart}
-                onChange={(v) => setDraft({ ...draft, autoStart: v })}
+          </div>
+        </Field>
+        <FieldDivider />
+        <Field label="Accent color" inline>
+          <div className="flex items-center gap-2">
+            {ACCENT_OPTIONS.map(({ value, color }) => (
+              <AccentSwatch
+                active={draft.accentColor === value}
+                color={color}
+                key={value}
+                onClick={() => setDraft({ ...draft, accentColor: value })}
+                title={value}
               />
-            </div>
-          </Field>
-          <Field label="Excluded apps" hint="Bundle IDs of apps where the toolbar should not appear (e.g. com.apple.finder). One per line.">
-            <textarea
-              className="h-20 w-full rounded-md border border-border bg-input px-2.5 py-1.5 text-sm text-strong outline-none focus:border-accent"
-              onChange={(event) => {
-                const apps = event.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
-                setDraft({ ...draft, excludedToolbarApps: apps });
+            ))}
+            <label
+              className="relative flex h-7 w-7 items-center justify-center rounded-full border-2 transition hover:scale-105"
+              style={{
+                borderColor: isCustomActive ? "rgb(var(--color-strong))" : "transparent",
+                backgroundColor: isCustomActive ? draft.customAccentColor : "rgb(var(--color-surface-hover))",
               }}
-              placeholder="com.apple.finder"
-              value={(draft.excludedToolbarApps ?? []).join("\n")}
-            />
-          </Field>
-        </div>
-      </div>
-      <hr className="border-border/30" />
-      <div className="space-y-2">
-        <h2 className="text-base font-semibold">AI API</h2>
-        <div className="grid gap-2">
+              title="Custom color"
+            >
+              {!isCustomActive && <span className="text-xs leading-none text-muted">+</span>}
+              <input
+                className="absolute inset-0 cursor-pointer opacity-0"
+                onChange={(event) => setDraft({ ...draft, accentColor: "custom", customAccentColor: event.target.value })}
+                type="color"
+                value={draft.customAccentColor}
+              />
+            </label>
+          </div>
+        </Field>
+        <FieldDivider />
+        <Field label="Popup background" inline hint="Applied to the translation popup and bar.">
+          <Select
+            onChange={(event) => setDraft({ ...draft, backgroundStyle: event.target.value as BackgroundStyle })}
+            value={draft.backgroundStyle}
+          >
+            <option value="solid">Solid</option>
+            <option value="transparent">Transparent</option>
+            <option value="macos_glass_clear">Liquid Glass</option>
+          </Select>
+        </Field>
+        <FieldDivider />
+        <Field label="Popup opacity" inline hint={`${normalizedOpacity(draft.windowOpacity)}%`}>
+          <input
+            className="h-1.5 w-40 cursor-pointer appearance-none rounded-full bg-surface-hover accent-accent"
+            max={100}
+            min={0}
+            onChange={(event) => setDraft({ ...draft, windowOpacity: Number(event.target.value) })}
+            step={5}
+            type="range"
+            value={normalizedOpacity(draft.windowOpacity)}
+          />
+        </Field>
+      </SettingsCard>
+
+      <SettingsCard title="Popup" description="Global shortcut and where the popup can appear.">
+        <Field label="Show popup shortcut" inline hint="Works from any Space.">
+          <ShortcutRecorder
+            value={draft.popupShortcut}
+            onChange={(shortcut) => setDraft({ ...draft, popupShortcut: shortcut })}
+          />
+        </Field>
+      </SettingsCard>
+
+      <SettingsCard title="General" description="App presence and system integration.">
+        <Field label="App location" inline hint="Menu bar only hides the Dock icon.">
+          <Select
+            onChange={(event) => setDraft({ ...draft, dockMode: event.target.value as DockMode })}
+            value={draft.dockMode}
+          >
+            <option value="dock_and_menu_bar">Dock and menu bar</option>
+            <option value="menu_bar_only">Menu bar only</option>
+          </Select>
+        </Field>
+        <FieldDivider />
+        <Field label="Launch at login" inline hint="Start Lexi automatically when you log in.">
+          <ToggleSwitch
+            checked={draft.autoStart}
+            onChange={(v) => setDraft({ ...draft, autoStart: v })}
+          />
+        </Field>
+        <FieldDivider />
+        <Field label="Excluded apps" hint="Bundle IDs of apps where the selection toolbar should not appear (e.g. com.apple.finder). One per line.">
+          <Textarea
+            className="font-mono text-xs"
+            onChange={(event) => {
+              const apps = event.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
+              setDraft({ ...draft, excludedToolbarApps: apps });
+            }}
+            placeholder="com.apple.finder"
+            value={(draft.excludedToolbarApps ?? []).join("\n")}
+          />
+        </Field>
+      </SettingsCard>
+
+      <SettingsCard title="AI API" description="OpenAI-compatible endpoint used by all features.">
+        <div className="grid gap-3">
           <Field label="Base URL">
             <Input
               onChange={(event) => setDraft({ ...draft, apiBaseUrl: event.target.value })}
               value={draft.apiBaseUrl}
             />
           </Field>
-          <div className="grid gap-2.5 sm:grid-cols-2">
-            <Field label="Model">
-              <Input onChange={(event) => setDraft({ ...draft, model: event.target.value })} value={draft.model} />
-            </Field>
-            <Field label="API key">
-              <Input
-                onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
-                type="password"
-                value={draft.apiKey}
-              />
-              </Field>
-          </div>
+          <Field label="Model">
+            <Input onChange={(event) => setDraft({ ...draft, model: event.target.value })} value={draft.model} />
+          </Field>
+          <Field
+            label="API key"
+            hint={savedApiKeyLength > 0 ? `Saved key: ${savedApiKeyLength} characters` : "Not saved yet"}
+          >
+            <Input
+              onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
+              type="password"
+              value={draft.apiKey}
+            />
+          </Field>
         </div>
-        <div className="rounded-md bg-surface/50 px-3 py-1.5 text-xs leading-5 text-muted">
-          Runtime: {isTauriRuntime() ? "Desktop app SQLite" : "Browser preview localStorage"}.
-          Saved API key: {savedApiKeyLength > 0 ? `${savedApiKeyLength} characters` : "not saved"}.
-        </div>
-      </div>
-      <hr className="border-border/30" />
-      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+      </SettingsCard>
+
+      <div className="flex flex-col gap-2.5 pb-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-base font-semibold">About</h2>
-          <p className="mt-1 text-sm text-muted">Lexi 0.1.0</p>
+          <p className="mt-1 text-sm text-muted">
+            Lexi 0.1.0 · {isTauriRuntime() ? "Desktop (SQLite)" : "Browser preview (localStorage)"}
+          </p>
         </div>
-        <p className="text-sm text-muted">{saveState === "saving" ? "Saving..." : "Autosaved"}</p>
       </div>
       {saveError ? (
         <div className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -263,7 +265,7 @@ interface ThemeButtonProps {
 function ThemeButton({ active, icon, label, onClick }: ThemeButtonProps) {
   return (
     <button
-      className={`flex flex-1 items-center justify-center gap-1.5 rounded py-1.5 text-sm font-medium transition ${
+      className={`flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
         active ? "bg-panel text-strong shadow-sm" : "text-muted hover:text-strong"
       }`}
       onClick={onClick}
@@ -271,6 +273,32 @@ function ThemeButton({ active, icon, label, onClick }: ThemeButtonProps) {
     >
       {icon}
       {label}
+    </button>
+  );
+}
+
+function AccentSwatch({
+  active,
+  color,
+  onClick,
+  title,
+}: {
+  active: boolean;
+  color: string;
+  onClick: () => void;
+  title: string;
+}) {
+  return (
+    <button
+      className={`flex h-7 w-7 items-center justify-center rounded-full border-2 transition hover:scale-105 ${
+        active ? "scale-110 border-strong" : "border-transparent"
+      }`}
+      onClick={onClick}
+      style={{ backgroundColor: color }}
+      title={title}
+      type="button"
+    >
+      {active && <Check size={13} strokeWidth={3} className="text-white drop-shadow" />}
     </button>
   );
 }
@@ -294,17 +322,14 @@ function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
       event.preventDefault();
       event.stopPropagation();
 
-      // Escape stops recording
       if (event.key === "Escape") {
         setRecording(false);
         return;
       }
 
-      // Detect bare modifier press — the key itself IS a modifier
       const isBareModifier = ["Meta", "Control", "Shift", "Alt"].includes(event.key);
 
       if (isBareModifier) {
-        // Check for double-press of the same modifier within 500ms
         const modifierName = event.key === "Control" ? "Ctrl"
           : event.key === "Meta" ? "Cmd"
           : event.key === "Shift" ? "Shift"
@@ -313,7 +338,6 @@ function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
         const last = lastModifierRef.current;
 
         if (last && last.key === modifierName && now - last.time < 500) {
-          // Double-press detected
           onChange(`${modifierName}+${modifierName}`);
           lastModifierRef.current = null;
           setRecording(false);
@@ -324,7 +348,6 @@ function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
         return;
       }
 
-      // Require at least one modifier for key combos
       if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
         return;
       }
@@ -360,7 +383,7 @@ function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
 
   return (
     <button
-      className={`h-8 rounded-md border px-2.5 text-left text-sm transition outline-none ${
+      className={`min-w-28 rounded-md border px-2.5 py-1.5 text-center font-mono text-xs transition outline-none ${
         recording
           ? "border-accent bg-accent/10 text-accent"
           : "border-border bg-input text-strong focus:border-accent"
@@ -369,7 +392,7 @@ function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
       onBlur={() => setRecording(false)}
       type="button"
     >
-      {recording ? "Press shortcut..." : value || "Not set"}
+      {recording ? "Recording…" : value || "Not set"}
     </button>
   );
 }
@@ -390,14 +413,16 @@ function ToggleSwitch({
         e.stopPropagation();
         onChange(!checked);
       }}
-      style={{ width: 28, height: 16 }}
+      style={{ width: 38, height: 22 }}
       type="button"
+      role="switch"
+      aria-checked={checked}
     >
       <span
         className={`absolute rounded-full bg-white shadow-sm transition-all ${
-          checked ? "right-0.5" : "left-0.5"
+          checked ? "right-[3px]" : "left-[3px]"
         }`}
-        style={{ width: 12, height: 12, top: 2 }}
+        style={{ width: 16, height: 16, top: 3 }}
       />
     </button>
   );

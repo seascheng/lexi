@@ -113,28 +113,7 @@ fn tool_handoff(app: &tauri::AppHandle, text: String) -> Result<(), String> {
         return Err("No handoff target app configured.".into());
     }
 
-    write_clipboard(&text)?;
-
-    let script = format!(
-        r#"tell application "{}" to activate
-delay 1.0
-tell application "System Events"
-    keystroke "v" using command down
-end tell"#,
-        target_app.replace('\\', "\\\\").replace('"', "\\\""),
-    );
-
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output()
-        .map_err(|error| format!("Handoff failed: {error}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Handoff error: {stderr}"));
-    }
-    Ok(())
+    crate::native_toolbar::do_handoff(&text, &target_app)
 }
 
 // --- Helpers ---
