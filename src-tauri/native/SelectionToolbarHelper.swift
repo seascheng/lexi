@@ -1376,7 +1376,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         cardNotesClip.drawsBackground = false
         cardNotesClip.hasVerticalScroller = true
         cardNotesClip.autohidesScrollers = true
-        let notesDoc = NSView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
+        let notesDoc = FlippedNotesDoc(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
         cardNotesClip.documentView = notesDoc
         resultContainer.addSubview(cardNotesClip)
 
@@ -1599,7 +1599,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         // content, 64pt row pitch. Click = select + inject at the source
         // caret; the per-row ↵ button is gone (Enter does the same).
         let doc = cardNotesClip.documentView ?? NSView()
-        var y: CGFloat = CGFloat(max(payload.notes.count - 1, 0)) * 64
+        var y: CGFloat = 4
         let rowW = (cardUserWidth ?? resultCardWidth) - 16
         for note in payload.notes {
             let row = ClickableRow(frame: NSRect(x: 4, y: y, width: rowW, height: 64))
@@ -1608,6 +1608,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             row.onClicked = { [weak self] in
                 guard let self, let index = self.cardNoteRowViews.firstIndex(of: row) else { return }
                 self.cardNotesInject(index)
+            }
+            row.onHover = { [weak self, weak row] entered in
+                guard let self, let row, let index = self.cardNoteRowViews.firstIndex(of: row),
+                      index != self.cardNotesSelectedIndex else { return }
+                row.layer?.backgroundColor = entered
+                    ? NSColor.labelColor.withAlphaComponent(0.05).cgColor
+                    : NSColor.clear.cgColor
             }
 
             let icon = NSImageView(frame: NSRect(x: 12, y: 23, width: 18, height: 18))
@@ -1664,7 +1671,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             cardNoteRowViews.append(row)
             y -= 64
         }
-        let notesHeight = CGFloat(max(payload.notes.count, 1)) * 64 + 12
+        let notesHeight = CGFloat(max(payload.notes.count, 1)) * 64 + 8
         doc.frame = NSRect(x: 0, y: 0, width: rowW + 8, height: notesHeight)
         cardNotesSelect(0)
         layoutResultCard()
@@ -1692,9 +1699,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             }
         }
         let count = cardNoteRowViews.count
-        let rowY = CGFloat(count - 1 - cardNotesSelectedIndex) * 64
+        let rowY = CGFloat(cardNotesSelectedIndex) * 64 // flipped: index 0 = top
         let clipH = cardNotesClip.frame.height
-        let docH = CGFloat(count) * 64 + 12
+        let docH = CGFloat(count) * 64 + 8
         let targetY = min(max(rowY - 8, 0), max(0, docH - clipH))
         cardNotesClip.contentView.scroll(to: NSPoint(x: 0, y: targetY))
         cardNotesClip.reflectScrolledClipView(cardNotesClip.contentView)
@@ -2833,12 +2840,33 @@ private struct CardReviewPayload: Decodable {
     let word: ReviewWord?
 }
 
-/// Whole-row click target (notes rows: click = select + inject).
+/// Whole-row click target (notes rows: click = select + inject). Hover gives
+/// unselected rows a whisper of background so the target is discoverable.
 private final class ClickableRow: NSView {
     var onClicked: (() -> Void)?
+    var onHover: ((Bool) -> Void)?
+    private var hoverArea: NSTrackingArea?
+
+    override var isFlipped: Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        if let hoverArea { addTrackingArea(hoverArea) }
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseExited(with event: NSEvent) { onHover?(false) }
+
     override func mouseDown(with event: NSEvent) {
         onClicked?()
     }
+}
+
+/// Top-down document view for the notes list (row 0 = the top edge).
+private final class FlippedNotesDoc: NSView {
+    override var isFlipped: Bool { true }
 }
 
 /// NSTextField that reports clicks (notes rows: click = copy).
