@@ -274,6 +274,10 @@ static CARD_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 /// injects the selected note at the source app's caret (the whole point of
 /// the panel — keyboard-only, no mouse round trip).
 static CARD_NOTES_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The result card is the KEY window (user clicked into it). Notes keyboard
+/// actions are legal ONLY now — without this gate the tap ate Enter typed in
+/// other apps and injected notes into them.
+static CARD_NOTES_FOCUS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static CARD_AUTO_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub(crate) fn forward_card_event(
@@ -1881,21 +1885,21 @@ fn handle_system_event(
             // panel tabs), mirroring the WebView popup consuming navigation
             // keys while visible. Everything else passes through.
             let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-            if keycode == 48 {
+            let card_focused = CARD_NOTES_FOCUS.load(std::sync::atomic::Ordering::Relaxed);
+            if keycode == 48 && card_focused {
                 if let Some(port) = crate::native_toolbar::toolbar_port() {
                     let _ = post_to_helper(port, "/card-tab-cycle", "{}");
                 }
                 return CallbackResult::Drop;
             }
-            if CARD_NOTES_MODE.load(std::sync::atomic::Ordering::Relaxed) {
-                log_native(&format!("card-notes key keycode={keycode}"));
+            if CARD_NOTES_MODE.load(std::sync::atomic::Ordering::Relaxed) && card_focused {
                 match keycode {
                     125 | 126 => {
                         let delta = if keycode == 125 { 1 } else { -1 };
                         thread::spawn(move || notes_navigate(delta));
                         return CallbackResult::Drop;
                     }
-                    36 | 52 => {
+                    36 | 52 if !NOTES_SNAPSHOT.lock().map(|c| c.is_empty()).unwrap_or(true) => {
                         thread::spawn(notes_enter);
                         return CallbackResult::Drop;
                     }
@@ -3104,6 +3108,7 @@ fn dispatch_toolbar_action(
     if action.action == "card-hidden" || action.action == "card-cleared" {
         CARD_UP.store(false, std::sync::atomic::Ordering::Relaxed);
         CARD_NOTES_MODE.store(false, std::sync::atomic::Ordering::Relaxed);
+        CARD_NOTES_FOCUS.store(false, std::sync::atomic::Ordering::Relaxed);
         return Ok(());
     }
     // Manual input surface: open the card on AiForm + IdleState (no run).
@@ -3139,6 +3144,10 @@ fn dispatch_toolbar_action(
         return send_card_notes(app);
     }
 
+    if action.action == "card-key" {
+        CARD_NOTES_FOCUS.store(action.text.trim() == "1", std::sync::atomic::Ordering::Relaxed);
+        return Ok(());
+    }
     if action.action == "panel-notes" {
         return send_card_notes(app);
     }

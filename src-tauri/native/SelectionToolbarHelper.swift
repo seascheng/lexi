@@ -1203,6 +1203,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         panelTabsControl.action = #selector(panelTabClicked(_:))
         for (index, def) in panelDefs.enumerated() {
             panelTabsControl.setLabel(def.name, forSegment: index)
+            panelTabsControl.setImage(lucideImage(for: def.icon, title: def.name), forSegment: index)
             panelTabsControl.setToolTip(def.name, forSegment: index)
         }
         panelTabsControl.selectedSegment = 0
@@ -1539,6 +1540,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             panelTabsControl.segmentCount = panelDefs.count
             for (index, def) in panelDefs.enumerated() {
                 panelTabsControl.setLabel(def.name, forSegment: index)
+                panelTabsControl.setImage(lucideImage(for: def.icon, title: def.name), forSegment: index)
                 panelTabsControl.setToolTip(def.name, forSegment: index)
             }
             if let index = panelDefs.firstIndex(where: { $0.id == activePanel }) {
@@ -1586,12 +1588,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         layoutResultCard()
     }
 
-    /// Mouse click on a row: select + run the Enter pipeline (notes-click on
-    /// the Rust side). Keyboard ↑/↓ selection does NOT fire the action.
+    /// Mouse click on a row: SELECT it and copy the content to the
+    /// clipboard. Injection happens on Enter only (WebView parity).
     @objc private func notesTableClicked(_ sender: NSTableView) {
         let row = sender.clickedRow
         guard row >= 0, row < cardNotesItems.count else { return }
-        postAction(action: "notes-click", text: "\(row)")
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(cardNotesItems[row].content, forType: .string)
     }
 
     @objc private func noteInsertClicked(_ sender: NSButton) {
@@ -3294,6 +3298,16 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         nil // default row view: the cell owns selection + hover visuals
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        let selected = notesTableView.selectedRow
+        for row in 0..<cardNotesItems.count {
+            guard let cell = notesTableView.view(
+                atColumn: 0, row: row, makeIfNecessary: false
+            ) as? NoteRowCell else { continue }
+            cell.backgroundStyle = row == selected ? .emphasized : .normal
+        }
     }
 }
 
