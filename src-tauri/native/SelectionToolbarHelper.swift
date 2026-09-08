@@ -1151,7 +1151,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         )
         applyNotesTheme()
         selectNoteRow(payload.selected, scroll: true)
-        NSApp.activate(ignoringOtherApps: true)
         notesPanel.makeKeyAndOrderFront(nil)
         notesPanel.makeFirstResponder(notesTableView)
         log("notes panel shown rows=\(payload.notes.count)")
@@ -1636,7 +1635,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 rise.duration = 0.22
                 rise.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 layer.add(rise, forKey: "materialize")
-                NSApp.activate(ignoringOtherApps: true)
                 resultPanel.makeKeyAndOrderFront(nil)
                 NSAnimationContext.runAnimationGroup({ context in
                     context.duration = 0.22
@@ -1645,7 +1643,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 })
             } else {
                 resultPanel.alphaValue = 0
-                NSApp.activate(ignoringOtherApps: true)
                 resultPanel.makeKeyAndOrderFront(nil)
                 NSAnimationContext.runAnimationGroup({ context in
                     context.duration = 0.15
