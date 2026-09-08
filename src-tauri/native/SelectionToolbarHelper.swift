@@ -2766,6 +2766,15 @@ private final class NoteRowCell: NSTableCellView {
     private var hoverArea: NSTrackingArea?
     private var hovering = false
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        addSubview(iconView)
+        addSubview(titleLabel)
+        addSubview(contentLabel)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not supported") }
+
     override var backgroundStyle: NSView.BackgroundStyle {
         didSet { retint() }
     }
