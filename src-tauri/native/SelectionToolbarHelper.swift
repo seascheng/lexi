@@ -587,6 +587,8 @@ private final class HoverIconButton: NSButton {
 private final class HorizontalOnlyClip: NSScrollView {
     weak var verticalForward: NSScrollView?
 
+    override var mouseDownCanMoveWindow: Bool { false }
+
     override func scrollWheel(with event: NSEvent) {
         if abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) {
             if let forward = verticalForward {
@@ -746,7 +748,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var cardPanelTabsView: NSView!
     private var panelTabsControl: NSSegmentedControl!
     private var resultRunsBar: NSView!
-    private var cardNotesClip: NSScrollView!
+    private var cardNotesClip: HorizontalOnlyClip!
+
     private var notesTableView: NSTableView!
     private var cardNotesItems: [CardNotesPayload.Note] = []
     private var reviewCardView: NSView!
@@ -1396,11 +1399,11 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         inputContainer.addSubview(inputButtonsClip)
 
         // Notes tab: browsable note rows (click = copy).
-        cardNotesClip = NSScrollView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
+        cardNotesClip = HorizontalOnlyClip(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
         cardNotesClip.drawsBackground = false
         cardNotesClip.hasVerticalScroller = true
         cardNotesClip.autohidesScrollers = true
-        notesTableView = NSTableView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
+        notesTableView = NotesTable(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
         notesTableView.headerView = nil
         notesTableView.rowHeight = 64
         notesTableView.intercellSpacing = .zero
@@ -1610,6 +1613,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     /// Mouse click on a row: select it (selectionDidChange copies the
     /// content) and arm the card for Enter. Injection happens on Enter only.
     @objc private func notesTableClicked(_ sender: NSTableView) {
+        FileLog.write("SEL clicked row=\(sender.clickedRow)")
         postAction(action: "card-key", text: "1")
     }
 
@@ -2314,6 +2318,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func hideIfClickOutsidePanel(_ event: NSEvent) {
         let screenPoint = NSEvent.mouseLocation
+        FileLog.write("DOWN point=\(screenPoint) win=\(event.window.map { "\($0)" } ?? "nil") cardFrame=\(NSStringFromRect(resultPanel.frame)) tvFrame=\(NSStringFromRect(notesTableView.frame)) tvVisible=\(NSStringFromRect(notesTableView.visibleRect))")
 
         // Card interaction focus: a click inside the card arms the notes
         // Enter; any click elsewhere disarms it. (Nonactivating panels can
@@ -2830,11 +2835,21 @@ private final class NoteRowCell: NSTableCellView {
 
 /// Row view: paints ONLY the hover (the system has none), mimicking the
 /// system capsule's inset/radius so the two geometries read as one.
+private final class NotesTable: NSTableView {
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func mouseDown(with event: NSEvent) {
+        FileLog.write("TBL mouseDown \(event.locationInWindow)")
+        super.mouseDown(with: event)
+    }
+}
+
 private final class NoteRowView: NSTableRowView {
     private var hoverArea: NSTrackingArea?
     private var hovering = false
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override var mouseDownCanMoveWindow: Bool { false }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -3335,6 +3350,7 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        FileLog.write("SEL didChange row=\(notesTableView.selectedRow)")
         let selected = notesTableView.selectedRow
         if selected >= 0, selected < cardNotesItems.count {
             let pasteboard = NSPasteboard.general
