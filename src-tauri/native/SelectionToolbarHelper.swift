@@ -729,8 +729,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var activePanel = "translate"
     private var panelDefs: [(id: String, name: String, icon: String)] = []
     private var cardPanelTabsView: NSView!
-    private var panelTabButtons: [NSButton] = []
-    private var panelTabsContentWidth: CGFloat = 0
+    private var panelTabsControl: NSSegmentedControl!
     private var resultRunsBar: NSView!
     private var cardNotesClip: NSScrollView!
     private var notesTableView: NSTableView!
@@ -1194,9 +1193,21 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultContainer.addSubview(resultTabsView)
 
         cardPanelTabsView = NSView(frame: NSRect(x: 8, y: 2, width: resultCardWidth - 48, height: 28))
-        cardPanelTabsView.wantsLayer = true
-        cardPanelTabsView.layer?.masksToBounds = true
         resultTabsView.addSubview(cardPanelTabsView)
+
+        panelTabsControl = NSSegmentedControl()
+        panelTabsControl.segmentCount = 3
+        panelTabsControl.segmentStyle = .automatic
+        panelTabsControl.trackingMode = .selectOne
+        panelTabsControl.target = self
+        panelTabsControl.action = #selector(panelTabClicked(_:))
+        for (index, def) in panelDefs.enumerated() {
+            panelTabsControl.setLabel(def.name, forSegment: index)
+            panelTabsControl.setToolTip(def.name, forSegment: index)
+        }
+        panelTabsControl.selectedSegment = 0
+        panelTabsControl.sizeToFit()
+        cardPanelTabsView.addSubview(panelTabsControl)
 
         // Pin toggle (WebView FloatingFrame parity): unpinned = dismisses on
         // outside click / Esc; pinned = stays. Replaces the close button —
@@ -1524,74 +1535,35 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private func handleCardActions(_ payload: CardActionsPayload) {
         cardActions = payload.actions
         panelDefs = (payload.panels ?? []).map { ($0.id, $0.name, $0.icon) }
+        if panelTabsControl != nil, !panelDefs.isEmpty {
+            panelTabsControl.segmentCount = panelDefs.count
+            for (index, def) in panelDefs.enumerated() {
+                panelTabsControl.setLabel(def.name, forSegment: index)
+                panelTabsControl.setToolTip(def.name, forSegment: index)
+            }
+            if let index = panelDefs.firstIndex(where: { $0.id == activePanel }) {
+                panelTabsControl.selectedSegment = index
+            }
+            panelTabsControl.sizeToFit()
+        }
         if panelDefs.isEmpty {
             panelDefs = [("translate", "Actions", "file-text"), ("notes", "Notes", "notebook-pen"), ("review", "Review", "book-open")]
         }
-        rebuildPanelTabs()
         rebuildInputButtons()
         layoutResultCard()
     }
 
-    private func rebuildPanelTabs() {
-        panelTabButtons.forEach { $0.removeFromSuperview() }
-        panelTabButtons.removeAll()
-
-        // Two passes: build to measure, then center the whole group in the
-        // strip (the WebView FloatingFrame centers its panel tabs too).
-        struct Built {
-            let button: NSButton
-            let width: CGFloat
-        }
-        var built: [Built] = []
-        var totalWidth: CGFloat = 0
-        for panel in panelDefs {
-            let active = activePanel == panel.id
-            let fg: NSColor = active ? .labelColor : .secondaryLabelColor
-            let button = NSButton(title: "", target: self, action: #selector(panelTabClicked(_:)))
-            button.bezelStyle = .regularSquare
-            button.isBordered = false
-            button.identifier = NSUserInterfaceItemIdentifier(panel.id)
-            button.wantsLayer = true
-            button.layer?.cornerRadius = 6
-            button.layer?.backgroundColor = active
-                ? (theme == .dark ? NSColor.white.withAlphaComponent(0.14).cgColor : NSColor.black.withAlphaComponent(0.08).cgColor)
-                : NSColor.clear.cgColor
-            // Icon + title as a single attributed string: identical leading
-            // and trailing padding (imageLeading flushed the icon to the
-            // left edge of the button).
-            let attach = NSTextAttachment()
-            attach.image = lucideImage(for: panel.icon, title: panel.name, color: fg)
-            attach.bounds = NSRect(x: 0, y: -1.5, width: 13, height: 13)
-            let attr = NSMutableAttributedString()
-            attr.append(NSAttributedString(string: "  "))
-            attr.append(NSAttributedString(attachment: attach))
-            attr.append(NSAttributedString(string: " \(panel.name)  ", attributes: [
-                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-                .foregroundColor: fg,
-            ]))
-            button.attributedTitle = attr
-            let width = attr.size().width + 8
-            built.append(Built(button: button, width: width))
-            totalWidth += width + 6
-        }
-        panelTabsContentWidth = totalWidth - 6
-
-        var x = max(0, (cardPanelTabsView.frame.width - (totalWidth - 6)) / 2)
-        for item in built {
-            item.button.frame = NSRect(x: x, y: 2, width: item.width, height: 24)
-            cardPanelTabsView.addSubview(item.button)
-            panelTabButtons.append(item.button)
-            x += item.width + 6
-        }
-    }
-    @objc private func panelTabClicked(_ sender: NSButton) {
-        guard let id = sender.identifier?.rawValue else { return }
-        showPanelTab(id)
+    @objc private func panelTabClicked(_ sender: NSSegmentedControl) {
+        let index = sender.selectedSegment
+        guard index >= 0, index < panelDefs.count else { return }
+        showPanelTab(panelDefs[index].id)
     }
 
     private func showPanelTab(_ id: String, notify: Bool = true) {
         activePanel = id
-        rebuildPanelTabs()
+        if let index = panelDefs.firstIndex(where: { $0.id == id }), panelTabsControl != nil {
+            panelTabsControl.selectedSegment = index
+        }
         rebuildRunTabs()
         renderActiveRun()
         layoutResultCard()
@@ -1807,7 +1779,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         activeRunId = nil
         cardPinned = false
         rebuildRunTabs()
-        rebuildPanelTabs()
     }
 
     @objc private func clearRunsClicked() {
@@ -1995,17 +1966,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultTrashButton.frame = NSRect(x: width - 30, y: runsY + 3, width: 22, height: 22)
         resultTrashButton.isHidden = runsH == 0
         resultRunsBar.isHidden = runsH == 0
-        layoutPanelTabs(width)
         updateEntryTypeTags()
-    }
-
-    /// Re-centers the panel tab group for the current card width.
-    private func layoutPanelTabs(_ width: CGFloat) {
-        var x = max(0, (cardPanelTabsView.frame.width - panelTabsContentWidth) / 2)
-        for button in panelTabButtons {
-            button.frame.origin.x = x
-            x += button.frame.width + 6
-        }
     }
 
     private func markdownRenderedHeight(_ markdown: String, atWidth width: CGFloat) -> CGFloat {
@@ -2037,7 +1998,18 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         container.lineFragmentPadding = 0
         manager.addTextContainer(container)
         _ = manager.glyphRange(for: container)
-        return ceil(manager.usedRect(for: container).height) + 12
+        return ceil(manager.usedRect(for: container).height)
+    }
+
+    /// Re-fit the review card's fixed chrome to the current card width.
+    private func relayoutReview(width: CGFloat) {
+        reviewWordLabel.frame = NSRect(x: 10, y: 120, width: width - 20, height: 28)
+        reviewAnswerLabel.frame = NSRect(x: 20, y: 88, width: width - 40, height: 18)
+        reviewRevealButton.frame.origin.x = width / 2 - 40
+        for (index, grade) in reviewGradeButtons.enumerated() {
+            grade.frame.origin.x = 20 + CGFloat(index) * 98
+        }
+        reviewEmptyLabel.frame = NSRect(x: 10, y: 90, width: width - 20, height: 18)
     }
 
     /// Height changes apply in ONE atomic setFrame: subview geometry is set
@@ -2051,37 +2023,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         programmaticFrame = true
         resultPanel.setFrame(target, display: true)
         programmaticFrame = false
-    }
-
-    func windowDidMove(_ notification: Notification) {
-        guard notification.object as? NSPanel === resultPanel else { return }
-        if let lp = lastProgrammaticFrame {
-            let f = resultPanel.frame
-            if abs(f.minX - lp.minX) < 1.5, abs(f.minY - lp.minY) < 1.5,
-               abs(f.width - lp.width) < 1.5, abs(f.height - lp.height) < 1.5 {
-                return // our own setFrame (rounded by the window server)
-            }
-        }
-
-        // Programmatic setFrame (layout/resize) also fires didMove; treating
-        // it as a user drag overwrote cardTopY with clamped intermediates and
-        // the card drifted while resizing. Only real user drags re-anchor.
-        guard !programmaticFrame else { return }
-        cardX = resultPanel.frame.minX
-        cardTopY = resultPanel.frame.maxY
-        cardModelHeight = resultPanel.frame.height
-    }
-
-
-    /// Re-fit the review card's fixed chrome to the current card width.
-    private func relayoutReview(width: CGFloat) {
-        reviewWordLabel.frame = NSRect(x: 10, y: 120, width: width - 20, height: 28)
-        reviewAnswerLabel.frame = NSRect(x: 20, y: 88, width: width - 40, height: 18)
-        reviewRevealButton.frame.origin.x = width / 2 - 40
-        for (index, grade) in reviewGradeButtons.enumerated() {
-            grade.frame.origin.x = 20 + CGFloat(index) * 98
-        }
-        reviewEmptyLabel.frame = NSRect(x: 10, y: 90, width: width - 20, height: 18)
     }
 
     private func placeResultCard() {
@@ -2301,8 +2242,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             runChipViews.forEach { $0.removeFromSuperview() }
             runChipViews.removeAll()
             rebuildRunTabs()
-            rebuildPanelTabs()
-            rebuildInputButtons()
+                rebuildInputButtons()
             applyNotesTheme()
             renderActiveRun()
             layoutResultCard()
