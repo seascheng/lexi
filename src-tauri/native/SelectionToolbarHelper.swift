@@ -2837,8 +2837,15 @@ private final class NoteRowCell: NSTableCellView {
 /// system capsule's inset/radius so the two geometries read as one.
 private final class NotesTable: NSTableView {
     override var mouseDownCanMoveWindow: Bool { false }
+
     override func mouseDown(with event: NSEvent) {
-        FileLog.write("TBL mouseDown \(event.locationInWindow)")
+        // NSTableView's click tracking bails out unless its window is key —
+        // and this nonactivating panel never is on the first click. Promote
+        // it, then let the system select the clicked row.
+        if window?.isKeyWindow != true {
+            NSApp.activate(ignoringOtherApps: false)
+            window?.makeKey()
+        }
         super.mouseDown(with: event)
     }
 }
