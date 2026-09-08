@@ -270,6 +270,10 @@ pub fn set_pending_note(text: Option<String>) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 static CARD_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The native card is showing its Notes tab: ArrowUp/Down select, Enter
+/// injects the selected note at the source app's caret (the whole point of
+/// the panel — keyboard-only, no mouse round trip).
+static CARD_NOTES_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static CARD_AUTO_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub(crate) fn forward_card_event(
@@ -696,6 +700,10 @@ fn notes_navigate(delta: i32) {
     let next = (current + delta).clamp(0, count as i32 - 1);
     NOTES_SELECTED.store(next, std::sync::atomic::Ordering::Relaxed);
 
+    if let Some(port) = toolbar_port() {
+        let _ = post_to_helper(port, "/card-notes-select", &format!("{{\"index\":{next}}}"));
+    }
+
     let port = TOOLBAR_PORT
         .get_or_init(|| Mutex::new(None))
         .lock()
@@ -742,6 +750,7 @@ fn notes_hide() {
         .and_then(|cell| *cell);
     let Some(port) = port else { return };
     let _ = post_to_helper(port, "/notes-hide", "{}");
+    let _ = post_to_helper(port, "/card-hide", "{}");
 }
 
 /// The helper hid the panel itself (outside click) — clear our flag.
@@ -1874,6 +1883,24 @@ fn handle_system_event(
                     let _ = post_to_helper(port, "/card-tab-cycle", "{}");
                 }
                 return CallbackResult::Drop;
+            }
+            if CARD_NOTES_MODE.load(std::sync::atomic::Ordering::Relaxed) {
+                match keycode {
+                    125 | 126 => {
+                        let delta = if keycode == 125 { 1 } else { -1 };
+                        thread::spawn(move || notes_navigate(delta));
+                        return CallbackResult::Drop;
+                    }
+                    36 | 52 => {
+                        thread::spawn(notes_enter);
+                        return CallbackResult::Drop;
+                    }
+                    53 => {
+                        notes_hide();
+                        return CallbackResult::Drop;
+                    }
+                    _ => {}
+                }
             }
             return CallbackResult::Keep;
         }
@@ -3050,6 +3077,7 @@ fn dispatch_toolbar_action(
     // CARD_UP never goes stale and swallows later stream events.
     if action.action == "card-hidden" || action.action == "card-cleared" {
         CARD_UP.store(false, std::sync::atomic::Ordering::Relaxed);
+        CARD_NOTES_MODE.store(false, std::sync::atomic::Ordering::Relaxed);
         return Ok(());
     }
     // Manual input surface: open the card on AiForm + IdleState (no run).
@@ -3089,7 +3117,12 @@ fn dispatch_toolbar_action(
         return send_card_notes(app);
     }
     if action.action == "panel-review" {
+        CARD_NOTES_MODE.store(false, std::sync::atomic::Ordering::Relaxed);
         send_next_review_word(app);
+        return Ok(());
+    }
+    if action.action == "panel-translate" {
+        CARD_NOTES_MODE.store(false, std::sync::atomic::Ordering::Relaxed);
         return Ok(());
     }
     if action.action == "review-grade" {
@@ -3129,6 +3162,15 @@ fn send_card_notes(app: &tauri::AppHandle) -> Result<(), String> {
         "SELECT IFNULL(name, '') AS name, content FROM notes ORDER BY created_at DESC, id DESC LIMIT 50;",
     )
     .unwrap_or_else(|| "[]".to_string());
+    // Arm keyboard navigation: ArrowUp/Down move the highlight, Enter injects
+    // the selected note (NOTES_SNAPSHOT is shared with the old notes panel).
+    if let Ok(parsed) = serde_json::from_str::<Vec<NoteRow>>(&rows) {
+        if let Ok(mut cell) = NOTES_SNAPSHOT.lock() {
+            *cell = parsed;
+        }
+        NOTES_SELECTED.store(0, std::sync::atomic::Ordering::Relaxed);
+        CARD_NOTES_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     let Some(port) = toolbar_port() else { return Ok(()) };
     let body = format!("{{\"notes\":{rows}}}");
     let _ = post_to_helper(port, "/card-notes", &body);

@@ -733,6 +733,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var resultRunsBar: NSView!
     private var cardNotesClip: NSView!
     private var cardNotesRows: [NSTextField] = []
+    private var cardNoteRowViews: [NSView] = []
+    private var cardNotesSelectedIndex = 0
     private var reviewCardView: NSView!
     private var reviewWordLabel: NSTextField!
     private var reviewAnswerLabel: NSTextField!
@@ -1577,32 +1579,47 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func handleCardNotes(_ payload: CardNotesPayload) {
         cardNotesRows.forEach { $0.removeFromSuperview() }
+        cardNoteRowViews.forEach { $0.removeFromSuperview() }
         cardNotesClip.subviews.forEach { $0.removeFromSuperview() }
         cardNotesRows.removeAll()
+        cardNoteRowViews.removeAll()
+        cardNotesSelectedIndex = 0
 
-        var y: CGFloat = CGFloat(max(payload.notes.count - 1, 0)) * 30
+        // Hapigo-style rows: bold title over muted content (two lines max).
+        var y: CGFloat = CGFloat(max(payload.notes.count - 1, 0)) * 44
         for note in payload.notes {
-            let row = NSView(frame: NSRect(x: 0, y: y, width: cardUserWidth ?? resultCardWidth, height: 30))
+            let row = NSView(frame: NSRect(x: 4, y: y, width: (cardUserWidth ?? resultCardWidth) - 12, height: 44))
             row.wantsLayer = true
+            row.layer?.cornerRadius = 6
 
-            let text = note.name.isEmpty ? note.content : "\(note.name): \(note.content)"
-            let label = ClickableTextField(labelWithString: text)
-            label.font = .systemFont(ofSize: 12)
-            label.textColor = theme == .dark ? .white.withAlphaComponent(0.85) : .black.withAlphaComponent(0.8)
-            label.lineBreakMode = .byTruncatingTail
-            label.maximumNumberOfLines = 1
-            label.cell?.truncatesLastVisibleLine = true
-            label.cell?.wraps = false
-            label.toolTip = text
-            label.frame = NSRect(x: 12, y: 7, width: (cardUserWidth ?? resultCardWidth) - 76, height: 16)
-            label.onClicked = { [weak label] in
-                guard let text = label?.stringValue else { return }
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(text, forType: .string)
+            let hasContent = !note.content.isEmpty
+            let title = ClickableTextField(labelWithString: note.name.isEmpty ? "(untitled)" : note.name)
+            title.font = .systemFont(ofSize: 13, weight: .semibold)
+            title.textColor = .labelColor
+            title.lineBreakMode = .byTruncatingTail
+            title.maximumNumberOfLines = 1
+            title.cell?.truncatesLastVisibleLine = true
+            title.cell?.wraps = false
+            title.toolTip = note.content
+            title.frame = NSRect(x: 10, y: hasContent ? 23 : 13, width: row.frame.width - 76, height: 17)
+            title.onClicked = { [weak self] in
+                guard let self, let index = self.cardNoteRowViews.firstIndex(of: row) else { return }
+                self.cardNotesSelect(index)
             }
-            row.addSubview(label)
-            cardNotesRows.append(label)
+            row.addSubview(title)
+            cardNotesRows.append(title)
+
+            if hasContent {
+                let content = NSTextField(labelWithString: note.content)
+                content.font = .systemFont(ofSize: 12)
+                content.textColor = .secondaryLabelColor
+                content.lineBreakMode = .byTruncatingTail
+                content.maximumNumberOfLines = 2
+                content.cell?.truncatesLastVisibleLine = true
+                content.cell?.wraps = true
+                content.frame = NSRect(x: 10, y: 4, width: row.frame.width - 76, height: 34)
+                row.addSubview(content)
+            }
 
             let insertButton = NSButton(title: "↵", target: self, action: #selector(noteInsertClicked(_:)))
             insertButton.bezelStyle = .regularSquare
@@ -1611,7 +1628,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             insertButton.contentTintColor = .secondaryLabelColor
             insertButton.toolTip = "Insert at cursor"
             insertButton.identifier = NSUserInterfaceItemIdentifier(note.content)
-            insertButton.frame = NSRect(x: (cardUserWidth ?? resultCardWidth) - 66, y: 4, width: 24, height: 22)
+            insertButton.frame = NSRect(x: row.frame.width - 56, y: 11, width: 24, height: 22)
             row.addSubview(insertButton)
 
             if let id = note.id {
@@ -1622,14 +1639,26 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 deleteButton.contentTintColor = .secondaryLabelColor
                 deleteButton.toolTip = "Delete note"
                 deleteButton.identifier = NSUserInterfaceItemIdentifier(String(id))
-                deleteButton.frame = NSRect(x: (cardUserWidth ?? resultCardWidth) - 38, y: 4, width: 24, height: 22)
+                deleteButton.frame = NSRect(x: row.frame.width - 28, y: 11, width: 24, height: 22)
                 row.addSubview(deleteButton)
             }
 
             cardNotesClip.addSubview(row)
-            y -= 30
+            cardNoteRowViews.append(row)
+            y -= 44
         }
+        cardNotesSelect(0)
         layoutResultCard()
+    }
+
+    /// Keyboard/click selection: accent-tinted row highlight.
+    private func cardNotesSelect(_ index: Int) {
+        guard !cardNoteRowViews.isEmpty else { return }
+        cardNotesSelectedIndex = min(max(index, 0), cardNoteRowViews.count - 1)
+        let accent = NSColor.controlAccentColor.withAlphaComponent(0.14).cgColor
+        for (i, row) in cardNoteRowViews.enumerated() {
+            row.layer?.backgroundColor = i == cardNotesSelectedIndex ? accent : NSColor.clear.cgColor
+        }
     }
 
     @objc private func noteInsertClicked(_ sender: NSButton) {
@@ -1891,7 +1920,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let status = activeRun?.status
         var contentH: CGFloat = 76 // idle
         if activePanel == "notes" {
-            contentH = min(CGFloat(max(cardNotesRows.count, 1)) * 30 + 12, 420)
+            contentH = min(CGFloat(max(cardNoteRowViews.count, 1)) * 44 + 12, 420)
         } else if activePanel == "review" {
             contentH = 200
         } else if status == "loading" {
@@ -2157,6 +2186,29 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             return
         }
 
+        if request.hasPrefix("POST /card-notes-select "),
+           let body = request.components(separatedBy: "\r\n\r\n").last,
+           let bodyData = body.data(using: .utf8),
+           let payload = try? JSONDecoder().decode(CardNotesSelectPayload.self, from: bodyData) {
+            DispatchQueue.main.async {
+                self.cardNotesSelect(payload.index)
+            }
+            return
+        }
+
+        if request.hasPrefix("POST /card-hide ") {
+            DispatchQueue.main.async {
+                self.resultPanel.orderOut(nil)
+                self.postAction(action: "card-hidden", text: "-")
+            }
+            return
+        }
+        if request.hasPrefix("POST /card-hide ") {
+            DispatchQueue.main.async {
+                self.resultPanel.orderOut(nil)
+                self.postAction(action: "card-hidden", text: "-")
+            }
+        }
         if request.hasPrefix("POST /card-tab-cycle "),
            request.components(separatedBy: "\r\n\r\n").last != nil {
             DispatchQueue.main.async {
@@ -2745,6 +2797,10 @@ private final class ClickableTextField: NSTextField {
 }
 
 /// One AI run shown in the card (WebView WorkspaceRun parity).
+struct CardNotesSelectPayload: Codable {
+    let index: Int
+}
+
 private final class CardRun {
     let id: String
     let featureId: String
