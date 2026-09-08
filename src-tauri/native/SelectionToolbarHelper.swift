@@ -1920,10 +1920,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         inputPlaceholder.isHidden = !inputTextView.string.isEmpty
 
         resultRunsBar.isHidden = runsH == 0
-        // Chip strip hugs its content; divider and close button FOLLOW the
-        // strip (one compact row) and cap together at the card's right edge
-        // once the chips overflow into scrolling.
-        let stripW = min(max(runTabsContentWidth, 40), width - 44)
+        let stripW = width - 48
         resultRunsBar.frame = NSRect(x: 8, y: runsY, width: stripW, height: runsH)
         resultTabsClip.frame = NSRect(x: 0, y: 0, width: stripW, height: 28)
         resultTabsClip.documentView?.frame = NSRect(x: 0, y: 0, width: max(runTabsContentWidth, stripW), height: 28)
@@ -1974,8 +1971,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultTrashButton.frame = NSRect(x: width - 30, y: runsY + 3, width: 22, height: 22)
         resultTrashButton.isHidden = runsH == 0
         runsSeparator.isHidden = runsH == 0
-        runsSeparator.frame = NSRect(x: 8 + stripW + 4, y: runsY + 4, width: 1, height: runsH - 8)
-        resultTrashButton.frame = NSRect(x: min(width - 30, 8 + stripW + 9), y: runsY + 3, width: 22, height: 22)
+        runsSeparator.frame = NSRect(x: width - 38, y: runsY + 4, width: 1, height: runsH - 8)
+        resultTrashButton.frame = NSRect(x: width - 30, y: runsY + 3, width: 22, height: 22)
         resultTrashButton.isHidden = runsH == 0
         resultRunsBar.isHidden = runsH == 0
         layoutPanelTabs(width)
