@@ -2726,8 +2726,6 @@ private struct CardActionsPayload: Decodable {
 /// is drawn here too — same width, same inset, same corner radius. (Hover on
 /// the CELL left an 8pt mismatch against the selection capsule.)
 private final class NoteRowView: NSTableRowView {
-    private var hoverArea: NSTrackingArea?
-    private var hovering = false
     private var isSelectedState = false
 
     override func updateTrackingAreas() {
@@ -2760,6 +2758,44 @@ private final class NoteRowView: NSTableRowView {
     }
 }
 
+/// Row view: the system paints the selection capsule here; hover is painted
+/// here too, at the SAME inset/radius — cell-layer hover was full-width
+/// square-cornered and mismatched the rounded system capsule.
+private final class NoteRowView: NSTableRowView {
+    private var hoverArea: NSTrackingArea?
+    private var hovering = false
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        if let hoverArea { addTrackingArea(hoverArea) }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        if !isSelected, hovering {
+            // Same geometry family as the system selection capsule.
+            NSColor.labelColor.withAlphaComponent(0.06).setFill()
+            NSBezierPath(
+                roundedRect: bounds.insetBy(dx: 3, dy: 2),
+                xRadius: 6,
+                yRadius: 6
+            ).fill()
+        }
+    }
+}
+
 /// One notes-table row (view-based NSTableView cell). The system provides
 /// selection (accent capsule), row height, scrolling, and width tracking;
 /// this cell only lays out its subviews and retints on selection/hover.
@@ -2769,8 +2805,6 @@ private final class NoteRowCell: NSTableCellView {
     let contentLabel = NSTextField(labelWithString: "")
     var deleteButton: NSButton?
     private var onDelete: ((Int64) -> Void)?
-    private var hoverArea: NSTrackingArea?
-    private var hovering = false
     private var isSelectedState = false
 
     override init(frame frameRect: NSRect) {
@@ -2799,7 +2833,6 @@ private final class NoteRowCell: NSTableCellView {
 
     func configure(note: CardNotesPayload.Note, dark: Bool,
                    onDelete: ((Int64) -> Void)?) {
-        hovering = false
         iconView.image = lucideImage(for: "file-text", title: note.name)
         iconView.imageScaling = .scaleProportionallyDown
 
@@ -2856,23 +2889,6 @@ private final class NoteRowCell: NSTableCellView {
         deleteButton?.frame = NSRect(x: w - 28, y: 24, width: 20, height: 16)
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverArea { removeTrackingArea(hoverArea) }
-        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        if let hoverArea { addTrackingArea(hoverArea) }
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        hovering = true
-        retint(selected: isSelectedState)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        hovering = false
-        retint(selected: isSelectedState)
-    }
-
     /// Selection + hover are painted HERE (selectionHighlightStyle = .none),
     /// both at the same inset/radius so the widths always match. Selection
     /// copy comes from the system's backgroundStyle (.emphasized).
@@ -2882,13 +2898,8 @@ private final class NoteRowCell: NSTableCellView {
             ? NSColor.white.withAlphaComponent(0.92)
             : .secondaryLabelColor
         iconView.contentTintColor = selected ? .white : .secondaryLabelColor
-        // The SYSTEM paints the selection capsule (.regular); this layer
-        // only ever paints the unselected hover tint.
-        wantsLayer = true
-        layer?.cornerRadius = 6
-        layer?.backgroundColor = (!selected && hovering)
-            ? NSColor.labelColor.withAlphaComponent(0.05).cgColor
-            : NSColor.clear.cgColor
+        // Selection capsule AND hover live on the row view; this cell only
+        // owns text/icon tinting.
     }
 }
 
@@ -3335,7 +3346,15 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        nil // default row view: the cell owns selection + hover visuals
+        if let reused = tableView.makeView(
+            withIdentifier: NSUserInterfaceItemIdentifier("NoteRowView"),
+            owner: self
+        ) as? NoteRowView {
+            return reused
+        }
+        let view = NoteRowView(frame: .zero)
+        view.identifier = NSUserInterfaceItemIdentifier("NoteRowView")
+        return view
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
