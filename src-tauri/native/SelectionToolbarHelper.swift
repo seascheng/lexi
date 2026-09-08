@@ -2745,6 +2745,8 @@ private final class NoteRowCell: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError("not supported") }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override var backgroundStyle: NSView.BackgroundStyle {
         didSet {
             // The ONLY custom visual: white text on the system's accent
@@ -2822,6 +2824,8 @@ private final class NoteRowCell: NSTableCellView {
 private final class NoteRowView: NSTableRowView {
     private var hoverArea: NSTrackingArea?
     private var hovering = false
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
