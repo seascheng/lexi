@@ -2945,12 +2945,11 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         iconView.contentTintColor = selected ? .white : themeColors.secondaryText
         deleteButton?.contentTintColor = selected ? .white : themeColors.secondaryText
 
-        // Rename editor: the card's input surface, readable on the
-        // selection capsule too.
-        titleEditor.textColor = selected ? .white : themeColors.foreground
-        titleEditor.backgroundColor = selected
-            ? NSColor.white.withAlphaComponent(0.14)
-            : themeColors.inputFill
+        // Rename editor: always its own surface (inputFill + foreground) —
+        // following the capsule's white-on-accent made white-on-white text
+        // on the light theme.
+        titleEditor.textColor = themeColors.foreground
+        titleEditor.backgroundColor = themeColors.inputFill
         titleEditor.layer?.borderColor = themeColors.hairline.cgColor
         titleEditor.layer?.borderWidth = 1
     }
@@ -3025,14 +3024,21 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         titleEditor.isHidden = false
         caretToEndOnBegin = true
         window?.makeFirstResponder(titleEditor)
+        DispatchQueue.main.async { [weak self] in
+            self?.placeCaretAtEndOnce()
+        }
+    }
+
+    private func placeCaretAtEndOnce() {
+        guard caretToEndOnBegin, let editor = titleEditor.currentEditor() else { return }
+        caretToEndOnBegin = false
+        // No select-all: the caret goes to the end (I-beam at the tail).
+        editor.moveToEndOfDocument(nil)
     }
 
     func controlTextDidBeginEditing(_ obj: Notification) {
-        guard obj.object as? NSTextField === titleEditor, caretToEndOnBegin else { return }
-        caretToEndOnBegin = false
-        // No select-all: a selection would read as a user text selection to
-        // our own monitors; the caret goes to the end (I-beam at the tail).
-        (obj.userInfo?["NSFieldEditor"] as? NSText)?.moveToEndOfDocument(nil)
+        guard obj.object as? NSTextField === titleEditor else { return }
+        placeCaretAtEndOnce()
     }
 
     private func endRenaming() {
@@ -3067,12 +3073,12 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         super.layout()
         let w = bounds.width
         titleLabel.frame = NSRect(x: 36, y: 38, width: w - 70, height: 18)
-        // Same text origin as the label: no bezel padding to compensate,
-        // vertical growth extends downward so the baseline stays put.
+        // Same text origin as the label; the editor claims the row's free
+        // width so clicks "behind the text" land inside it.
         titleEditor.frame = NSRect(
             x: titleLabel.frame.minX - 2,
             y: titleLabel.frame.minY - 3,
-            width: titleLabel.frame.width + 4,
+            width: bounds.width - titleLabel.frame.minX - 34,
             height: 24
         )
         contentLabel.frame = NSRect(x: 36, y: 6, width: w - 70, height: 30)
@@ -3101,15 +3107,22 @@ private final class NotesTable: NSTableView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        // The panel is nonactivating: on the first click the app isn't
-        // active, the window isn't key, and NSTableView's own tracking
-        // silently bails. Select the clicked row PROGRAMMATICALLY — that
-        // works without any key status — and let the system take over on
-        // subsequent (active) clicks.
+        // While a row's title editor is live, a click INSIDE that row belongs
+        // to the edit (caret moves, selection clears) — running the table's
+        // tracking would resign the editor and snap back to the label.
+        if let editor = window?.firstResponder as? NSText,
+           editor.isFieldEditor,
+           let host = editor.delegate as? NSTextField,
+           host === (view(atColumn: 0, row: row(at: convert(event.locationInWindow, from: nil)), makeIfNecessary: false) as? NoteRowCell)?.titleEditor {
+            return
+        }
+        // The panel is nonactivating: NSTableView's own tracking silently
+        // bails before the app is active. Select the clicked row
+        // PROGRAMMATICALLY — works without key status.
         let point = convert(event.locationInWindow, from: nil)
-        let row = self.row(at: point)
-        if row >= 0 {
-            selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        let clickedRow = self.row(at: point)
+        if clickedRow >= 0 {
+            selectRowIndexes(IndexSet(integer: clickedRow), byExtendingSelection: false)
         }
         super.mouseDown(with: event)
     }
