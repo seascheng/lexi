@@ -2722,42 +2722,6 @@ private struct CardActionsPayload: Decodable {
     let panels: [PanelDef]?
 }
 
-/// Row view for the notes table: the system draws selection here, so hover
-/// is drawn here too — same width, same inset, same corner radius. (Hover on
-/// the CELL left an 8pt mismatch against the selection capsule.)
-private final class NoteRowView: NSTableRowView {
-    private var isSelectedState = false
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverArea { removeTrackingArea(hoverArea) }
-        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        if let hoverArea { addTrackingArea(hoverArea) }
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        hovering = true
-        needsDisplay = true
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        hovering = false
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        if !isSelected, hovering {
-            NSColor.labelColor.withAlphaComponent(0.05).setFill()
-            NSBezierPath(
-                roundedRect: bounds.insetBy(dx: 3, dy: 2),
-                xRadius: 6,
-                yRadius: 6
-            ).fill()
-        }
-    }
-}
-
 /// Row view: the system paints the selection capsule here; hover is painted
 /// here too, at the SAME inset/radius — cell-layer hover was full-width
 /// square-cornered and mismatched the rounded system capsule.
