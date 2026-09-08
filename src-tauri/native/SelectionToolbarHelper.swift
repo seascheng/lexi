@@ -2198,15 +2198,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private func handleRequestData(_ data: Data) {
         let request = String(data: data, encoding: .utf8) ?? ""
 
-        if request.hasPrefix("POST /notes-select "),
-           let body = request.components(separatedBy: "\r\n\r\n").last,
-           let bodyData = body.data(using: .utf8),
-           let payload = try? JSONDecoder().decode(NotesSelectPayload.self, from: bodyData) {
-            DispatchQueue.main.async {
-                self.selectNoteRow(payload.selected, scroll: true)
-            }
-            return
-        }
+
 
         if request.hasPrefix("POST /notes-hide ") {
             DispatchQueue.main.async {
@@ -2256,19 +2248,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             return
         }
 
-        if request.hasPrefix("POST /card-notes-select "),
-           let body = request.components(separatedBy: "\r\n\r\n").last,
-           let bodyData = body.data(using: .utf8),
-           let payload = try? JSONDecoder().decode(CardNotesSelectPayload.self, from: bodyData) {
-            DispatchQueue.main.async {
-                let index = min(max(payload.index, 0), max(self.cardNotesItems.count - 1, 0))
-                if !self.cardNotesItems.isEmpty {
-                    self.notesTableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
-                    self.notesTableView.scrollRowToVisible(index)
-                }
-            }
-            return
-        }
 
         if request.hasPrefix("POST /card-hide ") {
             DispatchQueue.main.async {
@@ -3458,10 +3437,6 @@ private struct NotesShowPayload: Decodable {
         let content: String
     }
     let notes: [Note]
-    let selected: Int
-}
-
-private struct NotesSelectPayload: Decodable {
     let selected: Int
 }
 

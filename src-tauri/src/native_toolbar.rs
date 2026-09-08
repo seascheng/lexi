@@ -29,39 +29,9 @@ use std::ptr;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::{Emitter, LogicalPosition, LogicalSize, Manager};
+use tauri::{Emitter, Manager};
 
 
-/// Show the popup window above all other apps' windows WITHOUT making it key
-/// (Hapigo-style): the source app stays active and its input caret keeps
-/// blinking, so Enter-insert lands at the live caret. Keyboard interaction
-/// with the popup is routed through the event tap (see handle_system_event);
-/// clicking into the popup makes it key normally (explicit intent to type),
-/// and clicking anywhere else dismisses it.
-fn show_window_without_focus(window: &tauri::WebviewWindow) {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
-    let Ok(handle) = window.window_handle() else { return };
-    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else { return };
-
-    unsafe {
-        let ns_view = appkit.ns_view.as_ptr();
-        let ns_window = objc_msgSend(
-            ns_view,
-            sel_registerName(b"window\0".as_ptr() as *const i8),
-        );
-        if ns_window.is_null() {
-            return;
-        }
-
-        // Force window to front above all other apps' windows. Never
-        // makeKeyWindow: a key window would steal the source app's caret.
-        objc_msgSend(
-            ns_window,
-            sel_registerName(b"orderFrontRegardless\0".as_ptr() as *const i8),
-        );
-    }
-}
 
 /// Disable WebKit's occlusion detection so rAF/animations keep running when the
 /// window is hidden. Without this, WebKit throttles rendering for windows it
@@ -140,7 +110,6 @@ fn configure_window_all_spaces(window: &tauri::WebviewWindow) {
     }
 }
 
-const DEFAULT_POPUP_SIZE: f64 = 420.0;
 const IPC_HOST: &str = "127.0.0.1";
 const LOG_PATH: &str = "/tmp/lexi-native-toolbar.log";
 /// Fixed port the Chrome extension POSTs selected text to. Hardcoded so the
@@ -204,19 +173,10 @@ pub(crate) fn current_selection_target() -> Option<SelectionTarget> {
 /// thread stalls the tap until macOS kills it (kCGEventTapDisabledByTimeout),
 /// which turned arrow keys into "every other one works". The frontend reports
 /// hides via the `set_popup_up` command; Rust sets it on show/Esc/outside-click.
-static POPUP_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-#[tauri::command]
-pub fn set_popup_up(visible: bool) -> Result<(), String> {
-    mark_popup_up(visible);
-    Ok(())
-}
-
-fn mark_popup_up(visible: bool) {
-    POPUP_UP.store(visible, std::sync::atomic::Ordering::Relaxed);
-}
-
 /// Global handle for deferred native-card work (sqlite access from workers).
 static CURRENT_APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+static CARD_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static CARD_AUTO_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Last theme the frontend pushed. The helper defaults to dark and its
 /// lifecycle is independent of the frontend (watchdog relaunches), so every
@@ -248,60 +208,6 @@ fn push_theme_to_helper(toolbar_port: u16) {
     }
 }
 
-/// The note the frontend currently has highlighted in the popup's NotesPanel,
-/// synced eagerly by `set_pending_note` so the tap's Enter can insert it
-/// without touching the (throttled) webview.
-static PENDING_NOTE: std::sync::LazyLock<Mutex<Option<String>>> =
-    std::sync::LazyLock::new(|| Mutex::new(None));
-
-#[tauri::command]
-pub fn set_pending_note(text: Option<String>) -> Result<(), String> {
-    if let Ok(mut cell) = PENDING_NOTE.lock() {
-        *cell = text.filter(|t| !t.trim().is_empty());
-    }
-    Ok(())
-}
-
-
-// ---------------------------------------------------------------------------
-// Native result card (Phase 2) — the helper renders AI results with AppKit
-// (zero webview throttling). The AI stream in commands/ai.rs mirrors every
-// chunk/done/error here via `forward_card_event`; Rust owns the run.
-// ---------------------------------------------------------------------------
-
-static CARD_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// The native card is showing its Notes tab: ArrowUp/Down select, Enter
-/// injects the selected note at the source app's caret (the whole point of
-/// the panel — keyboard-only, no mouse round trip).
-/// The result card is the KEY window (user clicked into it). Notes keyboard
-/// actions are legal ONLY now — without this gate the tap ate Enter typed in
-/// other apps and injected notes into them.
-static CARD_AUTO_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-pub(crate) fn forward_card_event(
-    run_id: &str,
-    chunk: Option<&str>,
-    done: bool,
-    error: Option<&str>,
-    translation_json: Option<&str>,
-    saved: bool,
-) {
-    if !CARD_UP.load(std::sync::atomic::Ordering::Relaxed) {
-        return;
-    }
-    let Some(port) = toolbar_port() else { return };
-    let payload = serde_json::json!({
-        "runId": run_id,
-        "chunk": chunk,
-        "done": done,
-        "error": error,
-        "translationJson": translation_json,
-        "saved": saved,
-    });
-    if let Ok(body) = serde_json::to_string(&payload) {
-        let _ = post_to_helper(port, "/result-event", &body);
-    }
-}
 
 pub(crate) fn card_auto_save_enabled() -> bool {
     CARD_AUTO_SAVE.load(std::sync::atomic::Ordering::Relaxed)
@@ -618,106 +524,13 @@ struct NoteRow {
     content: String,
 }
 
-#[derive(Serialize)]
-struct NotesShowPayload {
-    notes: Vec<NoteRow>,
-    selected: usize,
-}
-
-#[derive(Serialize)]
-struct NotesSelectPayload {
-    selected: usize,
-}
 
 static NOTES_SNAPSHOT: std::sync::LazyLock<Mutex<Vec<NoteRow>>> =
     std::sync::LazyLock::new(|| Mutex::new(Vec::new()));
 static NOTES_SELECTED: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
-static NOTES_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Show the native notes panel over the helper: load the latest notes, reset
-/// the selection, and hand the snapshot to the helper for rendering.
-fn show_notes_panel(app: &tauri::AppHandle) {
-    let Some(notes) = load_notes(app) else {
-        log_native("notes: could not read notes db");
-        return;
-    };
-    if notes.is_empty() {
-        log_native("notes: no notes to show");
-        return;
-    }
-    let count = notes.len();
-    if let Ok(mut cell) = NOTES_SNAPSHOT.lock() {
-        *cell = notes.clone();
-    }
-    NOTES_SELECTED.store(0, std::sync::atomic::Ordering::Relaxed);
-    NOTES_UP.store(true, std::sync::atomic::Ordering::Relaxed);
 
-    let port = TOOLBAR_PORT
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .ok()
-        .and_then(|cell| *cell);
-    let Some(port) = port else {
-        log_native("notes: toolbar port not set");
-        return;
-    };
-    let Ok(body) = serde_json::to_string(&NotesShowPayload { notes, selected: 0 }) else {
-        return;
-    };
-    if post_to_helper(port, "/notes-show", &body).is_ok() {
-        log_native(&format!("notes panel shown rows={count}"));
-    }
-}
 
-/// Latest notes from SQLite via `sqlite3 -json` (handles newlines in content).
-fn load_notes(app: &tauri::AppHandle) -> Option<Vec<NoteRow>> {
-    let db = app.path().app_data_dir().ok()?.join("lexi.db");
-    if !db.exists() {
-        return None;
-    }
-    let output = Command::new("sqlite3")
-        .arg("-json")
-        .arg(&db)
-        .arg("SELECT id, IFNULL(name, '') AS name, content FROM notes ORDER BY created_at DESC, id DESC LIMIT 50;")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if stdout.trim().is_empty() {
-        return Some(Vec::new());
-    }
-    let rows: Vec<NoteRow> = serde_json::from_str(&stdout).ok()?;
-    Some(rows)
-}
-
-/// Move the native panel's highlight by `delta` rows (clamped).
-fn notes_navigate(delta: i32) {
-    let count = NOTES_SNAPSHOT.lock().map(|c| c.len()).unwrap_or(0);
-    if count == 0 {
-        return;
-    }
-    let current = NOTES_SELECTED.load(std::sync::atomic::Ordering::Relaxed).max(0);
-    let next = (current + delta).clamp(0, count as i32 - 1);
-    NOTES_SELECTED.store(next, std::sync::atomic::Ordering::Relaxed);
-
-    if let Some(port) = toolbar_port() {
-        let _ = post_to_helper(port, "/card-notes-select", &format!("{{\"index\":{next}}}"));
-    }
-
-    let port = TOOLBAR_PORT
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .ok()
-        .and_then(|cell| *cell);
-    let Some(port) = port else { return };
-    if let Ok(body) = serde_json::to_string(&NotesSelectPayload {
-        selected: next as usize,
-    }) {
-        let _ = post_to_helper(port, "/notes-select", &body);
-    }
-}
 
 /// Insert the highlighted note at the source app's caret, then hide the panel.
 fn notes_enter() {
@@ -747,7 +560,6 @@ fn notes_enter() {
 
 /// Dismiss the native panel and clear its flag.
 fn notes_hide() {
-    NOTES_UP.store(false, std::sync::atomic::Ordering::Relaxed);
     let port = TOOLBAR_PORT
         .get_or_init(|| Mutex::new(None))
         .lock()
@@ -760,14 +572,6 @@ fn notes_hide() {
 
 /// The helper hid the panel itself (outside click) — clear our flag.
 pub(crate) fn mark_notes_hidden() {
-    NOTES_UP.store(false, std::sync::atomic::Ordering::Relaxed);
-}
-/// Whether the popup card is currently on screen — while it is, the toolbar
-/// never pops over it and keyboard navigation is routed into the popup.
-fn popup_card_visible(app: &tauri::AppHandle) -> bool {
-    app.get_webview_window("popup_card")
-        .map(|window| window.is_visible().unwrap_or(false))
-        .unwrap_or(false)
 }
 /// Last observed NSPasteboard.changeCount. Cmd+C detection compares against
 /// this — only fires the toolbar when the count actually increases.
@@ -994,22 +798,7 @@ fn read_popup_shortcut_from_sqlite(path: &Path) -> Option<String> {
     Some(value)
 }
 
-#[derive(Clone, Serialize)]
-struct AiRequestPayload {
-    text: String,
-    mode: &'static str,
-    #[serde(rename = "featureId")]
-    feature_id: String,
-}
 
-#[derive(Clone, Serialize)]
-struct PopupShownPayload {
-    mode: &'static str,
-    /// Panel the popup should open on: "translate" (selection flow) or
-    /// "notes" (hotkey with no selection — the pick-a-note-and-Enter flow,
-    /// which must not require clicking the popup and stealing focus).
-    panel: String,
-}
 
 #[derive(Clone, Serialize)]
 struct ToolbarShowPayload {
@@ -1658,33 +1447,7 @@ fn handle_system_event(
                 });
             }
 
-            // Hapigo-style dismissal: with the popup up (it is never key), a
-            // click anywhere outside it closes it. Bounds checks run off the
-            // tap thread on the main thread.
-            let popup_app = app.clone();
-            let main = popup_app.clone();
-            let click = loc;
-            thread::spawn(move || {
-                let _ = main.run_on_main_thread(move || {
-                    if !popup_card_visible(&popup_app) {
-                        return;
-                    }
-                    let Some(popup) = popup_app.get_webview_window("popup_card") else {
-                        return;
-                    };
-                    let Ok(position) = popup.outer_position() else { return };
-                    let Ok(size) = popup.inner_size() else { return };
-                    let scale = popup.scale_factor().unwrap_or(1.0);
-                    let (px, py) = (position.x as f64 / scale, position.y as f64 / scale);
-                    let (w, h) = (size.width as f64 / scale, size.height as f64 / scale);
-                    let inside =
-                        click.x >= px && click.x <= px + w && click.y >= py && click.y <= py + h;
-                    if !inside {
-                        let _ = popup.hide();
-                        mark_popup_up(false);
-                    }
-                });
-            });
+
             // Snapshot the selection NOW, before the app processes this
             // mouse-down and mutates it — on mouse-up we compare against it so
             // a stale selection (still shown by browsers after a plain click)
@@ -1795,88 +1558,6 @@ fn handle_system_event(
                     show_toolbar(&app, toolbar_port, t, position, false, Some((down_x, down_y)));
                 }
             });
-        }
-        CGEventType::KeyDown if POPUP_UP.load(std::sync::atomic::Ordering::Relaxed)
-            || NOTES_UP.load(std::sync::atomic::Ordering::Relaxed) =>
-        {
-            // The popup is up and is never key: navigation keys are consumed
-            // here. Enter and Escape now execute entirely on the Rust side —
-            // the webview is throttled while lexi is not the active app, so
-            // routing the critical action through eval→React→invoke proved
-            // unreliable. Arrow keys only move a highlight, so they still go
-            // through eval where a dropped frame costs nothing.
-            let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-            let key: &str = match keycode {
-                125 => "ArrowDown",
-                126 => "ArrowUp",
-                36 | 52 => "Enter",
-                53 => "Escape",
-                _ => return CallbackResult::Keep,
-            };
-            log_native(&format!("popup-key: {key}"));
-            // Native notes panel: keys act on Rust-owned state (snapshot +
-            // index); the helper only draws — zero webview involvement.
-            if NOTES_UP.load(std::sync::atomic::Ordering::Relaxed) {
-                match key {
-                    "Escape" => notes_hide(),
-                    "Enter" => {
-                        thread::spawn(notes_enter);
-                    }
-                    _ => {
-                        let delta = if key == "ArrowDown" { 1 } else { -1 };
-                        thread::spawn(move || notes_navigate(delta));
-                    }
-                }
-            }
-            let app = app.clone();
-            let main = app.clone();
-            match key {
-                "Enter" => thread::spawn(move || {
-                    let text = PENDING_NOTE.lock().ok().and_then(|mut cell| cell.take());
-                    let Some(text) = text.filter(|t| !t.trim().is_empty()) else {
-                        log_native("popup Enter: no pending note");
-                        return;
-                    };
-                    match text_injection::deliver_text(&text) {
-                        Ok(tier) => {
-                            log_native(&format!("popup Enter: inserted via {tier}"));
-                            let _ = main.run_on_main_thread(move || {
-                                if let Some(popup) = app.get_webview_window("popup_card") {
-                                    let _ = popup.hide();
-                                }
-                                mark_popup_up(false);
-                            });
-                        }
-                        Err(error) => {
-                            log_native(&format!("popup Enter: insert failed: {error}"));
-                        }
-                    }
-                }),
-                _ => thread::spawn(move || {
-                    let _ = main.run_on_main_thread(move || {
-                        let Some(popup) = app.get_webview_window("popup_card") else {
-                            return;
-                        };
-                        if !popup.is_visible().unwrap_or(false) {
-                            // Stale flag (frontend hid without reporting).
-                            mark_popup_up(false);
-                            return;
-                        }
-                        if key == "Escape" {
-                            let _ = popup.hide();
-                            mark_popup_up(false);
-                            return;
-                        }
-                        let script = format!(
-                            "document.dispatchEvent(new KeyboardEvent('keydown', {{key: '{}', bubbles: true}}));",
-                            key
-                        );
-                        let _ = popup.eval(&script);
-                    });
-                }),
-            };
-            // Swallow: navigation must not also land in the source document.
-            return CallbackResult::Drop;
         }
         // NOTE: while the native card is up, the helper is the ACTIVE app with
         // a key panel (OS-normal model): arrows/Enter/Tab/Esc travel the
@@ -2985,19 +2666,39 @@ fn appkit_position_from_event(event: &CGEvent) -> CursorPosition {
     }
 }
 
+pub(crate) fn forward_card_event(
+    run_id: &str,
+    chunk: Option<&str>,
+    done: bool,
+    error: Option<&str>,
+    translation_json: Option<&str>,
+    saved: bool,
+) {
+    if !CARD_UP.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let Some(port) = toolbar_port() else { return };
+    let payload = serde_json::json!({
+        "runId": run_id,
+        "chunk": chunk,
+        "done": done,
+        "error": error,
+        "translationJson": translation_json,
+        "saved": saved,
+    });
+    if let Ok(body) = serde_json::to_string(&payload) {
+        let _ = post_to_helper(port, "/result-event", &body);
+    }
+}
+
 fn show_toolbar(
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
     toolbar_port: u16,
     text: String,
     position: CursorPosition,
     pending: bool,
     drag_origin: Option<(f64, f64)>,
 ) {
-    // While the popup card is up, the toolbar never pops over it.
-    if popup_card_visible(app) {
-        log_native("toolbar show suppressed: popup visible");
-        return;
-    }
     capture_selection_target();
     let Some(actions) = active_toolbar_actions() else {
         log_native("toolbar show ignored disabled or empty actions");
@@ -3340,83 +3041,9 @@ fn card_input_action(app: &tauri::AppHandle, text: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn open_popup_with_feature(
-    app: &tauri::AppHandle,
-    text: String,
-    feature_id: &str,
-) -> Result<(), String> {
-    capture_selection_target();
-    show_popup(app)?;
-    app.emit(
-        "lexi://ai-request",
-        AiRequestPayload {
-            text,
-            mode: "popup_card",
-            feature_id: feature_id.to_string(),
-        },
-    )
-    .map_err(|error| format!("Could not emit AI request: {error}"))
-}
 
-fn show_popup(app: &tauri::AppHandle) -> Result<(), String> {
-    show_popup_with_panel(app, "translate")
-}
 
-fn show_popup_with_panel(app: &tauri::AppHandle, panel: &'static str) -> Result<(), String> {
-    let handle = app.clone();
-    let task_handle = handle.clone();
-    let panel = panel.to_string();
-    handle
-        .run_on_main_thread(move || {
-            if let Err(error) = show_popup_now(&task_handle, &panel) {
-                log_native(&format!("Could not show popup: {error}"));
-            }
-        })
-        .map_err(|error| format!("Could not schedule popup show: {error}"))?;
 
-    Ok(())
-}
-
-fn show_popup_now(app: &tauri::AppHandle, panel: &str) -> Result<(), String> {
-    let Some(window) = app.get_webview_window("popup_card") else {
-        return Err("popup window was not found".into());
-    };
-
-    let already_visible = window.is_visible().unwrap_or(false);
-
-    if already_visible {
-        // Bring to front without stealing focus from the source app
-        show_window_without_focus(&window);
-        mark_popup_up(true);
-        return Ok(());
-    }
-
-    let cursor = cursor_position();
-    window
-        .set_size(LogicalSize::new(DEFAULT_POPUP_SIZE, DEFAULT_POPUP_SIZE))
-        .map_err(|error| format!("Could not reset popup size: {error}"))?;
-
-    let pos = smart_popup_position(cursor.x, cursor.y, DEFAULT_POPUP_SIZE as i32);
-    window
-        .set_position(LogicalPosition::new(pos.0, pos.1))
-        .map_err(|error| format!("Could not position popup: {error}"))?;
-
-    // Emit before show so content clears while window is still hidden
-    app.emit(
-        "lexi://popup-shown",
-        PopupShownPayload {
-            mode: "popup_card",
-            panel: panel.to_string(),
-        },
-    )
-    .map_err(|error| format!("Could not emit popup shown: {error}"))?;
-
-    // Show without stealing focus — preserves text selection in the source app
-    show_window_without_focus(&window);
-    mark_popup_up(true);
-
-    Ok(())
-}
 
 /// Compute smart popup position: default is below-right of cursor,
 /// but if not enough space below on the current screen, place above instead.

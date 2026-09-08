@@ -16,7 +16,6 @@ import {
 import { syncNativeToolbar } from "./lib/nativeToolbar";
 import { isTauriRuntime } from "./lib/platform";
 import { Button } from "./components/ui/Button";
-import { TranslationWindow } from "./components/translation/TranslationWindow";
 import { VocabularyPage } from "./pages/VocabularyPage";
 import { ReviewPage } from "./pages/ReviewPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -35,11 +34,6 @@ const navItems: Array<{ page: Page; label: string; icon: JSX.Element; dividerBef
 
 export default function App() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
-  const windowName = params.get("window");
-
-  if (windowName === "float_bar" || windowName === "popup_card") {
-    return <TranslationWindow />;
-  }
 
   return <MainWindow />;
 }

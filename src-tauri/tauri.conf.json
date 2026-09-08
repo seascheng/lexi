@@ -26,50 +26,22 @@
         "transparent": true,
         "center": true,
         "visible": false
-      },
-      {
-        "label": "float_bar",
-        "title": "Lexi",
-        "url": "index.html?window=float_bar",
-        "width": 980,
-        "height": 260,
-        "x": 220,
-        "y": 24,
-        "decorations": false,
-        "transparent": true,
-        "shadow": false,
-        "alwaysOnTop": true,
-        "resizable": false,
-        "skipTaskbar": true,
-        "visible": false,
-        "visibleOnAllWorkspaces": true
-      },
-      {
-        "label": "popup_card",
-        "title": "Lexi",
-        "url": "index.html?window=popup_card",
-        "width": 420,
-        "height": 420,
-        "decorations": false,
-        "transparent": true,
-        "shadow": true,
-        "alwaysOnTop": true,
-        "resizable": true,
-        "minWidth": 360,
-        "minHeight": 360,
-        "skipTaskbar": true,
-        "visible": false,
-        "visibleOnAllWorkspaces": true
       }
     ]
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
+    "targets": [
+      "app"
+    ],
     "macOS": {
       "signingIdentity": "Lexicon Local Code Signing"
     },
-    "resources": ["native/LexiSelectionHelper.app"],
-    "icon": ["icons/icon.png"]
+    "resources": [
+      "native/LexiSelectionHelper.app"
+    ],
+    "icon": [
+      "icons/icon.png"
+    ]
   }
 }

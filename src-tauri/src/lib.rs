@@ -7,14 +7,12 @@ mod text_injection;
 use commands::ai::{run_ai_prompt, run_ai_prompt_stream};
 use commands::speech::speak_text;
 use commands::tools::execute_tool;
-use commands::window::{set_popup_height, start_popup_resize};
 use cursor::cursor_position;
 use native_toolbar::{
     configure_native_toolbar, handoff_to_app_cmd, hide_native_toolbar, popup_position,
     set_excluded_toolbar_apps, set_handoff_target, set_native_toolbar_actions,
     set_native_toolbar_enabled, set_native_toolbar_theme, set_popup_shortcut,
 };
-use native_toolbar::{set_popup_up, set_pending_note};
 use text_injection::insert_at_focus;
 
 use tauri::menu::{Menu, MenuItem};
@@ -49,11 +47,7 @@ pub fn run() {
             set_native_toolbar_theme,
             set_popup_shortcut,
             speak_text,
-            set_popup_up,
-            set_pending_note,
             insert_at_focus,
-            set_popup_height,
-            start_popup_resize
         ])
         .on_window_event(|window, event| {
             if window.label() == "main" {
