@@ -1526,10 +1526,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             self.postAction(action: "notes-click", text: String(id))
         }
         notesTableView.headerView = nil
-        notesTableView.rowHeight = 64
+        notesTableView.rowHeight = 40
         notesTableView.intercellSpacing = .zero
         notesTableView.style = .fullWidth
-        notesTableView.selectionHighlightStyle = .regular
+        notesTableView.selectionHighlightStyle = .none
         notesTableView.backgroundColor = .clear
         notesTableView.usesAutomaticRowHeights = false
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("note"))
@@ -1550,8 +1550,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         // Notes toolbar: live title search + tag filter chips.
         noteSearchField = NSTextField()
-        noteSearchField.placeholderString = "Search notes"
-        noteSearchField.font = .systemFont(ofSize: 12)
+        let searchCell = VerticallyCenteredTextFieldCell()
+        searchCell.placeholderString = "Search notes"
+        searchCell.font = .systemFont(ofSize: 12)
+        noteSearchField.cell = searchCell
         noteSearchField.wantsLayer = true
         noteSearchField.layer?.cornerRadius = 6
         noteSearchField.layer?.borderWidth = 1
@@ -2110,7 +2112,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let status = activeRun?.status
         var contentH: CGFloat = 76 // idle
         if activePanel == "notes" {
-            let listH = min(CGFloat(max(displayedNotes.count, 1)) * 64 + 12, 420)
+            let listH = min(CGFloat(max(displayedNotes.count, 1)) * 40 + 12, 420)
             contentH = 28 + 8 + 24 + 6 + listH // search + gap + chips + gap + list
         } else if activePanel == "review" {
             contentH = 200
@@ -2990,6 +2992,8 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     let iconView = NSImageView(frame: NSRect(x: 10, y: 23, width: 18, height: 18))
     let titleLabel = NSTextField(labelWithString: "")
     let contentLabel = NSTextField(labelWithString: "")
+    private var tagLabel: NSTextField?
+    private var tagWidth: CGFloat = 40
     /// Inline rename editor: hidden until a double-click swaps it in.
     let titleEditor = NSTextField()
     var deleteButton: NSButton?
@@ -3040,13 +3044,14 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     }
 
     private func applyThemeColors() {
-        let selected = backgroundStyle == .emphasized
-        titleLabel.textColor = selected ? .white : themeColors.foreground
-        contentLabel.textColor = selected
-            ? NSColor.white.withAlphaComponent(0.92)
-            : themeColors.secondaryText
-        iconView.contentTintColor = selected ? .white : themeColors.secondaryText
-        deleteButton?.contentTintColor = selected ? .white : themeColors.secondaryText
+        titleLabel.textColor = themeColors.foreground
+        contentLabel.textColor = themeColors.tertiaryText
+        iconView.contentTintColor = themeColors.secondaryText
+        deleteButton?.contentTintColor = themeColors.secondaryText
+        if let tagLabel {
+            tagLabel.textColor = themeColors.secondaryText
+            tagLabel.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(themeColors.isDark ? 0.10 : 0.06).cgColor
+        }
 
         // Rename editor: always its own surface (inputFill + foreground) —
         // following the capsule's white-on-accent made white-on-white text
@@ -3082,12 +3087,26 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         titleLabel.toolTip = note.content
 
         contentLabel.stringValue = note.content
-        contentLabel.font = .systemFont(ofSize: 12)
-        contentLabel.textColor = .secondaryLabelColor
+        contentLabel.font = .systemFont(ofSize: 11)
         contentLabel.lineBreakMode = .byTruncatingTail
-        contentLabel.maximumNumberOfLines = 2
+        contentLabel.maximumNumberOfLines = 1
         contentLabel.cell?.truncatesLastVisibleLine = true
-        contentLabel.cell?.wraps = true
+        contentLabel.cell?.wraps = false
+
+        // Trailing tag pill (one tag per note in this data model).
+        tagLabel?.removeFromSuperview()
+        tagLabel = nil
+        if let tag = (note.tags ?? []).first {
+            let label = NSTextField(labelWithString: tag)
+            label.font = .systemFont(ofSize: 10, weight: .medium)
+            label.alignment = .center
+            label.lineBreakMode = .byTruncatingTail
+            tagWidth = max((tag as NSString).size(withAttributes: [.font: label.font!]).width + 14, 34)
+            label.wantsLayer = true
+            label.layer?.cornerRadius = 8
+            addSubview(label)
+            tagLabel = label
+        }
 
         if let deleteButton {
             deleteButton.removeFromSuperview()
@@ -3175,18 +3194,26 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     override func layout() {
         super.layout()
         let w = bounds.width
-        titleLabel.frame = NSRect(x: 36, y: 38, width: w - 70, height: 18)
-        // Same text origin as the label; the editor claims the row's free
-        // width so clicks "behind the text" land inside it.
+        // goty tty7 proportions: 14pt icon slot deep in the pill, the
+        // two-line text block against the icon's midline, trailing column
+        // (tag pill + delete) sharing one right margin.
+        iconView.frame = NSRect(x: 12, y: bounds.midY - 7, width: 14, height: 14)
+        deleteButton?.frame = NSRect(x: w - 26, y: bounds.midY - 8, width: 16, height: 16)
+        let hasTag = tagLabel != nil && !tagLabel!.isHidden
+        if hasTag {
+            tagLabel!.frame = NSRect(x: w - 26 - 6 - tagWidth, y: bounds.midY - 8, width: tagWidth, height: 16)
+        }
+        let textX: CGFloat = 32
+        let trailingX: CGFloat = (hasTag ? (w - 26 - 6 - tagWidth) : w - 26) - 8
+        titleLabel.frame = NSRect(x: textX, y: 21, width: trailingX - textX, height: 15)
+        contentLabel.frame = NSRect(x: textX, y: 5, width: trailingX - textX, height: 14)
+        // Rename editor: same text origin as the title label, grown downward.
         titleEditor.frame = NSRect(
             x: titleLabel.frame.minX - 2,
-            y: titleLabel.frame.minY - 3,
-            width: bounds.width - titleLabel.frame.minX - 34,
-            height: 24
+            y: titleLabel.frame.minY - 4,
+            width: trailingX - titleLabel.frame.minX + 2,
+            height: 23
         )
-        contentLabel.frame = NSRect(x: 36, y: 6, width: w - 70, height: 30)
-        iconView.frame = NSRect(x: 10, y: 23, width: 18, height: 18)
-        deleteButton?.frame = NSRect(x: w - 28, y: 24, width: 20, height: 16)
     }
 }
 
@@ -3250,6 +3277,7 @@ private final class NotesTable: NSTableView {
 private final class NoteRowView: NSTableRowView {
     private var hoverArea: NSTrackingArea?
     private var hovering = false
+    var pillColor: NSColor = .clear { didSet { needsDisplay = true } }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -3281,16 +3309,31 @@ private final class NoteRowView: NSTableRowView {
         didSet { needsDisplay = true }
     }
 
+    // goty tty7 pill: hugging the row's edge by the same inset on both
+    // sides, full-radius caps. Selection is a quiet same-hue wash (text
+    // keeps its color); hover is one step lighter.
     override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect) // system selection capsule paints here
-        if !isSelected, hovering {
-            hoverColor.setFill()
-            NSBezierPath(
-                roundedRect: bounds.insetBy(dx: 3, dy: 2),
-                xRadius: 6,
-                yRadius: 6
-            ).fill()
+        super.draw(dirtyRect)
+        let fill: NSColor
+        if isSelected {
+            fill = pillColor
+        } else if hovering {
+            fill = hoverColor
+        } else {
+            return
         }
+        let pill = bounds.insetBy(dx: 4, dy: 3)
+        NSBezierPath(
+            roundedRect: pill,
+            xRadius: pill.height / 2,
+            yRadius: pill.height / 2
+        ).fill()
+        fill.setFill()
+        NSBezierPath(
+            roundedRect: pill,
+            xRadius: pill.height / 2,
+            yRadius: pill.height / 2
+        ).fill()
     }
 }
 
@@ -3770,6 +3813,7 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
         let view = NoteRowView(frame: .zero)
         view.identifier = NSUserInterfaceItemIdentifier("NoteRowView")
         view.hoverColor = cardTheme.hoverFill
+        view.pillColor = cardTheme.selectedFill
         return view
     }
 
