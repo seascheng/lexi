@@ -1806,10 +1806,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     private func layoutPanelTabPills() {
-        var x: CGFloat = 0
-        for pill in panelTabPills {
+        let widths = panelTabPills.map { pill -> CGFloat in
             pill.sizeToFit()
-            let w = max(pill.frame.width + 20, 60)
+            return max(pill.frame.width + 20, 60)
+        }
+        // The pill group centers in the tab strip.
+        let total = widths.reduce(0, +) + CGFloat(max(widths.count - 1, 0)) * 6
+        var x = max((cardPanelTabsView.bounds.width - total) / 2, 0)
+        for (pill, w) in zip(panelTabPills, widths) {
             pill.frame = NSRect(x: x, y: 2, width: w, height: 26)
             x += w + 6
         }
