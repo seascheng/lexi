@@ -2171,8 +2171,12 @@ fn trigger_popup_with_selection(app: &tauri::AppHandle) {
     if let Some(selected) = &text {
         show_result_card(app, selected, "translation");
     } else {
-        show_notes_panel(app);
-        log_native(&format!("shortcut no selected text (source={})", source));
+        // Cursor sits in an input with nothing selected: open the native card
+        // straight onto its Notes tab — ↑/↓ select, Enter injects at the
+        // source app's caret (the panel's core purpose).
+        show_idle_card(app);
+        send_card_notes(app);
+        log_native(&format!("shortcut notes mode (source={})", source));
     }
 }
 

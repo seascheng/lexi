@@ -1568,11 +1568,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         showPanelTab(id)
     }
 
-    private func showPanelTab(_ id: String) {
+    private func showPanelTab(_ id: String, notify: Bool = true) {
         activePanel = id
         rebuildPanelTabs()
+        rebuildRunTabs()
         renderActiveRun()
         layoutResultCard()
+        guard notify else { return }
         if id == "notes" {
             postAction(action: "panel-notes", text: "-")
         } else if id == "review" {
@@ -2245,6 +2247,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
            let payload = try? JSONDecoder().decode(CardNotesPayload.self, from: bodyData) {
             DispatchQueue.main.async {
                 self.handleCardNotes(payload)
+                self.showPanelTab("notes", notify: false)
             }
             return
         }
