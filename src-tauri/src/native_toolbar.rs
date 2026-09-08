@@ -1635,6 +1635,31 @@ fn handle_system_event(
 
     CallbackResult::Keep
 }
+/// True when the screen position lands on OUR OWN UI (helper panels or the
+/// main window) — clicks there are interactions with this app, not selection
+/// gestures in a source app, and must never kick off selection reading (the
+/// fallback's synthetic Cmd+C at the still-frontmost source app was the
+/// rename double-click's mystery beep).
+fn position_hits_own_ui(x: f64, y: f64) -> bool {
+    unsafe {
+        let system = AXUIElementCreateSystemWide();
+        if system.is_null() {
+            return false;
+        }
+        let mut element: AXUIElementRef = ptr::null();
+        let result = AXUIElementCopyElementAtPosition(system, x as f32, y as f32, &mut element);
+        CFRelease(system as CFTypeRef);
+        if result != AX_ERROR_SUCCESS || element.is_null() {
+            return false;
+        }
+        let mut pid: i32 = 0;
+        AXUIElementGetPid(element, &mut pid);
+        CFRelease(element as CFTypeRef);
+        pid == std::process::id() as i32
+            || pid == HELPER_PID.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// Check if the given screen position is on a text-selectable element.
 /// Returns false for window chrome (title bar, toolbar, buttons, scroll bars, menus).
 fn is_text_area_at_position(x: f64, y: f64) -> bool {
