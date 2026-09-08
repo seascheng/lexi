@@ -1379,7 +1379,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         notesTableView.headerView = nil
         notesTableView.rowHeight = 64
         notesTableView.intercellSpacing = .zero
-        notesTableView.selectionHighlightStyle = .regular
+        notesTableView.selectionHighlightStyle = .none
         notesTableView.backgroundColor = .clear
         notesTableView.usesAutomaticRowHeights = false
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("note"))
@@ -2800,6 +2800,8 @@ private final class NoteRowCell: NSTableCellView {
     let contentLabel = NSTextField(labelWithString: "")
     var deleteButton: NSButton?
     private var onDelete: ((Int64) -> Void)?
+    private var hoverArea: NSTrackingArea?
+    private var hovering = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -2872,6 +2874,26 @@ private final class NoteRowCell: NSTableCellView {
         deleteButton?.frame = NSRect(x: w - 28, y: 24, width: 20, height: 16)
     }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        if let hoverArea { addTrackingArea(hoverArea) }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        retint()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        retint()
+    }
+
+    /// Selection + hover are painted HERE (selectionHighlightStyle = .none),
+    /// both at the same inset/radius so the widths always match. Selection
+    /// copy comes from the system's backgroundStyle (.emphasized).
     private func retint() {
         let selected = backgroundStyle == .emphasized
         titleLabel.textColor = selected ? .white : .labelColor
@@ -2879,6 +2901,15 @@ private final class NoteRowCell: NSTableCellView {
             ? NSColor.white.withAlphaComponent(0.92)
             : .secondaryLabelColor
         iconView.contentTintColor = selected ? .white : .secondaryLabelColor
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        if selected {
+            layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        } else if hovering {
+            layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.05).cgColor
+        } else {
+            layer?.backgroundColor = NSColor.clear.cgColor
+        }
     }
 }
 
@@ -3314,15 +3345,7 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        if let reused = tableView.makeView(
-            withIdentifier: NSUserInterfaceItemIdentifier("NoteRowView"),
-            owner: self
-        ) as? NoteRowView {
-            return reused
-        }
-        let view = NoteRowView(frame: .zero)
-        view.identifier = NSUserInterfaceItemIdentifier("NoteRowView")
-        return view
+        nil // default row view: the cell owns selection + hover visuals
     }
 }
 
