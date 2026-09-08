@@ -815,8 +815,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var translateIdleView: NSView!
     private var resultIdleLabel: NSTextField!
     private var resultIdleHint: NSTextField!
-    private var noteHintLabel: NSTextField!
-    private var noteHintHideWork: DispatchWorkItem?
     private var resultIdleIcon: NSImageView!
     private var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
     private var resultActionBar: NSView!
@@ -1416,12 +1414,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultIdleHint.textColor = cardTheme.tertiaryText
         resultIdleHint.alignment = .center
 
-        noteHintLabel = NSTextField(labelWithString: "")
-        noteHintLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        noteHintLabel.textColor = cardTheme.dangerFill
-        noteHintLabel.alignment = .center
-        noteHintLabel.isHidden = true
-        resultContainer.addSubview(noteHintLabel)
         resultIdleHint.frame = NSRect(x: 10, y: 6, width: resultCardWidth - 20, height: 14)
         translateIdleView.addSubview(resultIdleHint)
 
@@ -1692,19 +1684,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let index = sender.selectedSegment
         guard index >= 0, index < panelDefs.count else { return }
         showPanelTab(panelDefs[index].id)
-    }
-
-    private func showNoteHint(_ message: String) {
-        noteHintHideWork?.cancel()
-        noteHintLabel.stringValue = message
-        noteHintLabel.isHidden = false
-        layoutResultCard()
-        let work = DispatchWorkItem { [weak self] in
-            self?.noteHintLabel.isHidden = true
-            self?.layoutResultCard()
-        }
-        noteHintHideWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
     }
 
     private func cyclePanelTab() {
@@ -2097,9 +2076,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         cardNotesClip.isHidden = activePanel != "notes"
         cardNotesClip.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
-        if noteHintLabel != nil {
-            noteHintLabel.frame = NSRect(x: 10, y: contentY + contentFinal - 20, width: width - 20, height: 16)
-        }
 
         reviewCardView.isHidden = activePanel != "review"
         reviewCardView.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
@@ -2279,15 +2255,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
 
 
-        if request.hasPrefix("POST /card-note-error "),
-           let body = request.components(separatedBy: "\r\n\r\n").last,
-           let bodyData = body.data(using: .utf8),
-           let payload = try? JSONDecoder().decode(CardNoteErrorPayload.self, from: bodyData) {
-            DispatchQueue.main.async {
-                self.showNoteHint(payload.message)
-            }
-            return
-        }
         if request.hasPrefix("POST /card-hide ") {
             DispatchQueue.main.async {
                 guard !self.cardPinned else { return }
@@ -3047,10 +3014,6 @@ private final class NoteRowView: NSTableRowView {
             ).fill()
         }
     }
-}
-
-private struct CardNoteErrorPayload: Decodable {
-    let message: String
 }
 
 private struct CardNotesPayload: Decodable {
