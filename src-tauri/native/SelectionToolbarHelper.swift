@@ -2756,6 +2756,7 @@ private final class NoteRowCell: NSTableCellView {
     func setEmphasized(_ emphasized: Bool) {
         isSelectedState = emphasized
         retint(selected: emphasized)
+        needsDisplay = true // the capsule lives in draw(); it never repaints without this
     }
 
     override func updateTrackingAreas() {
@@ -2796,6 +2797,9 @@ private final class NoteRowCell: NSTableCellView {
 
     func configure(note: CardNotesPayload.Note, dark: Bool,
                    onDelete: ((Int64) -> Void)?) {
+        isSelectedState = false
+        hovering = false
+        needsDisplay = true
         iconView.image = lucideImage(for: "file-text", title: note.name)
         iconView.imageScaling = .scaleProportionallyDown
 
