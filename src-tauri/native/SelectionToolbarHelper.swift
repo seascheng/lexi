@@ -2747,6 +2747,15 @@ private final class NoteRowCell: NSTableCellView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    /// Labels are the deepest hit-test targets and reject the first mouse by
+    /// default — claim every non-button hit so the table gets the click.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if let hit = super.hitTest(point), hit is NSButton {
+            return hit
+        }
+        return self
+    }
+
     override var backgroundStyle: NSView.BackgroundStyle {
         didSet {
             // The ONLY custom visual: white text on the system's accent
