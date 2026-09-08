@@ -2839,12 +2839,15 @@ private final class NotesTable: NSTableView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func mouseDown(with event: NSEvent) {
-        // NSTableView's click tracking bails out unless its window is key —
-        // and this nonactivating panel never is on the first click. Promote
-        // it, then let the system select the clicked row.
-        if window?.isKeyWindow != true {
-            NSApp.activate(ignoringOtherApps: false)
-            window?.makeKey()
+        // The panel is nonactivating: on the first click the app isn't
+        // active, the window isn't key, and NSTableView's own tracking
+        // silently bails. Select the clicked row PROGRAMMATICALLY — that
+        // works without any key status — and let the system take over on
+        // subsequent (active) clicks.
+        let point = convert(event.locationInWindow, from: nil)
+        let row = self.row(at: point)
+        if row >= 0 {
+            selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         }
         super.mouseDown(with: event)
     }
