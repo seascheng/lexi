@@ -565,6 +565,24 @@ private final class HoverIconButton: NSButton {
     }
 }
 
+/// NSScrollView that only scrolls horizontally. Vertical wheel deltas are
+/// forwarded to another scroll view (the markdown content) — the strips are
+/// one line high, so the default vertical rubber-band made the buttons
+/// "scroll up and down" in place.
+private final class HorizontalOnlyClip: NSScrollView {
+    weak var verticalForward: NSScrollView?
+
+    override func scrollWheel(with event: NSEvent) {
+        if abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) {
+            if let forward = verticalForward {
+                forward.scrollWheel(with: event)
+            }
+            return // never bounce vertically
+        }
+        super.scrollWheel(with: event)
+    }
+}
+
 /// Resize surfaces for the borderless card: bottom-right corner, right edge,
 /// bottom edge. Dragging anchors the opposite edge (standard window resize
 /// semantics) and each zone shows the matching system cursor.
@@ -678,7 +696,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var resultPanel: NSPanel!
     private var resultContainer: NSVisualEffectView!
     private var resultTabsView: NSView!
-    private var resultTabsClip: NSScrollView!
+    private var resultTabsClip: HorizontalOnlyClip!
     private var resultTrashButton: NSButton!
     private var resultCloseButton: NSButton!
     private var resultScrollView: NSScrollView!
@@ -698,7 +716,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var inputPlaceholder: NSTextField!
     private var runsSeparator: NSView!
     private var inputButtonsRow: NSView!
-    private var inputButtonsClip: NSScrollView!
+    private var inputButtonsClip: HorizontalOnlyClip!
     private var cardRuns: [CardRun] = []
     private var cardActions: [CardActionsPayload.Item] = []
     private var activeRunId: String?
@@ -1188,13 +1206,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultRunsBar = NSView(frame: NSRect(x: 0, y: 180, width: resultCardWidth, height: 28))
         resultContainer.addSubview(resultRunsBar)
 
-        resultTabsClip = NSScrollView(frame: NSRect(x: 8, y: 0, width: resultCardWidth - 84, height: 28))
+        resultTabsClip = HorizontalOnlyClip(frame: NSRect(x: 8, y: 0, width: resultCardWidth - 84, height: 28))
         resultTabsClip.drawsBackground = false
         resultTabsClip.hasVerticalScroller = false
         resultTabsClip.hasHorizontalScroller = false
         resultTabsClip.autohidesScrollers = true
         let runsDoc = NSView(frame: NSRect(x: 0, y: 0, width: resultCardWidth - 84, height: 28))
         resultTabsClip.documentView = runsDoc
+        resultTabsClip.verticalForward = resultScrollView
         resultRunsBar.addSubview(resultTabsClip)
 
         runsSeparator = NSView(frame: .zero)
@@ -1328,13 +1347,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         inputContainer.addSubview(inputPlaceholder)
 
         inputButtonsRow = NSView(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
-        inputButtonsClip = NSScrollView(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
+        inputButtonsClip = HorizontalOnlyClip(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
         inputButtonsClip.drawsBackground = false
         inputButtonsClip.hasVerticalScroller = false
         inputButtonsClip.hasHorizontalScroller = false
         inputButtonsClip.autohidesScrollers = true
         inputButtonsClip.contentView.automaticallyAdjustsContentInsets = false
         inputButtonsClip.documentView = inputButtonsRow
+        inputButtonsClip.verticalForward = resultScrollView
         inputContainer.addSubview(inputButtonsClip)
 
         // Notes tab: browsable note rows (click = copy).
