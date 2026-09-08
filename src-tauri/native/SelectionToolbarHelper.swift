@@ -1927,7 +1927,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         // render at — otherwise the two widths disagree and text is clipped
         // or a tall empty frame is left behind.
         let rowMeasured = inputTextHeight(atWidth: rowLayoutWidth - 12)
-        let isMultiline = rowMeasured > 34
+        let isMultiline = rowMeasured > 18 // one 13pt line ≈ 17.5pt: anything more is a textarea
         let fullMeasured = inputTextHeight(atWidth: contentWidth - 24)
         let textHeight = isMultiline ? min(fullMeasured, 152) : max(min(rowMeasured, 34), 24)
         let inputBarHeight = isMultiline ? textHeight + 12 + 6 + 28 + 8 : textHeight + 8
