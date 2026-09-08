@@ -2718,6 +2718,7 @@ private struct CardActionsPayload: Decodable {
 private final class NoteRowView: NSTableRowView {
     private var hoverArea: NSTrackingArea?
     private var hovering = false
+    private var isSelectedState = false
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -2760,6 +2761,7 @@ private final class NoteRowCell: NSTableCellView {
     private var onDelete: ((Int64) -> Void)?
     private var hoverArea: NSTrackingArea?
     private var hovering = false
+    private var isSelectedState = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -2771,17 +2773,22 @@ private final class NoteRowCell: NSTableCellView {
     required init?(coder: NSCoder) { fatalError("not supported") }
 
     override var backgroundStyle: NSView.BackgroundStyle {
-        didSet { retint(selected: backgroundStyle == .emphasized) }
+        didSet {
+            isSelectedState = backgroundStyle == .emphasized
+            retint(selected: isSelectedState)
+        }
     }
 
     /// Explicit selection drive — with selectionHighlightStyle = .none the
     /// system never flips backgroundStyle, so selectionDidChange pushes it.
     func setEmphasized(_ emphasized: Bool) {
+        isSelectedState = emphasized
         retint(selected: emphasized)
     }
 
     func configure(note: CardNotesPayload.Note, dark: Bool,
                    onDelete: ((Int64) -> Void)?) {
+        hovering = false
         iconView.image = lucideImage(for: "file-text", title: note.name)
         iconView.imageScaling = .scaleProportionallyDown
 
@@ -2847,12 +2854,12 @@ private final class NoteRowCell: NSTableCellView {
 
     override func mouseEntered(with event: NSEvent) {
         hovering = true
-        retint(selected: backgroundStyle == .emphasized)
+        retint(selected: isSelectedState)
     }
 
     override func mouseExited(with event: NSEvent) {
         hovering = false
-        retint(selected: backgroundStyle == .emphasized)
+        retint(selected: isSelectedState)
     }
 
     /// Selection + hover are painted HERE (selectionHighlightStyle = .none),
