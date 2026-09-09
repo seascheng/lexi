@@ -3501,8 +3501,6 @@ private final class TagDropdownView: NSView {
         self.theme = theme
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 8
-        layer?.borderWidth = 1
 
         var y: CGFloat = 4
         func addRow(_ title: String, value: String?, checked: Bool) {
@@ -3569,9 +3567,10 @@ private final class TagDropdownView: NSView {
     }
 }
 
-/// A dropdown row: whole-row click.
+/// A dropdown row: whole-row click, goty quiet-wash hover.
 private final class RowPickButton: NSButton {
     var onPickRow: (() -> Void)?
+    private var hoverArea: NSTrackingArea?
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -3581,11 +3580,37 @@ private final class RowPickButton: NSButton {
         isBordered = false
         target = self
         action = #selector(rowPicked)
+        wantsLayer = true
+        layer?.cornerRadius = 6
     }
 
-    @objc private func rowPicked() {
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        hoverArea = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        if let hoverArea { addTrackingArea(hoverArea) }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.14).cgColor
+        super.mouseDown(with: event)
         onPickRow?()
     }
+
+    @objc private func rowPicked() {}
 
     required init?(coder: NSCoder) {
         fatalError("programmatic only")
