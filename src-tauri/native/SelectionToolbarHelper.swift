@@ -827,7 +827,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var resultSaveButton: NSButton!
     private var inputContainer: NSView!
     private var inputTextView: CardInputTextView!
-    private var inputPlaceholder: NSTextField!
     private var runsSeparator: NSView!
     private var inputButtonsRow: NSView!
     private var inputButtonsClip: HorizontalOnlyClip!
@@ -1283,7 +1282,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             container?.layer?.cornerRadius = 8
             container?.layer?.borderWidth = 1
         }
-        inputPlaceholder?.textColor = cardTheme.tertiaryText
+        inputTextView?.placeholder = NSAttributedString(
+            string: "Enter text",
+            attributes: [.foregroundColor: cardTheme.tertiaryText, .font: NSFont.systemFont(ofSize: 13)]
+        )
     }
     // MARK: - Native result card (WebView parity): AiForm input bar,
     // multi-run tabs, loading/streaming/ready/error states, EntryTypeTags,
@@ -1500,15 +1502,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             self?.setInputFocused(false)
         }
         inputTextView.textContainer?.lineFragmentPadding = 0
-
-        // Placeholder sits UNDER the (transparent) text view: a label on top
-        // would swallow the click and the field could never take focus.
-        inputPlaceholder = NSTextField(labelWithString: "Enter text")
-        inputPlaceholder.font = .systemFont(ofSize: 13)
-        inputPlaceholder.textColor = cardTheme.tertiaryText
-        inputPlaceholder.frame = NSRect(x: 9, y: 9, width: 160, height: 16)
-        inputContainer.addSubview(inputPlaceholder)
-
+        inputTextView.placeholder = NSAttributedString(
+            string: "Enter text",
+            attributes: [.foregroundColor: cardTheme.tertiaryText, .font: NSFont.systemFont(ofSize: 13)]
+        )
         inputContainer.addSubview(inputTextView)
 
         inputButtonsRow = NSView(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
@@ -1583,7 +1580,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         noteSearchField.cell = searchCell
         noteSearchField.font = .systemFont(ofSize: 13)
         noteSearchField.textColor = cardTheme.foreground
-        noteSearchField.placeholderAttributedString = nil
         noteSearchField.backgroundColor = .clear
         noteSearchField.drawsBackground = false
         noteSearchField.isBordered = false
@@ -2200,9 +2196,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             inputButtonsClip.reflectScrolledClipView(inputButtonsClip.contentView)
         }
 
-        inputPlaceholder.isHidden = !inputTextView.string.isEmpty
-        inputPlaceholder.frame.origin = NSPoint(x: inputTextView.frame.minX + inputTextView.textContainerInset.width + 1, y: inputTextView.frame.minY + inputTextView.textContainerInset.height)
-
         // --- Strip sizes (screen order top→bottom: tabs / input / runs /
         // content / actionBar). Notes & Review replace everything below tabs.
         let isTranslate = activePanel == "translate"
@@ -2265,7 +2258,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         if isTranslate {
             inputContainer.frame = NSRect(x: side, y: inputY, width: contentWidth, height: inputBarHeight)
         }
-        inputPlaceholder.isHidden = !inputTextView.string.isEmpty
 
         resultRunsBar.isHidden = runsH == 0
         let stripW = width - 48
@@ -3641,8 +3633,25 @@ private final class RunChipView: NSView {
 private final class CardInputTextView: NSTextView {
     var onBecameFocus: (() -> Void)?
     var onLostFocus: (() -> Void)?
+    /// Multiline text views have no native placeholder; this one paints the
+    /// hint INSIDE draw() at textContainerOrigin with the same font — the
+    /// hint and real text share one layout pipeline, so they cannot drift.
+    var placeholder: NSAttributedString?
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard string.isEmpty, let placeholder else { return }
+        let origin = textContainerOrigin
+        let lineH = font?.boundingRectForFont.height.rounded() ?? 16
+        placeholder.draw(in: NSRect(
+            x: origin.x,
+            y: origin.y,
+            width: bounds.width - origin.x * 2,
+            height: lineH
+        ))
+    }
 
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
