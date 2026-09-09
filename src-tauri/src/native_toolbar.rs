@@ -2884,6 +2884,39 @@ fn dispatch_toolbar_action(
         }
         return send_card_notes(app);
     }
+    if action.action == "note-tag" {
+        // text = "<note_id>|<tag_name>"; empty tag name clears the tag.
+        if let Some((id, name)) = action.text.split_once('|') {
+            if let Ok(id) = id.trim().parse::<i64>() {
+                let tag = name.trim().replace('\'', "''");
+                if tag.is_empty() {
+                    let _ = sqlite_query_json(
+                        app,
+                        &format!("DELETE FROM note_tags WHERE note_id = {id};"),
+                    );
+                } else {
+                    let _ = sqlite_query_json(
+                        app,
+                        &format!("INSERT OR IGNORE INTO tags (name) VALUES ('{tag}');"),
+                    );
+                    // One visible tag per note: replace rather than add.
+                    let _ = sqlite_query_json(
+                        app,
+                        &format!("DELETE FROM note_tags WHERE note_id = {id};"),
+                    );
+                    let _ = sqlite_query_json(
+                        app,
+                        &format!(
+                            "INSERT INTO note_tags (note_id, tag_id) \
+                             SELECT {id}, id FROM tags WHERE name = '{tag}';"
+                        ),
+                    );
+                }
+                let _ = app.emit("lexi://notes-changed", ());
+            }
+        }
+        return send_card_notes(app);
+    }
     if action.action == "note-delete" {
         if let Ok(id) = action.text.trim().parse::<i64>() {
             let _ = sqlite_query_json(app, &format!("DELETE FROM notes WHERE id = {id};"));

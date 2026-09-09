@@ -1946,6 +1946,43 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         postAction(action: "card-hidden", text: "-")
     }
 
+    /// System NSMenu at the pill: every known tag (checkmark on the current
+    /// one) plus a clear option. Picks post note-tag to Rust, which updates
+    /// note_tags and pushes the refreshed snapshot back.
+    private func showTagMenu(noteId: Int64, tag: String?, anchor: NSView) {
+        guard noteId != 0 else { return }
+        let menu = NSMenu()
+        let allTags = Array(Set(cardNotesItems.flatMap { $0.tags ?? [] })).sorted()
+        for name in allTags {
+            let item = NSMenuItem(title: name, action: #selector(tagMenuPicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = "\(noteId)|\(name)"
+            item.state = name == tag ? .on : .off
+            menu.addItem(item)
+        }
+        if !allTags.isEmpty {
+            menu.addItem(.separator())
+        }
+        let clear = NSMenuItem(title: "No tag", action: #selector(tagMenuPicked(_:)), keyEquivalent: "")
+        clear.target = self
+        clear.representedObject = "\(noteId)|"
+        menu.addItem(clear)
+        if let window = anchor.window {
+            let loc = NSPoint(x: 0, y: anchor.bounds.height + 4)
+            menu.popUp(positioning: nil, at: anchor.convert(loc, to: nil), in: anchor)
+            _ = window // keep the key panel referenced through the tracking session
+        }
+    }
+
+    @objc private func tagMenuPicked(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? String,
+              let sep = payload.firstIndex(of: "|") else { return }
+        let id = Int64(payload[payload.startIndex..<sep]) ?? 0
+        let name = String(payload[payload.index(after: sep)...])
+        guard id != 0 else { return }
+        postAction(action: "note-tag", text: "\(id)|\(name)")
+    }
+
     private func noteDeleteClickedId(_ id: Int64) {
         postAction(action: "note-delete", text: String(id))
     }
@@ -3118,6 +3155,12 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     let titleLabel = NSTextField(labelWithString: "")
     let contentLabel = NSTextField(labelWithString: "")
     private var tagLabel: NSTextField?
+    private var tagButton: TagPillButton?
+    private var onTagPicked: ((Int64, NSView) -> Void)?
+
+    private func fireTagClick() {
+        if let noteId { onTagPicked?(noteId, tagButton ?? (self as NSView)) }
+    }
     private var tagWidth: CGFloat = 40
     /// Inline rename editor: hidden until a double-click swaps it in.
     let titleEditor = NSTextField()
@@ -3180,9 +3223,9 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         contentLabel.textColor = inverted ? themeColors.background.withAlphaComponent(0.8) : themeColors.tertiaryText
         iconView.contentTintColor = inverted ? themeColors.background : themeColors.secondaryText
         deleteButton?.contentTintColor = inverted ? themeColors.background : themeColors.secondaryText
-        if let tagLabel {
-            tagLabel.textColor = inverted ? themeColors.background : themeColors.secondaryText
-            tagLabel.layer?.backgroundColor = inverted
+        if let tagButton {
+            tagButton.contentTintColor = inverted ? themeColors.background : themeColors.secondaryText
+            tagButton.layer?.backgroundColor = inverted
                 ? NSColor.black.withAlphaComponent(0.18).cgColor
                 : NSColor.labelColor.withAlphaComponent(themeColors.isDark ? 0.10 : 0.06).cgColor
         }
@@ -3202,7 +3245,8 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
 
     func configure(note: CardNotesPayload.Note, dark: Bool,
                    onDelete: ((Int64) -> Void)?,
-                   onRename: ((Int64, String) -> Void)? = nil) {
+                   onRename: ((Int64, String) -> Void)? = nil,
+                   onTagPicked: ((Int64, NSView) -> Void)? = nil) {
         iconView.image = lucideImage(for: "file-text", title: note.name)
         iconView.imageScaling = .scaleProportionallyDown
 
@@ -3227,19 +3271,28 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         contentLabel.cell?.truncatesLastVisibleLine = true
         contentLabel.cell?.wraps = false
 
-        // Trailing tag pill (one tag per note in this data model).
+        // Trailing tag pill (one tag per note in this data model). It is a
+        // BUTTON: click opens the tag picker (system NSMenu) for this note.
         tagLabel?.removeFromSuperview()
         tagLabel = nil
+        tagButton?.removeFromSuperview()
+        tagButton = nil
         if let tag = (note.tags ?? []).first {
-            let label = NSTextField(labelWithString: tag)
-            label.font = .systemFont(ofSize: 10, weight: .medium)
-            label.alignment = .center
-            label.lineBreakMode = .byTruncatingTail
-            tagWidth = max((tag as NSString).size(withAttributes: [.font: label.font!]).width + 14, 34)
-            label.wantsLayer = true
-            label.layer?.cornerRadius = 8
-            addSubview(label)
-            tagLabel = label
+            let button = TagPillButton()
+            button.title = tag
+            button.isBordered = false
+            button.font = .systemFont(ofSize: 10, weight: .medium)
+            button.alignment = .center
+            button.lineBreakMode = .byTruncatingTail
+            button.toolTip = "Change tag"
+            tagWidth = max((tag as NSString).size(withAttributes: [.font: button.font!]).width + 14, 34)
+            button.wantsLayer = true
+            button.layer?.cornerRadius = 8
+            button.onTagClicked = { [weak self] in
+                self?.fireTagClick()
+            }
+            addSubview(button)
+            tagButton = button
         }
 
         if let deleteButton {
@@ -3255,6 +3308,9 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
             button.toolTip = "Delete note"
             button.identifier = NSUserInterfaceItemIdentifier(String(id))
             self.onDelete = onDelete
+        if let onTagPicked {
+            self.onTagPicked = onTagPicked
+        }
             button.target = self
             button.action = #selector(deleteTapped)
             deleteButton = button
@@ -3333,9 +3389,9 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         // (tag pill + delete) sharing one right margin.
         iconView.frame = NSRect(x: 12, y: bounds.midY - 7, width: 14, height: 14)
         deleteButton?.frame = NSRect(x: w - 26, y: bounds.midY - 8, width: 16, height: 16)
-        let hasTag = tagLabel != nil && !tagLabel!.isHidden
+        let hasTag = tagButton != nil
         if hasTag {
-            tagLabel!.frame = NSRect(x: w - 26 - 6 - tagWidth, y: bounds.midY - 8, width: tagWidth, height: 16)
+            tagButton!.frame = NSRect(x: w - 26 - 6 - tagWidth, y: bounds.midY - 8, width: tagWidth, height: 16)
         }
         let textX: CGFloat = 32
         let trailingX: CGFloat = (hasTag ? (w - 26 - 6 - tagWidth) : w - 26) - 8
@@ -3405,6 +3461,27 @@ private final class NotesTable: NSTableView {
             selectRowIndexes(IndexSet(integer: clickedRow), byExtendingSelection: false)
         }
         super.mouseDown(with: event)
+    }
+}
+
+/// Tag pill: a borderless button that fires on ANY click inside its bounds.
+private final class TagPillButton: NSButton {
+    var onTagClicked: (() -> Void)?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    init() {
+        super.init(frame: .zero)
+        target = self
+        action = #selector(pillClicked)
+    }
+
+    @objc private func pillClicked() {
+        onTagClicked?()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("programmatic only")
     }
 }
 
@@ -3988,6 +4065,9 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
                        },
                        onRename: { [weak self] id, name in
                            self?.noteRenamed(id: id, name: name)
+                       },
+                       onTagPicked: { [weak self] id, anchor in
+                           self?.showTagMenu(noteId: id, tag: note.tags?.first, anchor: anchor)
                        })
         cell.themeColors = cardTheme
         return cell
