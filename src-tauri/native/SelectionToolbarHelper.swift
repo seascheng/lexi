@@ -843,7 +843,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private var notesTableView: NotesTable!
     private var noteSearchContainer: NSView!
-    private var noteSearchField: NSTextView!
+    private var noteSearchField: CardInputTextView!
     private var noteSearchPlaceholder: NSTextField!
     private var noteTagBar: NSView!
     private var noteTagButtons: [NSButton] = []
@@ -1263,10 +1263,29 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func setInputFocused(_ focused: Bool) {
         isInputFocused = focused
-        inputContainer.layer?.backgroundColor = cardTheme.inputFill.cgColor
-        inputContainer.layer?.borderColor = focused
-            ? cardTheme.foreground.withAlphaComponent(0.45).cgColor
-            : cardTheme.hairline.cgColor
+        styleCardInputs(focused: focused ? .actions : .none)
+    }
+
+    /// Both card inputs (Actions bar + Notes search) share ONE surface
+    /// definition: same fill, hairline, radius, placeholder tint. Focus
+    /// (per field) deepens the border.
+    private enum CardInputFocus { case none, actions, search }
+
+    private func styleCardInputs(focused: CardInputFocus = .none) {
+        let surface = cardTheme.inputFill.cgColor
+        let hairline = cardTheme.hairline.cgColor
+        let focusTint = cardTheme.foreground.withAlphaComponent(0.45).cgColor
+        let border: (CardInputFocus) -> CGColor = { focus in
+            focus == .none ? hairline : focusTint
+        }
+        for (container, focus) in [(inputContainer, CardInputFocus.actions), (noteSearchContainer, CardInputFocus.search)] {
+            container?.layer?.backgroundColor = surface
+            container?.layer?.borderColor = border(focus == .none || focus == focused ? focused : .none)
+            container?.layer?.cornerRadius = 8
+            container?.layer?.borderWidth = 1
+        }
+        inputPlaceholder?.textColor = cardTheme.tertiaryText
+        noteSearchPlaceholder?.textColor = cardTheme.tertiaryText
     }
     // MARK: - Native result card (WebView parity): AiForm input bar,
     // multi-run tabs, loading/streaming/ready/error states, EntryTypeTags,
@@ -1477,13 +1496,17 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         inputTextView.delegate = self
         inputTextView.onBecameFocus = { [weak self] in
             self?.postAction(action: "card-key", text: "1")
+            self?.setInputFocused(true)
+        }
+        inputTextView.onLostFocus = { [weak self] in
+            self?.setInputFocused(false)
         }
         inputTextView.textContainer?.lineFragmentPadding = 0
         inputContainer.addSubview(inputTextView)
 
         inputPlaceholder = NSTextField(labelWithString: "Enter text")
         inputPlaceholder.font = .systemFont(ofSize: 13)
-        inputPlaceholder.textColor = .tertiaryLabelColor
+        inputPlaceholder.textColor = cardTheme.tertiaryText
         inputPlaceholder.frame = NSRect(x: 9, y: 9, width: 160, height: 16)
         inputContainer.addSubview(inputPlaceholder)
 
@@ -1560,6 +1583,12 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         noteSearchField.isAutomaticDashSubstitutionEnabled = false
         noteSearchField.delegate = self
         noteSearchField.textContainer?.lineFragmentPadding = 0
+        noteSearchField.onBecameFocus = { [weak self] in
+            self?.styleCardInputs(focused: .search)
+        }
+        noteSearchField.onLostFocus = { [weak self] in
+            self?.styleCardInputs(focused: .none)
+        }
         noteSearchContainer.addSubview(noteSearchField)
 
         noteSearchPlaceholder = NSTextField(labelWithString: "Search notes")
@@ -1810,6 +1839,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             icon.size = NSSize(width: 12, height: 12)
             let attachment = NSTextAttachment()
             attachment.image = icon
+            // Center the glyph on the label's optical middle (cap height),
+            // not on the baseline where attachments sit by default.
+            let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+            attachment.bounds = NSRect(
+                x: 0, y: (font.capHeight - 12) / 2,
+                width: 12, height: 12
+            )
             title.append(NSAttributedString(attachment: attachment))
         }
         title.append(NSAttributedString(string: "  \(def.name)", attributes: [
@@ -2251,7 +2287,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let notesUIVisible = activePanel == "notes"
         let searchH: CGFloat = 30
         let chipsH: CGFloat = 24
-        noteSearchField.isHidden = !notesUIVisible
+        noteSearchContainer.isHidden = !notesUIVisible
         noteTagBar.isHidden = !notesUIVisible
         cardNotesClip.isHidden = !notesUIVisible
         if notesUIVisible {
@@ -3595,11 +3631,17 @@ private final class RunChipView: NSView {
 /// Enter/Esc — but a distinct type keeps the firstResponder check readable.
 private final class CardInputTextView: NSTextView {
     var onBecameFocus: (() -> Void)?
+    var onLostFocus: (() -> Void)?
 
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
         if ok { onBecameFocus?() }
         return ok
+    }
+
+    override func resignFirstResponder() -> Bool {
+        onLostFocus?()
+        return super.resignFirstResponder()
     }
 }
 
