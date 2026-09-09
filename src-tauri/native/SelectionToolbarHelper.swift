@@ -1930,7 +1930,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
         rebuildNoteTagBar()
         applyNoteFilters()
-        FileLog.write("NOTES loaded count=\(cardNotesItems.count) selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden)")
+        FileLog.write("NOTES loaded count=\(cardNotesItems.count) allTags=\(cardAllTags.count) selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden)")
         layoutResultCard()
         FileLog.write("NOTES post-layout selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden) panel=\(activePanel)")
     }
@@ -3569,6 +3569,23 @@ private final class TagDropdownView: NSView {
                 y += 5
             }
         }
+        needsDisplay = true
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // OPAQUE card-colored panel + hairline. Layer backgrounds never
+        // composited here; painting does (same as the notes row pills).
+        theme.background.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
+        theme.hairline.setStroke()
+        NSBezierPath(
+            roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+            xRadius: 8,
+            yRadius: 8
+        ).stroke()
+        FileLog.write("TAGDROP drew bg=\(theme.background) bounds=\(bounds)")
     }
 
     required init?(coder: NSCoder) {
