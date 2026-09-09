@@ -1575,6 +1575,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         noteSearchField = CardInputTextField(frame: .zero)
         let searchCell = VerticallyCenteredTextFieldCell()
+        searchCell.stringValue = "" // bare NSTextFieldCell ships titled "Field"
         searchCell.isEditable = true
         searchCell.placeholderString = "Search notes"
         noteSearchField.cell = searchCell
