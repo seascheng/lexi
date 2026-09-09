@@ -1946,41 +1946,65 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         postAction(action: "card-hidden", text: "-")
     }
 
-    /// System NSMenu at the pill: every known tag (checkmark on the current
-    /// one) plus a clear option. Picks post note-tag to Rust, which updates
-    /// note_tags and pushes the refreshed snapshot back.
+    // MARK: - Tag dropdown (in-card, goty language)
+    // The system NSMenu misplaces itself on a nonactivating panel - the tag
+    // picker is an in-card dropdown layer instead: same material, opens at
+    // the pill, click-outside/Esc closes, picking posts note-tag.
+
+    private var tagDropdown: TagDropdownView?
+    private var tagDropdownMonitor: Any?
+
     private func showTagMenu(noteId: Int64, tag: String?, anchor: NSView) {
-        guard noteId != 0 else { return }
-        let menu = NSMenu()
+        guard noteId != 0,
+              let host = resultPanel.contentView else { return }
+        closeTagDropdown()
+
         let allTags = Array(Set(cardNotesItems.flatMap { $0.tags ?? [] })).sorted()
-        for name in allTags {
-            let item = NSMenuItem(title: name, action: #selector(tagMenuPicked(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = "\(noteId)|\(name)"
-            item.state = name == tag ? .on : .off
-            menu.addItem(item)
+        let dropdown = TagDropdownView(
+            tags: allTags,
+            current: tag,
+            theme: cardTheme,
+            onPick: { [weak self] name in
+                self?.closeTagDropdown()
+                self?.postAction(action: "note-tag", text: "\(noteId)|\(name ?? "")")
+            }
+        )
+        let pillRect = anchor.convert(anchor.bounds, to: host)
+        dropdown.sizeToFit(width: max(pillRect.width + 40, 150))
+        var origin = NSPoint(x: min(pillRect.minX, host.bounds.width - dropdown.frame.width - 8), y: pillRect.minY - dropdown.frame.height - 4)
+        if origin.y < 8 {
+            origin.y = pillRect.maxY + 4
         }
-        if !allTags.isEmpty {
-            menu.addItem(.separator())
-        }
-        let clear = NSMenuItem(title: "No tag", action: #selector(tagMenuPicked(_:)), keyEquivalent: "")
-        clear.target = self
-        clear.representedObject = "\(noteId)|"
-        menu.addItem(clear)
-        if let window = anchor.window {
-            let loc = NSPoint(x: 0, y: anchor.bounds.height + 4)
-            menu.popUp(positioning: nil, at: anchor.convert(loc, to: nil), in: anchor)
-            _ = window // keep the key panel referenced through the tracking session
+        dropdown.frame.origin = origin
+        host.addSubview(dropdown)
+        tagDropdown = dropdown
+
+        tagDropdownMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] event in
+            guard let self else { return event }
+            if event.type == .keyDown, event.keyCode == 53 {
+                self.closeTagDropdown()
+                return nil
+            }
+            if event.type != .keyDown {
+                let location = event.locationInWindow
+                let inDropdown = self.tagDropdown.map {
+                    $0.convert($0.bounds, to: nil).contains(location)
+                } ?? false
+                if !inDropdown {
+                    self.closeTagDropdown()
+                }
+            }
+            return event
         }
     }
 
-    @objc private func tagMenuPicked(_ sender: NSMenuItem) {
-        guard let payload = sender.representedObject as? String,
-              let sep = payload.firstIndex(of: "|") else { return }
-        let id = Int64(payload[payload.startIndex..<sep]) ?? 0
-        let name = String(payload[payload.index(after: sep)...])
-        guard id != 0 else { return }
-        postAction(action: "note-tag", text: "\(id)|\(name)")
+    private func closeTagDropdown() {
+        tagDropdown?.removeFromSuperview()
+        tagDropdown = nil
+        if let tagDropdownMonitor {
+            NSEvent.removeMonitor(tagDropdownMonitor)
+            self.tagDropdownMonitor = nil
+        }
     }
 
     private func noteDeleteClickedId(_ id: Int64) {
@@ -3461,6 +3485,110 @@ private final class NotesTable: NSTableView {
             selectRowIndexes(IndexSet(integer: clickedRow), byExtendingSelection: false)
         }
         super.mouseDown(with: event)
+    }
+}
+
+/// In-card tag picker: flipped layer list pinned at the pill. One row per
+/// known tag (check on the current), divider, clear row. System menus
+/// misplace themselves on nonactivating panels - this stays in the card.
+private final class TagDropdownView: NSView {
+    private let onPick: (String?) -> Void
+    private let theme: CardTheme
+    private var rows: [NSView] = []
+
+    init(tags: [String], current: String?, theme: CardTheme, onPick: @escaping (String?) -> Void) {
+        self.onPick = onPick
+        self.theme = theme
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.borderWidth = 1
+
+        var y: CGFloat = 4
+        func addRow(_ title: String, value: String?, checked: Bool) {
+            let button = RowPickButton(title: title)
+            button.font = .systemFont(ofSize: 12, weight: checked ? .medium : .regular)
+            button.alignment = .left
+            if checked, let check = lucideImage(for: "check", title: title, color: theme.foreground) {
+                check.size = NSSize(width: 12, height: 12)
+                let attachment = NSTextAttachment()
+                attachment.image = check
+                attachment.bounds = NSRect(x: 0, y: (button.font!.capHeight - 12) / 2, width: 12, height: 12)
+                let title = NSMutableAttributedString(string: title, attributes: [
+                    .font: button.font!,
+                    .foregroundColor: theme.foreground,
+                ])
+                title.append(NSAttributedString(string: "  "))
+                title.append(NSAttributedString(attachment: attachment))
+                button.attributedTitle = title
+            } else {
+                button.attributedTitle = NSAttributedString(string: title, attributes: [
+                    .font: button.font!,
+                    .foregroundColor: value == nil ? theme.secondaryText : theme.foreground,
+                ])
+            }
+            button.wantsLayer = true
+            button.layer?.cornerRadius = 6
+            button.onPickRow = { [weak self] in self?.onPick(value) }
+            rows.append(button)
+            addSubview(button)
+            y += 26
+        }
+        for tag in tags {
+            addRow(tag, value: tag, checked: tag == current)
+        }
+        if !tags.isEmpty {
+            let divider = NSView()
+            divider.wantsLayer = true
+            divider.layer?.backgroundColor = theme.hairline.cgColor
+            rows.append(divider)
+            addSubview(divider)
+            y += 5
+        }
+        addRow("No tag", value: nil, checked: current == nil)
+        frame.size = NSSize(width: 150, height: y)
+        sizeToFit(width: 150)
+    }
+
+    func sizeToFit(width: CGFloat) {
+        frame.size.width = width
+        var y: CGFloat = 3
+        for view in rows {
+            if view is RowPickButton {
+                view.frame = NSRect(x: 4, y: y, width: width - 8, height: 24)
+                y += 26
+            } else {
+                view.frame = NSRect(x: 8, y: y + 2, width: width - 16, height: 1)
+                y += 5
+            }
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("programmatic only")
+    }
+}
+
+/// A dropdown row: whole-row click.
+private final class RowPickButton: NSButton {
+    var onPickRow: (() -> Void)?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    init(title: String) {
+        super.init(frame: .zero)
+        self.title = title
+        isBordered = false
+        target = self
+        action = #selector(rowPicked)
+    }
+
+    @objc private func rowPicked() {
+        onPickRow?()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("programmatic only")
     }
 }
 
