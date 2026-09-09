@@ -843,8 +843,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private var notesTableView: NotesTable!
     private var noteSearchContainer: NSView!
-    private var noteSearchField: CardInputTextView!
-    private var noteSearchPlaceholder: NSTextField!
+    private var noteSearchField: CardInputTextField!
     private var noteTagBar: NSView!
     private var noteTagButtons: [NSButton] = []
     private var noteSearchText = ""
@@ -1285,7 +1284,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             container?.layer?.borderWidth = 1
         }
         inputPlaceholder?.textColor = cardTheme.tertiaryText
-        noteSearchPlaceholder?.textColor = cardTheme.tertiaryText
     }
     // MARK: - Native result card (WebView parity): AiForm input bar,
     // multi-run tabs, loading/streaming/ready/error states, EntryTypeTags,
@@ -1578,28 +1576,25 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         noteSearchContainer.layer?.borderWidth = 1
         resultContainer.addSubview(noteSearchContainer)
 
-        noteSearchField = CardInputTextView(frame: NSRect(x: 6, y: 4, width: 100, height: 22))
+        noteSearchField = CardInputTextField(frame: .zero)
+        let searchCell = VerticallyCenteredTextFieldCell()
+        searchCell.isEditable = true
+        searchCell.placeholderString = "Search notes"
+        noteSearchField.cell = searchCell
         noteSearchField.font = .systemFont(ofSize: 13)
+        noteSearchField.textColor = cardTheme.foreground
+        noteSearchField.placeholderAttributedString = nil
+        noteSearchField.backgroundColor = .clear
         noteSearchField.drawsBackground = false
-        noteSearchField.isRichText = false
-        noteSearchField.isAutomaticQuoteSubstitutionEnabled = false
-        noteSearchField.isAutomaticDashSubstitutionEnabled = false
+        noteSearchField.isBordered = false
+        noteSearchField.focusRingType = .none
         noteSearchField.delegate = self
-        noteSearchField.textContainer?.lineFragmentPadding = 0
         noteSearchField.onBecameFocus = { [weak self] in
             self?.styleCardInputs(focused: .search)
         }
         noteSearchField.onLostFocus = { [weak self] in
             self?.styleCardInputs(focused: .none)
         }
-
-        // Placeholder UNDER the transparent text view — same click-swallowing
-        // fix as the Actions input.
-        noteSearchPlaceholder = NSTextField(labelWithString: "Search notes")
-        noteSearchPlaceholder.font = .systemFont(ofSize: 13)
-        noteSearchPlaceholder.textColor = cardTheme.tertiaryText
-        noteSearchContainer.addSubview(noteSearchPlaceholder)
-
         noteSearchContainer.addSubview(noteSearchField)
 
         noteTagBar = NSView(frame: .zero)
@@ -2299,9 +2294,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         if notesUIVisible {
             let listTop = contentY + contentFinal
             noteSearchContainer.frame = NSRect(x: 12, y: listTop - searchH, width: width - 24, height: searchH)
-            noteSearchField.frame = NSRect(x: 8, y: 4, width: width - 24 - 16, height: searchH - 9)
-            noteSearchPlaceholder.frame = NSRect(x: 9, y: (searchH - 16) / 2, width: 140, height: 16)
-            noteSearchPlaceholder.isHidden = !noteSearchField.string.isEmpty
+            noteSearchField.frame = NSRect(x: 8, y: 3, width: width - 24 - 16, height: searchH - 6)
             noteTagBar.frame = NSRect(x: 12, y: listTop - searchH - 6 - chipsH, width: width - 24, height: chipsH)
             layoutNoteTagButtons()
             cardNotesClip.frame = NSRect(
@@ -3651,12 +3644,28 @@ private final class CardInputTextView: NSTextView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func mouseDown(with event: NSEvent) {
-        let win = window
-        FileLog.write("INPUT mousedown self=\(Self.self) isKey=\(win?.isKeyWindow ?? false) winIsPanel=\(win is NSPanel) responder=\(String(describing: win?.firstResponder).prefix(80))")
-        super.mouseDown(with: event)
-        FileLog.write("INPUT post-mousedown responder=\(String(describing: win?.firstResponder).prefix(80))")
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { onBecameFocus?() }
+        return ok
     }
+
+    override func resignFirstResponder() -> Bool {
+        onLostFocus?()
+        return super.resignFirstResponder()
+    }
+}
+
+/// Single-line card input: native NSTextField with the placeholder STRING
+/// drawn by the cell itself — caret and placeholder share one layout, so
+/// they cannot drift apart. Vertically centered via the same cell used by
+/// the inline rename editor.
+class CardInputTextField: NSTextField {
+    var onBecameFocus: (() -> Void)?
+    var onLostFocus: (() -> Void)?
+    var onCommit: (() -> Void)?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
@@ -3836,13 +3845,13 @@ private enum LightMarkdown {
 }
 
 extension SelectionToolbarApp: NSTextViewDelegate {
+    func controlTextDidChange(_ obj: Notification) {
+        guard obj.object as? NSTextField === noteSearchField else { return }
+        noteSearchText = noteSearchField.stringValue
+        applyNoteFilters()
+    }
+
     func textDidChange(_ notification: Notification) {
-        if notification.object as? NSTextView === noteSearchField {
-            noteSearchText = noteSearchField.string
-            noteSearchPlaceholder.isHidden = !noteSearchField.string.isEmpty
-            applyNoteFilters()
-            return
-        }
         guard notification.object as? NSTextView === inputTextView else { return }
         // AiForm parity: re-measure and re-flow single- vs multi-line on
         // every edit, and re-enable the action buttons when text exists.
@@ -3915,10 +3924,9 @@ extension SelectionToolbarApp: NSTextFieldDelegate {
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         guard control === noteSearchField else { return false }
         if commandSelector == NSSelectorFromString("cancelOperation:") {
-            if !noteSearchField.string.isEmpty {
-                noteSearchField.string = ""
+            if !noteSearchField.stringValue.isEmpty {
+                noteSearchField.stringValue = ""
                 noteSearchText = ""
-                noteSearchPlaceholder.isHidden = true
                 applyNoteFilters()
             } else {
                 notesTableView.window?.makeFirstResponder(notesTableView)
