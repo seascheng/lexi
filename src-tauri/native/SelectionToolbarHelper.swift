@@ -2408,16 +2408,36 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     private func placeResultCard() {
-        let point = NSEvent.mouseLocation
-        var origin = NSPoint(x: point.x + 16, y: point.y - 40)
-        if let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main {
-            let frame = screen.visibleFrame
-            origin.x = min(max(origin.x, frame.minX + 8), frame.maxX - (cardUserWidth ?? resultCardWidth) - 8)
-            // Guarantee vertical room below the card (~7 note rows + chrome).
-            // A low cursor used to starve maxTotal and the notes list showed
-            // a single squeezed row.
-            let room = min(560, frame.height - 16)
-            origin.y = min(max(origin.y, frame.minY + room), frame.maxY - 300 - 8)
+        let cardSize = resultPanel.frame.size
+        let origin: NSPoint
+        if panel.isVisible {
+            // Card unfolds from the toolbar: left-aligned with it, 8pt below
+            // its bottom edge, growing DOWNWARD. Flips above only when the
+            // screen has no room below the toolbar.
+            let tb = panel.frame
+            var p = NSPoint(x: tb.minX, y: tb.minY - cardSize.height - 8)
+            if let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: tb.midX, y: tb.midY)) }) ?? NSScreen.main {
+                let visible = screen.visibleFrame
+                if p.y < visible.minY + 8 {
+                    p.y = tb.maxY + 8
+                }
+                p.x = min(max(p.x, visible.minX + 8), visible.maxX - cardSize.width - 8)
+            }
+            origin = p
+        } else {
+            // Toolbar gone: the card TOP sits just below the cursor and the
+            // card grows downward — the old bottom-anchor put a 400pt card
+            // far above the cursor.
+            let point = NSEvent.mouseLocation
+            var p = NSPoint(x: point.x + 16, y: point.y - 8 - cardSize.height)
+            if let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main {
+                let frame = screen.visibleFrame
+                p.x = min(max(p.x, frame.minX + 8), frame.maxX - cardSize.width - 8)
+                if p.y < frame.minY + 8 {
+                    p.y = min(point.y + 24, frame.maxY - cardSize.height - 8)
+                }
+            }
+            origin = p
         }
         resultPanel.setFrameOrigin(origin)
     }
