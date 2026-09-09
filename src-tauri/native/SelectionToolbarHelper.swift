@@ -1502,13 +1502,16 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             self?.setInputFocused(false)
         }
         inputTextView.textContainer?.lineFragmentPadding = 0
-        inputContainer.addSubview(inputTextView)
 
+        // Placeholder sits UNDER the (transparent) text view: a label on top
+        // would swallow the click and the field could never take focus.
         inputPlaceholder = NSTextField(labelWithString: "Enter text")
         inputPlaceholder.font = .systemFont(ofSize: 13)
         inputPlaceholder.textColor = cardTheme.tertiaryText
         inputPlaceholder.frame = NSRect(x: 9, y: 9, width: 160, height: 16)
         inputContainer.addSubview(inputPlaceholder)
+
+        inputContainer.addSubview(inputTextView)
 
         inputButtonsRow = NSView(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
         inputButtonsClip = HorizontalOnlyClip(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
@@ -1589,12 +1592,15 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         noteSearchField.onLostFocus = { [weak self] in
             self?.styleCardInputs(focused: .none)
         }
-        noteSearchContainer.addSubview(noteSearchField)
 
+        // Placeholder UNDER the transparent text view — same click-swallowing
+        // fix as the Actions input.
         noteSearchPlaceholder = NSTextField(labelWithString: "Search notes")
         noteSearchPlaceholder.font = .systemFont(ofSize: 13)
-        noteSearchPlaceholder.textColor = .tertiaryLabelColor
+        noteSearchPlaceholder.textColor = cardTheme.tertiaryText
         noteSearchContainer.addSubview(noteSearchPlaceholder)
+
+        noteSearchContainer.addSubview(noteSearchField)
 
         noteTagBar = NSView(frame: .zero)
         resultContainer.addSubview(noteTagBar)
@@ -2499,6 +2505,16 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             }
         }
 
+
+        if request.hasPrefix("POST /focus-test ") {
+            DispatchQueue.main.async {
+                self.showPanelTab("notes")
+                self.resultPanel.makeKeyAndOrderFront(nil)
+                let ok = self.resultPanel.makeFirstResponder(self.noteSearchField)
+                FileLog.write("FOCUS-TEST ok=\(ok) isKey=\(self.resultPanel.isKeyWindow) responder=\(String(describing: self.resultPanel.firstResponder).prefix(140))")
+            }
+            return
+        }
 
         if request.hasPrefix("POST /card-notes "),
            let body = request.components(separatedBy: "\r\n\r\n").last,
@@ -3632,6 +3648,15 @@ private final class RunChipView: NSView {
 private final class CardInputTextView: NSTextView {
     var onBecameFocus: (() -> Void)?
     var onLostFocus: (() -> Void)?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        let win = window
+        FileLog.write("INPUT mousedown self=\(Self.self) isKey=\(win?.isKeyWindow ?? false) winIsPanel=\(win is NSPanel) responder=\(String(describing: win?.firstResponder).prefix(80))")
+        super.mouseDown(with: event)
+        FileLog.write("INPUT post-mousedown responder=\(String(describing: win?.firstResponder).prefix(80))")
+    }
 
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
