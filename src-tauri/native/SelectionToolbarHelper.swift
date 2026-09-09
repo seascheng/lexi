@@ -420,12 +420,17 @@ private func lucideMarkup(for icon: String) -> String {
         """
     case "diamond":
         return """
-        <path d="M2.7 10.3a2.41 2.41 0 0 0 0 3.41l7.59 7.59a2.41 2.41 0 0 0 3.41 0l7.59-7.59a2.41 2.41 0 0 0 0-3.41l-7.59-7.59a2.41 2.41 0 0 0-3.41 0Z"/>
+        <path d="M2.7 10.3a2.41 2.41 0 0 0 0 3.41l7.59 7.59a2.41 2.41 0 0 0 3.41 0l7.59-7.59a2.41 2.41 0 0 0 0-3.41l-7.58-7.59a2.41 2.41 0 0 0-3.41 0Z"/>
+        """
+    case "check":
+        return """
+        <path d="M20 6 9 17l-5-5"/>
         """
     default:
-        return """
-        <path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/>
-        """
+        // UNKNOWN ICONS RENDER BLANK. The wand here silently replaced every
+        // misspelled/missing glyph (the "x" and "check" bugs) — a missing
+        // icon must be invisible, never a different icon.
+        return ""
     }
 }
 
@@ -1975,7 +1980,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             }
         )
         let pillRect = anchor.convert(anchor.bounds, to: host)
-        dropdown.sizeToFit(width: max(pillRect.width + 40, 150))
+        dropdown.sizeToFit(width: dropdown.naturalWidth)
         var origin = NSPoint(x: min(pillRect.minX, host.bounds.width - dropdown.frame.width - 8), y: pillRect.minY - dropdown.frame.height - 4)
         if origin.y < 8 {
             origin.y = pillRect.maxY + 4
@@ -3500,6 +3505,7 @@ private final class TagDropdownView: NSView {
     private let onPick: (String?) -> Void
     private let theme: CardTheme
     private var rows: [NSView] = []
+    private(set) var naturalWidth: CGFloat = 120
 
     init(tags: [String], current: String?, theme: CardTheme, onPick: @escaping (String?) -> Void) {
         self.onPick = onPick
@@ -3516,6 +3522,7 @@ private final class TagDropdownView: NSView {
             let button = RowPickButton(title: title)
             button.font = .systemFont(ofSize: 12, weight: checked ? .medium : .regular)
             button.alignment = .left
+            button.lineBreakMode = .byTruncatingTail
             if checked, let check = lucideImage(for: "check", title: title, color: theme.foreground) {
                 check.size = NSSize(width: 12, height: 12)
                 let attachment = NSTextAttachment()
@@ -3544,6 +3551,12 @@ private final class TagDropdownView: NSView {
         for tag in tags {
             addRow(tag, value: tag, checked: tag == current)
         }
+        // Width hugs the longest label (+check mark slot); never the old
+        // blanket 150+.
+        let longest = (["No tag"] + tags).map {
+            ($0 as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width
+        }.max() ?? 60
+        naturalWidth = min(max(longest + 46, 96), 190)
         if !tags.isEmpty {
             let divider = NSView()
             divider.wantsLayer = true
@@ -3562,7 +3575,7 @@ private final class TagDropdownView: NSView {
         var y: CGFloat = 3
         for view in rows {
             if view is RowPickButton {
-                view.frame = NSRect(x: 4, y: y, width: width - 8, height: 24)
+                view.frame = NSRect(x: 6, y: y, width: width - 12, height: 24)
                 y += 26
             } else {
                 view.frame = NSRect(x: 8, y: y + 2, width: width - 16, height: 1)
@@ -3608,6 +3621,21 @@ private final class RowPickButton: NSButton {
         action = #selector(rowPicked)
         wantsLayer = true
         layer?.cornerRadius = 6
+    }
+
+    override var title: String {
+        didSet {}
+    }
+
+    /// Text sits 10pt from the row's left edge, not flush against it.
+    override func draw(_ dirtyRect: NSRect) {
+        let inset = bounds.insetBy(dx: 8, dy: 0)
+        attributedTitle.draw(in: NSRect(
+            x: inset.minX + 2,
+            y: (bounds.height - attributedTitle.size().height) / 2,
+            width: inset.width,
+            height: attributedTitle.size().height
+        ))
     }
 
     override func updateTrackingAreas() {
@@ -3687,8 +3715,14 @@ private final class NoteRowView: NSTableRowView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        hovering = true
-        needsDisplay = true
+        // Tracking areas ignore occlusion by sibling layers (the tag
+        // dropdown floats above the list): only hover when THIS row is the
+        // top-most view under the cursor.
+        if let top = window?.contentView?.hitTest(event.locationInWindow),
+           top === self || top.isDescendant(of: self) {
+            hovering = true
+            needsDisplay = true
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
