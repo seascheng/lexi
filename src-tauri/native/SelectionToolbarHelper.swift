@@ -1895,6 +1895,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             // INVERTED active pill: foreground surface, background-colored
             // glyphs — contrast the quiet wash could never deliver.
             pill.attributedTitle = def.map { tabPillTitle($0, active: active) } ?? pill.attributedTitle
+            // Template attachments tint through the button; the attributed
+            // text carries its own color — both must agree.
+            pill.contentTintColor = active ? cardTheme.foreground : cardTheme.secondaryText
             pill.layer?.backgroundColor = active
                 ? cardTheme.selectedFill.cgColor
                 : NSColor.clear.cgColor
