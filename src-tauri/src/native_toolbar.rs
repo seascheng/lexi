@@ -3005,11 +3005,25 @@ fn send_card_notes(app: &tauri::AppHandle) -> Result<(), String> {
         }
         NOTES_SELECTED_NOTE_ID.store(-1, std::sync::atomic::Ordering::Relaxed);
     }
+    // The tag picker lists every CONFIGURED tag (tags table), not just the
+    // ones already bound to a note — the snapshot GROUP_CONCAT misses the
+    // unbound ones.
+    let all_tags = sqlite_query_json(app, "SELECT name FROM tags ORDER BY name;")
+        .and_then(|json| serde_json::from_str::<Vec<serde_json::Value>>(&json).ok())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|v| v["name"].as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let Some(port) = toolbar_port() else { return Ok(()) };
     if let Ok(cell) = NOTES_SNAPSHOT.lock() {
         if let Ok(serialized) = serde_json::to_string(&*cell) {
-            let body = format!("{{\"notes\":{serialized}}}");
-            let _ = post_to_helper(port, "/card-notes", &body);
+            if let Ok(tags_json) = serde_json::to_string(&all_tags) {
+                let body = format!("{{\"notes\":{serialized},\"allTags\":{tags_json}}}");
+                let _ = post_to_helper(port, "/card-notes", &body);
+            }
         }
     }
     Ok(())

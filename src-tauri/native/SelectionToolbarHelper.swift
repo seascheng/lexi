@@ -1917,7 +1917,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
     }
 
+    private var cardAllTags: [String] = []
+
     private func handleCardNotes(_ payload: CardNotesPayload) {
+        cardAllTags = payload.allTags ?? []
         cardNotesItems = payload.notes
         notesTableView.reloadData()
         notesTableView.sizeLastColumnToFit()
@@ -1959,7 +1962,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
               let host = resultPanel.contentView else { return }
         closeTagDropdown()
 
-        let allTags = Array(Set(cardNotesItems.flatMap { $0.tags ?? [] })).sorted()
+        let allTags = cardAllTags.isEmpty
+            ? Array(Set(cardNotesItems.flatMap { $0.tags ?? [] })).sorted()
+            : cardAllTags
         let dropdown = TagDropdownView(
             tags: allTags,
             current: tag,
@@ -3501,6 +3506,10 @@ private final class TagDropdownView: NSView {
         self.theme = theme
         super.init(frame: .zero)
         wantsLayer = true
+        shadow = NSShadow()
+        shadow?.shadowColor = NSColor.black.withAlphaComponent(0.35)
+        shadow?.shadowBlurRadius = 14
+        shadow?.shadowOffset = NSSize(width: 0, height: -3)
 
         var y: CGFloat = 4
         func addRow(_ title: String, value: String?, checked: Bool) {
@@ -3710,6 +3719,7 @@ private final class NoteRowView: NSTableRowView {
 }
 
 private struct CardNotesPayload: Decodable {
+    var allTags: [String]?
     struct Note: Decodable {
         let id: Int64?
         let name: String
