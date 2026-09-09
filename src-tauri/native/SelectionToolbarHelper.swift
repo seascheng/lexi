@@ -3352,6 +3352,12 @@ private final class NoteRowView: NSTableRowView {
     private var hoverArea: NSTrackingArea?
     private var hovering = false
     var pillColor: NSColor = .clear { didSet { needsDisplay = true } }
+    // With selectionHighlightStyle = .none the table does NOT redraw on
+    // selection change — without this the deselected row keeps its stale
+    // pill and two rows read as selected at once.
+    override var isSelected: Bool {
+        didSet { needsDisplay = true }
+    }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
