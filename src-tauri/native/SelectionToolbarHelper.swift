@@ -859,8 +859,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var reviewCurrentWordId: Int64 = 0
     private var runChipViews: [RunChipView] = []
     private var runTabsContentWidth: CGFloat = 376
-    private var cardUserWidth: CGFloat?
-    private var cardUserHeight: CGFloat?
+    // Card opens at the user's preferred size (drag-resizable; double-click
+    // a resize zone still returns to the auto-size default).
+    private var cardUserWidth: CGFloat? = 428
+    private var cardUserHeight: CGFloat? = 400
     private var resizeCorner: CardResizeZone!
     private var resizeRight: CardResizeZone!
     private var resizeBottom: CardResizeZone!
