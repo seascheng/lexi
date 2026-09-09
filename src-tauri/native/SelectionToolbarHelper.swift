@@ -1855,7 +1855,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private func tabPillTitle(_ def: (id: String, name: String, icon: String), active: Bool = false) -> NSAttributedString {
         let title = NSMutableAttributedString(string: " ")
         if let icon = lucideImage(for: def.icon, title: def.name,
-                                  color: active ? cardTheme.background : cardTheme.secondaryText) {
+                                  color: active ? cardTheme.foreground : cardTheme.secondaryText) {
             icon.size = NSSize(width: 12, height: 12)
             let attachment = NSTextAttachment()
             attachment.image = icon
