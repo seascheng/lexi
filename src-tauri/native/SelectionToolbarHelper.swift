@@ -76,7 +76,7 @@ struct CardTheme {
     var inputFill: NSColor { blend(background, toward: foreground, fraction: isDark ? 0.11 : 0.07) }
 
     /// Selection capsule: same-hue emphasis, not accent blue (goty style).
-    var selectedFill: NSColor { blend(background, toward: foreground, fraction: isDark ? 0.16 : 0.12) }
+    var selectedFill: NSColor { blend(background, toward: foreground, fraction: isDark ? 0.22 : 0.16) }
 
     /// Icon tint sits near the full foreground.
     var iconTint: NSColor { blend(background, toward: foreground, fraction: 0.85) }
@@ -1156,7 +1156,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         inputButton.bezelStyle = .regularSquare
         inputButton.isBordered = false
         inputButton.font = .systemFont(ofSize: 12)
-        inputButton.contentTintColor = .secondaryLabelColor
+        inputButton.contentTintColor = cardTheme.secondaryText
         inputButton.image = lucideImage(for: "pen", title: "Type to translate")
         inputButton.imageScaling = .scaleProportionallyDown
         inputButton.imagePosition = .imageLeading
@@ -1242,7 +1242,22 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         CGFloat(notesCount) * notesRowHeight
     }
 
+    /// All card chrome tints in ONE place — build AND theme switches run it,
+    /// so dark/light flips can never leave stale system colors behind.
+    private func restateCardChromeTints() {
+        resultCloseButton?.contentTintColor = cardPinned ? cardTheme.foreground : cardTheme.secondaryText
+        resultTrashButton?.contentTintColor = cardTheme.secondaryText
+        resultCopyButton?.contentTintColor = cardTheme.secondaryText
+        resultSaveButton?.contentTintColor = cardTheme.background
+        resultIdleIcon?.contentTintColor = cardTheme.foreground
+        resultLoadingLabel?.textColor = cardTheme.tertiaryText
+        reviewAnswerLabel?.textColor = cardTheme.secondaryText
+        reviewEmptyLabel?.textColor = cardTheme.tertiaryText
+        entryButtons.forEach { $0.contentTintColor = cardTheme.secondaryText }
+    }
+
     private func applyNotesTheme() {
+        restateCardChromeTints()
         let hairline = theme == .dark
             ? NSColor.white.withAlphaComponent(0.22)
             : NSColor.black.withAlphaComponent(0.20)
@@ -1355,7 +1370,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultCloseButton.isBordered = false
         resultCloseButton.image = lucideImage(for: "pin-off", title: "Pin")
         resultCloseButton.imageScaling = .scaleProportionallyDown
-        resultCloseButton.contentTintColor = NSColor.secondaryLabelColor
+        resultCloseButton.contentTintColor = cardTheme.secondaryText
         resultCloseButton.toolTip = "Pin"
         resultCloseButton.frame = NSRect(x: resultCardWidth - 30, y: 7, width: 20, height: 20)
         resultTabsView.addSubview(resultCloseButton)
@@ -1382,7 +1397,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultTrashButton.image = lucideImage(for: "x", title: "Close all results")
         resultTrashButton.imageScaling = .scaleProportionallyDown
         resultTrashButton.toolTip = "Close all results"
-        resultTrashButton.contentTintColor = NSColor.secondaryLabelColor
+        resultTrashButton.contentTintColor = cardTheme.secondaryText
         resultTrashButton.frame = NSRect(x: resultCardWidth - 34, y: 7, width: 20, height: 20)
         resultContainer.addSubview(resultTrashButton) // top level: can never be overdrawn
 
@@ -1413,7 +1428,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         resultLoadingLabel = NSTextField(labelWithString: "Running...")
         resultLoadingLabel.font = .systemFont(ofSize: 13)
-        resultLoadingLabel.textColor = .secondaryLabelColor
+        resultLoadingLabel.textColor = cardTheme.tertiaryText
         resultLoadingLabel.frame = NSRect(x: 36, y: 100, width: 200, height: 18)
         resultContainer.addSubview(resultLoadingLabel)
 
@@ -1426,7 +1441,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         resultIdleIcon = NSImageView(frame: NSRect(x: resultCardWidth / 2 - 8, y: 32, width: 16, height: 16))
         resultIdleIcon.image = lucideImage(for: "sparkles", title: "Idle")
-        resultIdleIcon.contentTintColor = .controlAccentColor
+        resultIdleIcon.contentTintColor = cardTheme.foreground
         resultIdleIcon.imageScaling = .scaleProportionallyDown
         translateIdleView.addSubview(resultIdleIcon)
 
@@ -1470,7 +1485,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultCopyButton.isBordered = false
         resultCopyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy result")
         resultCopyButton.imageScaling = .scaleProportionallyDown
-        resultCopyButton.contentTintColor = .secondaryLabelColor
+        resultCopyButton.contentTintColor = cardTheme.secondaryText
         resultCopyButton.toolTip = "Copy result"
         resultCopyButton.frame = NSRect(x: resultCardWidth - 190, y: 2, width: 26, height: 26)
         resultActionBar.addSubview(resultCopyButton)
@@ -1481,7 +1496,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultSaveButton.font = .systemFont(ofSize: 12, weight: .medium)
         resultSaveButton.wantsLayer = true
         resultSaveButton.layer?.cornerRadius = 6
-        resultSaveButton.contentTintColor = .white
+        resultSaveButton.contentTintColor = cardTheme.background
         resultSaveButton.frame = NSRect(x: resultCardWidth - 158, y: 4, width: 148, height: 24)
         resultActionBar.addSubview(resultSaveButton)
 
@@ -1616,7 +1631,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         reviewAnswerLabel = NSTextField(labelWithString: "")
         reviewAnswerLabel.font = .systemFont(ofSize: 14)
-        reviewAnswerLabel.textColor = .secondaryLabelColor
+        reviewAnswerLabel.textColor = cardTheme.secondaryText
         reviewAnswerLabel.alignment = .center
         reviewAnswerLabel.lineBreakMode = .byTruncatingTail
         reviewAnswerLabel.frame = NSRect(x: 20, y: 88, width: resultCardWidth - 40, height: 18)
@@ -1664,7 +1679,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         reviewEmptyLabel = NSTextField(labelWithString: "No words due for review.")
         reviewEmptyLabel.font = .systemFont(ofSize: 13)
-        reviewEmptyLabel.textColor = .secondaryLabelColor
+        reviewEmptyLabel.textColor = cardTheme.tertiaryText
         reviewEmptyLabel.alignment = .center
         reviewEmptyLabel.frame = NSRect(x: 10, y: 90, width: resultCardWidth - 20, height: 18)
         reviewCardView.addSubview(reviewEmptyLabel)
@@ -1855,7 +1870,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
         title.append(NSAttributedString(string: "  \(def.name)", attributes: [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: active ? cardTheme.background : cardTheme.secondaryText,
+            .foregroundColor: active ? cardTheme.foreground : cardTheme.secondaryText,
         ]))
         return title
     }
@@ -1881,7 +1896,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             // glyphs — contrast the quiet wash could never deliver.
             pill.attributedTitle = def.map { tabPillTitle($0, active: active) } ?? pill.attributedTitle
             pill.layer?.backgroundColor = active
-                ? cardTheme.foreground.cgColor
+                ? cardTheme.selectedFill.cgColor
                 : NSColor.clear.cgColor
         }
     }
@@ -2198,7 +2213,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         cardPinned.toggle()
         resultCloseButton.image = lucideImage(for: cardPinned ? "pin" : "pin-off", title: cardPinned ? "Unpin" : "Pin")
         resultCloseButton.toolTip = cardPinned ? "Unpin" : "Pin"
-        resultCloseButton.contentTintColor = cardPinned ? .controlAccentColor : .secondaryLabelColor
+        resultCloseButton.contentTintColor = cardPinned ? cardTheme.foreground : cardTheme.secondaryText
         log("card pinned=\(cardPinned)")
     }
 
@@ -3751,20 +3766,12 @@ private final class NoteRowView: NSTableRowView {
             yRadius: 8
         )
         if isSelected {
-            // Inverted selection: foreground surface, high contrast.
+            // Selection = the wash capsule; glyphs keep their own color.
             pillColor.setFill()
             path.fill()
-            if let cell = subviews.first(where: { $0 is NoteRowCell }) as? NoteRowCell {
-                cell.setInverted(true)
-            }
-        } else {
-            if let cell = subviews.first(where: { $0 is NoteRowCell }) as? NoteRowCell {
-                cell.setInverted(false)
-            }
-            if hovering {
-                hoverColor.setFill()
-                path.fill()
-            }
+        } else if hovering {
+            hoverColor.setFill()
+            path.fill()
         }
     }
 }
@@ -4297,7 +4304,7 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
         let view = NoteRowView(frame: .zero)
         view.identifier = NSUserInterfaceItemIdentifier("NoteRowView")
         view.hoverColor = cardTheme.hoverFill
-        view.pillColor = cardTheme.foreground
+        view.pillColor = cardTheme.selectedFill
         return view
     }
 
