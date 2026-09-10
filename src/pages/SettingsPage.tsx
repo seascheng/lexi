@@ -1,11 +1,11 @@
-import { Sun, Moon, Check } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Sun, Moon, Check, Palette, PanelTop, Cog, Sparkles, Info } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { AccentColor, AppSettings, BackgroundStyle, DockMode } from "../types";
 import { applyAppearanceSettings, normalizedOpacity } from "../lib/appearance";
 import { saveSettings } from "../lib/database";
 import { errorMessage } from "../lib/errors";
 import { isTauriRuntime } from "../lib/platform";
-import { Field, Input, Select, SettingsCard, FieldDivider, Textarea } from "../components/ui/Field";
+import { Field, Input, Select, SettingsCard, FieldDivider, Textarea, ToggleSwitch } from "../components/ui/Field";
 import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 
 interface SettingsPageProps {
@@ -22,11 +22,22 @@ const ACCENT_OPTIONS: { value: AccentColor; color: string }[] = [
   { value: "purple", color: "#a855f7" },
 ];
 
+type Section = "appearance" | "popup" | "general" | "ai" | "about";
+
+const SECTIONS: Array<{ id: Section; label: string; icon: JSX.Element }> = [
+  { id: "appearance", label: "Appearance", icon: <Palette size={16} /> },
+  { id: "popup", label: "Popup", icon: <PanelTop size={16} /> },
+  { id: "general", label: "General", icon: <Cog size={16} /> },
+  { id: "ai", label: "AI API", icon: <Sparkles size={16} /> },
+  { id: "about", label: "About", icon: <Info size={16} /> },
+];
+
 export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps) {
   const [draft, setDraft] = useState(settings);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [saveError, setSaveError] = useState("");
   const [savedApiKeyLength, setSavedApiKeyLength] = useState(settings.apiKey.length);
+  const [section, setSection] = useState<Section>("appearance");
   const didMountRef = useRef(false);
 
   useEffect(() => {
@@ -92,165 +103,224 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
   }, []);
 
   const isCustomActive = draft.accentColor === "custom";
+  const opacity = normalizedOpacity(draft.windowOpacity);
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5">
-      <header className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold tracking-tight">Settings</h2>
-        <span className="text-xs text-muted">
-          {saveState === "saving" ? "Saving…" : "Autosaved"}
-        </span>
-      </header>
+    <div className="flex min-h-full flex-col md:h-full">
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        {/* Section list — goty's left column: horizontal chips below md, 216px column above */}
+        <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/30 p-2 md:w-[216px] md:flex-col md:overflow-visible md:border-b-0 md:border-r md:p-2.5">
+          {SECTIONS.map(({ id, label, icon }) => {
+            const active = section === id;
+            return (
+              <button
+                className={`flex h-10 shrink-0 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium transition ${
+                  active
+                    ? "bg-strong/10 text-strong"
+                    : "text-content hover:bg-strong/5 hover:text-strong"
+                }`}
+                key={id}
+                onClick={() => setSection(id)}
+                type="button"
+              >
+                {icon}
+                <span className="whitespace-nowrap">{label}</span>
+              </button>
+            );
+          })}
+        </nav>
 
-      <SettingsCard title="Appearance" description="Theme, accent color and popup background.">
-        <Field label="Theme" inline>
-          <div className="flex gap-0.5 rounded-lg bg-surface/60 p-0.5">
-            <ThemeButton
-              active={draft.theme === "dark"}
-              icon={<Moon size={14} />}
-              label="Dark"
-              onClick={() => setDraft({ ...draft, theme: "dark" })}
-            />
-            <ThemeButton
-              active={draft.theme === "light"}
-              icon={<Sun size={14} />}
-              label="Light"
-              onClick={() => setDraft({ ...draft, theme: "light" })}
-            />
+        {/* Page host — one section at a time, scrolls on its own */}
+        <div className="min-h-0 flex-1 md:overflow-y-auto">
+          <div className="px-2 py-6 md:px-6">
+            {section === "appearance" && (
+              <SettingsCard title="Appearance" description="Theme, accent color and popup background.">
+                <Field label="Theme" inline>
+                  <div className="flex gap-0.5 rounded-md bg-surface/60 p-0.5">
+                    <ThemeButton
+                      active={draft.theme === "dark"}
+                      icon={<Moon size={13} />}
+                      label="Dark"
+                      onClick={() => setDraft({ ...draft, theme: "dark" })}
+                    />
+                    <ThemeButton
+                      active={draft.theme === "light"}
+                      icon={<Sun size={13} />}
+                      label="Light"
+                      onClick={() => setDraft({ ...draft, theme: "light" })}
+                    />
+                  </div>
+                </Field>
+                <FieldDivider />
+                <Field label="Accent color" inline>
+                  <div className="flex items-center gap-2">
+                    {ACCENT_OPTIONS.map(({ value, color }) => (
+                      <AccentSwatch
+                        active={draft.accentColor === value}
+                        color={color}
+                        key={value}
+                        onClick={() => setDraft({ ...draft, accentColor: value })}
+                        title={value}
+                      />
+                    ))}
+                    <label
+                      className="relative flex h-7 w-7 items-center justify-center rounded-full border-2 transition hover:scale-105"
+                      style={{
+                        borderColor: isCustomActive ? "rgb(var(--color-strong))" : "transparent",
+                        backgroundColor: isCustomActive ? draft.customAccentColor : "rgb(var(--color-surface-hover))",
+                      }}
+                      title="Custom color"
+                    >
+                      {!isCustomActive && <span className="text-xs leading-none text-muted">+</span>}
+                      <input
+                        className="absolute inset-0 cursor-pointer opacity-0"
+                        onChange={(event) => setDraft({ ...draft, accentColor: "custom", customAccentColor: event.target.value })}
+                        type="color"
+                        value={draft.customAccentColor}
+                      />
+                    </label>
+                  </div>
+                </Field>
+                <FieldDivider />
+                <Field label="Popup background" inline hint="Applied to the translation popup and bar.">
+                  <Select
+                    onChange={(event) => setDraft({ ...draft, backgroundStyle: event.target.value as BackgroundStyle })}
+                    value={draft.backgroundStyle}
+                  >
+                    <option value="solid">Solid</option>
+                    <option value="transparent">Transparent</option>
+                    <option value="macos_glass_clear">Liquid Glass</option>
+                  </Select>
+                </Field>
+                <FieldDivider />
+                <Field label="Popup opacity" inline hint={`${opacity}%`}>
+                  <input
+                    className="lexi-slider"
+                    max={100}
+                    min={0}
+                    onChange={(event) => setDraft({ ...draft, windowOpacity: Number(event.target.value) })}
+                    step={5}
+                    style={{ "--slider-fill": `${opacity}%` } as CSSProperties}
+                    type="range"
+                    value={opacity}
+                  />
+                </Field>
+              </SettingsCard>
+            )}
+
+            {section === "popup" && (
+              <SettingsCard title="Popup" description="Global shortcut and where the popup can appear.">
+                <Field label="Show popup shortcut" inline hint="Works from any Space.">
+                  <ShortcutRecorder
+                    value={draft.popupShortcut}
+                    onChange={(shortcut) => setDraft({ ...draft, popupShortcut: shortcut })}
+                  />
+                </Field>
+              </SettingsCard>
+            )}
+
+            {section === "general" && (
+              <SettingsCard title="General" description="App presence and system integration.">
+                <Field label="App location" inline hint="Menu bar only hides the Dock icon.">
+                  <Select
+                    onChange={(event) => setDraft({ ...draft, dockMode: event.target.value as DockMode })}
+                    value={draft.dockMode}
+                  >
+                    <option value="dock_and_menu_bar">Dock and menu bar</option>
+                    <option value="menu_bar_only">Menu bar only</option>
+                  </Select>
+                </Field>
+                <FieldDivider />
+                <Field label="Launch at login" inline hint="Start Lexi automatically when you log in.">
+                  <ToggleSwitch
+                    checked={draft.autoStart}
+                    onChange={(v) => setDraft({ ...draft, autoStart: v })}
+                  />
+                </Field>
+                <FieldDivider />
+                <Field label="Excluded apps" hint="Bundle IDs of apps where the selection toolbar should not appear (e.g. com.apple.finder). One per line.">
+                  <Textarea
+                    className="font-mono text-xs"
+                    onChange={(event) => {
+                      const apps = event.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
+                      setDraft({ ...draft, excludedToolbarApps: apps });
+                    }}
+                    placeholder="com.apple.finder"
+                    value={(draft.excludedToolbarApps ?? []).join("\n")}
+                  />
+                </Field>
+              </SettingsCard>
+            )}
+
+            {section === "ai" && (
+              <SettingsCard title="AI API" description="OpenAI-compatible endpoint used by all features.">
+                <Field label="Base URL" inline>
+                  <Input
+                    className="w-72"
+                    onChange={(event) => setDraft({ ...draft, apiBaseUrl: event.target.value })}
+                    value={draft.apiBaseUrl}
+                  />
+                </Field>
+                <FieldDivider />
+                <Field label="Model" inline>
+                  <Input
+                    className="w-72"
+                    onChange={(event) => setDraft({ ...draft, model: event.target.value })}
+                    value={draft.model}
+                  />
+                </Field>
+                <FieldDivider />
+                <Field
+                  label="API key"
+                  inline
+                  hint={savedApiKeyLength > 0 ? `Saved key: ${savedApiKeyLength} characters` : "Not saved yet"}
+                >
+                  <Input
+                    className="w-72"
+                    onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
+                    type="password"
+                    value={draft.apiKey}
+                  />
+                </Field>
+              </SettingsCard>
+            )}
+
+            {section === "about" && (
+              <section className="mx-auto w-full max-w-[640px]">
+                <header>
+                  <h3 className="text-[17px] font-semibold tracking-tight text-strong">About</h3>
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-muted">Lexi — translate, collect, review.</p>
+                </header>
+                <div className="mt-4 rounded-xl border border-border bg-panel shadow-sm">
+                  <div className="px-4 pb-3.5 pt-3.5">
+                    <div className="text-[10.5px] font-semibold uppercase tracking-wide text-muted">Version</div>
+                    <div className="mt-0.5 font-mono text-[13px] text-strong">0.1.0</div>
+                  </div>
+                  <div className="mx-4 border-t border-border/40" />
+                  <div className="flex items-center gap-2 px-4 py-3.5">
+                    <span className={`h-[7px] w-[7px] rounded-full ${isTauriRuntime() ? "bg-green-500" : "bg-muted/60"}`} />
+                    <span className="text-[11.5px] text-muted">
+                      {isTauriRuntime() ? "Desktop build — data stored in SQLite." : "Browser preview — data stored in localStorage."}
+                    </span>
+                  </div>
+                </div>
+              </section>
+            )}
           </div>
-        </Field>
-        <FieldDivider />
-        <Field label="Accent color" inline>
-          <div className="flex items-center gap-2">
-            {ACCENT_OPTIONS.map(({ value, color }) => (
-              <AccentSwatch
-                active={draft.accentColor === value}
-                color={color}
-                key={value}
-                onClick={() => setDraft({ ...draft, accentColor: value })}
-                title={value}
-              />
-            ))}
-            <label
-              className="relative flex h-7 w-7 items-center justify-center rounded-full border-2 transition hover:scale-105"
-              style={{
-                borderColor: isCustomActive ? "rgb(var(--color-strong))" : "transparent",
-                backgroundColor: isCustomActive ? draft.customAccentColor : "rgb(var(--color-surface-hover))",
-              }}
-              title="Custom color"
-            >
-              {!isCustomActive && <span className="text-xs leading-none text-muted">+</span>}
-              <input
-                className="absolute inset-0 cursor-pointer opacity-0"
-                onChange={(event) => setDraft({ ...draft, accentColor: "custom", customAccentColor: event.target.value })}
-                type="color"
-                value={draft.customAccentColor}
-              />
-            </label>
-          </div>
-        </Field>
-        <FieldDivider />
-        <Field label="Popup background" inline hint="Applied to the translation popup and bar.">
-          <Select
-            onChange={(event) => setDraft({ ...draft, backgroundStyle: event.target.value as BackgroundStyle })}
-            value={draft.backgroundStyle}
-          >
-            <option value="solid">Solid</option>
-            <option value="transparent">Transparent</option>
-            <option value="macos_glass_clear">Liquid Glass</option>
-          </Select>
-        </Field>
-        <FieldDivider />
-        <Field label="Popup opacity" inline hint={`${normalizedOpacity(draft.windowOpacity)}%`}>
-          <input
-            className="h-1.5 w-40 cursor-pointer appearance-none rounded-full bg-surface-hover accent-accent"
-            max={100}
-            min={0}
-            onChange={(event) => setDraft({ ...draft, windowOpacity: Number(event.target.value) })}
-            step={5}
-            type="range"
-            value={normalizedOpacity(draft.windowOpacity)}
-          />
-        </Field>
-      </SettingsCard>
-
-      <SettingsCard title="Popup" description="Global shortcut and where the popup can appear.">
-        <Field label="Show popup shortcut" inline hint="Works from any Space.">
-          <ShortcutRecorder
-            value={draft.popupShortcut}
-            onChange={(shortcut) => setDraft({ ...draft, popupShortcut: shortcut })}
-          />
-        </Field>
-      </SettingsCard>
-
-      <SettingsCard title="General" description="App presence and system integration.">
-        <Field label="App location" inline hint="Menu bar only hides the Dock icon.">
-          <Select
-            onChange={(event) => setDraft({ ...draft, dockMode: event.target.value as DockMode })}
-            value={draft.dockMode}
-          >
-            <option value="dock_and_menu_bar">Dock and menu bar</option>
-            <option value="menu_bar_only">Menu bar only</option>
-          </Select>
-        </Field>
-        <FieldDivider />
-        <Field label="Launch at login" inline hint="Start Lexi automatically when you log in.">
-          <ToggleSwitch
-            checked={draft.autoStart}
-            onChange={(v) => setDraft({ ...draft, autoStart: v })}
-          />
-        </Field>
-        <FieldDivider />
-        <Field label="Excluded apps" hint="Bundle IDs of apps where the selection toolbar should not appear (e.g. com.apple.finder). One per line.">
-          <Textarea
-            className="font-mono text-xs"
-            onChange={(event) => {
-              const apps = event.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
-              setDraft({ ...draft, excludedToolbarApps: apps });
-            }}
-            placeholder="com.apple.finder"
-            value={(draft.excludedToolbarApps ?? []).join("\n")}
-          />
-        </Field>
-      </SettingsCard>
-
-      <SettingsCard title="AI API" description="OpenAI-compatible endpoint used by all features.">
-        <div className="grid gap-3">
-          <Field label="Base URL">
-            <Input
-              onChange={(event) => setDraft({ ...draft, apiBaseUrl: event.target.value })}
-              value={draft.apiBaseUrl}
-            />
-          </Field>
-          <Field label="Model">
-            <Input onChange={(event) => setDraft({ ...draft, model: event.target.value })} value={draft.model} />
-          </Field>
-          <Field
-            label="API key"
-            hint={savedApiKeyLength > 0 ? `Saved key: ${savedApiKeyLength} characters` : "Not saved yet"}
-          >
-            <Input
-              onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
-              type="password"
-              value={draft.apiKey}
-            />
-          </Field>
-        </div>
-      </SettingsCard>
-
-      <div className="flex flex-col gap-2.5 pb-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-base font-semibold">About</h2>
-          <p className="mt-1 text-sm text-muted">
-            Lexi 0.1.0 · {isTauriRuntime() ? "Desktop (SQLite)" : "Browser preview (localStorage)"}
-          </p>
         </div>
       </div>
-      {saveError ? (
-        <div className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
-          {saveError}
-        </div>
-      ) : null}
+
+      {/* Status strip — goty's 26pt bottom bar */}
+      <div className="mt-auto flex h-[26px] shrink-0 items-center justify-between gap-3 border-t border-border/30 px-3">
+        <span className="truncate text-[11.5px] text-muted">Changes save automatically.</span>
+        {saveError ? (
+          <span className="truncate text-[11.5px] text-danger">{saveError}</span>
+        ) : (
+          <span className="shrink-0 text-[11.5px] text-muted">
+            {saveState === "saving" ? "Saving…" : "All changes saved"}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -265,8 +335,8 @@ interface ThemeButtonProps {
 function ThemeButton({ active, icon, label, onClick }: ThemeButtonProps) {
   return (
     <button
-      className={`flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
-        active ? "bg-panel text-strong shadow-sm" : "text-muted hover:text-strong"
+      className={`flex h-6 items-center justify-center gap-1.5 rounded px-2.5 text-xs font-medium transition ${
+        active ? "bg-strong/10 text-strong shadow-sm" : "text-muted hover:text-strong"
       }`}
       onClick={onClick}
       type="button"
@@ -383,7 +453,7 @@ function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
 
   return (
     <button
-      className={`min-w-28 rounded-md border px-2.5 py-1.5 text-center font-mono text-xs transition outline-none ${
+      className={`h-[30px] min-w-28 rounded-md border px-2.5 text-center font-mono text-xs transition outline-none ${
         recording
           ? "border-accent bg-accent/10 text-accent"
           : "border-border bg-input text-strong focus:border-accent"
@@ -393,37 +463,6 @@ function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
       type="button"
     >
       {recording ? "Recording…" : value || "Not set"}
-    </button>
-  );
-}
-
-function ToggleSwitch({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <button
-      className={`relative inline-flex shrink-0 items-center rounded-full transition-colors ${
-        checked ? "bg-accent" : "bg-border"
-      }`}
-      onClick={(e) => {
-        e.stopPropagation();
-        onChange(!checked);
-      }}
-      style={{ width: 38, height: 22 }}
-      type="button"
-      role="switch"
-      aria-checked={checked}
-    >
-      <span
-        className={`absolute rounded-full bg-white shadow-sm transition-all ${
-          checked ? "right-[3px]" : "left-[3px]"
-        }`}
-        style={{ width: 16, height: 16, top: 3 }}
-      />
     </button>
   );
 }

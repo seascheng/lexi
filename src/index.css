@@ -80,6 +80,56 @@ input[type="range"] {
   accent-color: rgb(var(--color-accent));
 }
 
+/* Settings slider — goty's ChromeSlider: 3px track, 13px knob, accent fill. */
+.lexi-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 150px;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.lexi-slider::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 1.5px;
+  background: linear-gradient(
+    to right,
+    rgb(var(--color-accent)) var(--slider-fill, 50%),
+    rgb(var(--color-surface-hover)) var(--slider-fill, 50%)
+  );
+}
+
+.lexi-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -5px;
+  border-radius: 9999px;
+  background: rgb(var(--color-strong));
+}
+
+.lexi-slider::-moz-range-track {
+  height: 3px;
+  border-radius: 1.5px;
+  background: rgb(var(--color-surface-hover));
+}
+
+.lexi-slider::-moz-range-progress {
+  height: 3px;
+  border-radius: 1.5px;
+  background: rgb(var(--color-accent));
+}
+
+.lexi-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: none;
+  border-radius: 9999px;
+  background: rgb(var(--color-strong));
+}
+
 body {
   margin: 0;
   min-width: 320px;

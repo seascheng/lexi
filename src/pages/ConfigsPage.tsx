@@ -38,7 +38,7 @@ import { syncNativeToolbar } from "../lib/nativeToolbar";
 import { isTauriRuntime } from "../lib/platform";
 import { Button } from "../components/ui/Button";
 import { IconPicker } from "../components/ui/IconPicker";
-import { Field, Input, Select, Textarea } from "../components/ui/Field";
+import { Field, Input, Select, Textarea, ToggleSwitch } from "../components/ui/Field";
 
 type DraftItem =
   | { kind: "workspace" }
@@ -1453,34 +1453,6 @@ function GenericPanelConfig({
 
 /* ========== Shared ========== */
 
-function ToggleSwitch({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <button
-      className={`relative inline-flex shrink-0 items-center rounded-full transition-colors ${
-        checked ? "bg-accent" : "bg-border"
-      }`}
-      onClick={(e) => {
-        e.stopPropagation();
-        onChange(!checked);
-      }}
-      style={{ width: 28, height: 16 }}
-      type="button"
-    >
-      <span
-        className={`absolute rounded-full bg-white shadow-sm transition-all ${
-          checked ? "right-0.5" : "left-0.5"
-        }`}
-        style={{ width: 12, height: 12, top: 2 }}
-      />
-    </button>
-  );
-}
 
 async function notifyChanged() {
   if (isTauriRuntime()) {

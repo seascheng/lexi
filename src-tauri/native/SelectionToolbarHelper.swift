@@ -3396,8 +3396,9 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     private func placeCaretAtEndOnce() {
         guard caretToEndOnBegin, let editor = titleEditor.currentEditor() else { return }
         caretToEndOnBegin = false
-        // No select-all: the caret goes to the end (I-beam at the tail).
-        editor.moveToEndOfDocument(nil)
+        // Finder semantics: entering rename PRE-SELECTS everything, so
+        // typing replaces and arrow keys/home reveal the caret as needed.
+        editor.selectAll(nil)
     }
 
     func controlTextDidBeginEditing(_ obj: Notification) {
@@ -3485,10 +3486,13 @@ private final class NotesTable: NSTableView {
         // While a row's title editor is live, a click INSIDE that row belongs
         // to the edit (caret moves, selection clears) — running the table's
         // tracking would resign the editor and snap back to the label.
+        // The event still belongs to the FIELD EDITOR: forward it, otherwise
+        // double-click-to-select-word and drag-select die inside the editor.
         if let editor = window?.firstResponder as? NSText,
            editor.isFieldEditor,
            let host = editor.delegate as? NSTextField,
            host === (view(atColumn: 0, row: row(at: convert(event.locationInWindow, from: nil)), makeIfNecessary: false) as? NoteRowCell)?.titleEditor {
+            editor.mouseDown(with: event)
             return
         }
         // The panel is nonactivating: NSTableView's own tracking silently
