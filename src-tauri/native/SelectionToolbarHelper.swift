@@ -3231,16 +3231,21 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         addSubview(contentLabel)
 
         let centeredCell = VerticallyCenteredTextFieldCell()
+        centeredCell.stringValue = "" // bare cells ship titled "Field"
         centeredCell.isEditable = true
         centeredCell.isBordered = false
         centeredCell.font = .systemFont(ofSize: 13, weight: .semibold)
         centeredCell.lineBreakMode = .byTruncatingTail
         centeredCell.usesSingleLineMode = true
         titleEditor.cell = centeredCell
+        titleEditor.drawsBackground = false
+        // SAME input surface as the Actions bar and search field:
+        // inputFill + hairline + radius 8; focus border comes with the edit.
         titleEditor.wantsLayer = true
-        titleEditor.layer?.cornerRadius = 5
+        titleEditor.layer?.cornerRadius = 8
+        titleEditor.layer?.borderWidth = 1
         titleEditor.layer?.masksToBounds = true
-        titleEditor.focusRingType = .exterior
+        titleEditor.focusRingType = .none
         titleEditor.isHidden = true
         titleEditor.delegate = self
         addSubview(titleEditor)
@@ -3271,6 +3276,9 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     }
 
     private func applyThemeColors() {
+        titleEditor.textColor = themeColors.foreground
+        titleEditor.layer?.backgroundColor = themeColors.inputFill.cgColor
+        titleEditor.layer?.borderColor = themeColors.hairline.cgColor
         titleLabel.textColor = inverted ? themeColors.background : themeColors.foreground
         contentLabel.textColor = inverted ? themeColors.background.withAlphaComponent(0.8) : themeColors.tertiaryText
         iconView.contentTintColor = inverted ? themeColors.background : themeColors.secondaryText
@@ -3387,6 +3395,7 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         titleLabel.isHidden = true
         titleEditor.isHidden = false
         caretToEndOnBegin = true
+        titleEditor.layer?.borderColor = themeColors.foreground.withAlphaComponent(0.45).cgColor
         window?.makeFirstResponder(titleEditor)
         DispatchQueue.main.async { [weak self] in
             self?.placeCaretAtEndOnce()
@@ -3407,6 +3416,7 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     }
 
     private func endRenaming() {
+        titleEditor.layer?.borderColor = themeColors.hairline.cgColor
         titleEditor.isHidden = true
         titleLabel.isHidden = false
     }
