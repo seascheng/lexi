@@ -2361,8 +2361,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultScrollView.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
         resultLoadingIndicator.isHidden = !isTranslate || status != "loading"
         resultLoadingLabel.isHidden = !isTranslate || status != "loading"
-        resultLoadingIndicator.frame.origin = NSPoint(x: 14, y: contentY + contentFinal / 2 - 8)
-        resultLoadingLabel.frame.origin = NSPoint(x: 36, y: contentY + contentFinal / 2 - 9)
+        resultLoadingIndicator.frame.origin = NSPoint(x: 14, y: contentY + contentFinal - 16 - 12)
+        resultLoadingLabel.frame.origin = NSPoint(x: 36, y: contentY + contentFinal - 14 - 13)
         translateIdleView.isHidden = !isTranslate || activeRun != nil
         translateIdleView.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
         resultIdleLabel.frame = NSRect(x: 10, y: contentFinal / 2 - 6, width: width - 20, height: 18)
