@@ -2,6 +2,7 @@ mod ax;
 mod commands;
 mod cursor;
 mod native_toolbar;
+mod launcher;
 mod text_injection;
 
 use commands::ai::{run_ai_prompt, run_ai_prompt_stream};

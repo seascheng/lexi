@@ -685,9 +685,9 @@ static LAST_COPIED_TEXT: OnceLock<Mutex<Option<(String, Instant)>>> = OnceLock::
 /// How long after a Cmd+C the captured text is still considered usable.
 const COPIED_TEXT_FRESH_SECS: u64 = 5;
 
-/// Parsed keyboard shortcut for showing the popup.
-#[derive(Clone, Copy)]
-enum ShortcutMode {
+/// Parsed keyboard shortcut for a global hotkey.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ShortcutMode {
     /// Traditional modifier+key combo, e.g. Cmd+Shift+T
     KeyCombo {
         cmd: bool,
@@ -696,8 +696,10 @@ enum ShortcutMode {
         alt: bool,
         key_code: u16,
     },
-    /// Double-press a modifier key within a time window
-    DoubleCtrl,
+    /// Double-press a modifier within a time window ("Ctrl+Ctrl",
+    /// "Shift+Shift", …). `key_code` is the pair's canonical (left) keycode;
+    /// detection matches on the FLAG bit, so left/right both count.
+    DoubleModifier { key_code: u16 },
 }
 
 impl ShortcutMode {
@@ -714,9 +716,12 @@ impl ShortcutMode {
     fn parse(shortcut: &str) -> Option<Self> {
         let lower = shortcut.trim().to_lowercase();
 
-        // Double-modifier patterns: "Ctrl+Ctrl", "Control+Control"
-        if lower == "ctrl+ctrl" || lower == "control+control" {
-            return Some(Self::DoubleCtrl);
+        // Double-modifier patterns: "Ctrl+Ctrl", "Shift+Shift", "Alt+Alt", "Cmd+Cmd"
+        let doubled: Vec<&str> = lower.split('+').collect();
+        if doubled.len() == 2 && doubled[0] == doubled[1] {
+            if let Some(key_code) = modifier_name_to_code(doubled[0]) {
+                return Some(Self::DoubleModifier { key_code });
+            }
         }
 
         let parts: Vec<&str> = shortcut.split('+').collect();
@@ -754,6 +759,18 @@ impl ShortcutMode {
             alt: config.alt,
             key_code,
         })
+    }
+}
+
+/// Canonical keycode for a modifier name. Only doubled-form shortcuts
+/// ("shift+shift") consult this — combos use `key_name_to_code`.
+fn modifier_name_to_code(name: &str) -> Option<u16> {
+    match name {
+        "ctrl" | "control" => Some(KeyCode::CONTROL as u16),
+        "shift" => Some(KeyCode::SHIFT as u16),
+        "alt" | "option" => Some(KeyCode::OPTION as u16),
+        "cmd" | "command" => Some(KeyCode::COMMAND as u16),
+        _ => None,
     }
 }
 
@@ -1535,6 +1552,14 @@ fn handle_system_event(
     event_type: CGEventType,
     event: &CGEvent,
 ) -> CallbackResult {
+    // Every KeyDown is a non-modifier key (modifiers arrive as FlagsChanged).
+    // Double-modifier shortcuts reject intervals that contain typing.
+    if matches!(event_type, CGEventType::KeyDown) {
+        if let Ok(mut cell) = LAST_NONMOD_KEYDOWN.lock() {
+            *cell = Some(Instant::now());
+        }
+    }
+
     match event_type {
         CGEventType::LeftMouseDown => {
             // Record the down position ONLY — no Accessibility calls here. This
@@ -1884,13 +1909,18 @@ fn is_selection_gesture_key(event: &CGEvent) -> bool {
 }
 
 fn is_translate_shortcut(event: &CGEvent) -> bool {
-    let mode = current_popup_shortcut();
+    shortcut_matches_keydown(&current_popup_shortcut(), event)
+}
+
+/// True when a KeyDown event matches the combo form of `mode`.
+/// DoubleModifier modes never match — they live in FlagsChanged.
+pub(crate) fn shortcut_matches_keydown(mode: &ShortcutMode, event: &CGEvent) -> bool {
     let ShortcutMode::KeyCombo { cmd, shift, ctrl, alt, key_code } = mode else {
-        return false; // DoubleCtrl is handled via FlagsChanged, not KeyDown
+        return false;
     };
     let event_key_code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
     let flags = event.get_flags();
-    event_key_code == key_code
+    event_key_code == *key_code
         && (!cmd || flags.contains(CGEventFlags::CGEventFlagCommand))
         && (!shift || flags.contains(CGEventFlags::CGEventFlagShift))
         && (!ctrl || flags.contains(CGEventFlags::CGEventFlagControl))
@@ -1914,45 +1944,73 @@ fn is_copy_command(event: &CGEvent) -> bool {
         && !flags.contains(CGEventFlags::CGEventFlagAlternate)
 }
 
-/// Maximum time between two Ctrl presses to count as a double-press (ms).
-const DOUBLE_CTRL_INTERVAL_MS: u64 = 300;
+/// Maximum time between two presses of a modifier to count as a double-press (ms).
+const DOUBLE_PRESS_INTERVAL_MS: u64 = 300;
 
-/// Handle modifier key state changes for double-Ctrl detection.
-fn handle_flags_changed(app: &tauri::AppHandle, event: &CGEvent) {
-    if !matches!(current_popup_shortcut(), ShortcutMode::DoubleCtrl) {
-        return;
+/// Latest non-modifier KeyDown (every KeyDown is non-modifier — modifiers
+/// arrive as FlagsChanged). Double-modifier shortcuts reject intervals that
+/// contain typing: fast `Shift+H Shift+I` capital bursts must never fire.
+static LAST_NONMOD_KEYDOWN: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// The flag bit a modifier keycode maps to (left/right variants share it).
+/// Raw values: kVK_Control 0x3B / 0x3E, kVK_Shift 0x38 / 0x3C,
+/// kVK_Option 0x3A / 0x3D, kVK_Command 0x37 / 0x36.
+pub(crate) fn modifier_flag(key_code: u16) -> Option<CGEventFlags> {
+    match key_code {
+        0x3B | 0x3E => Some(CGEventFlags::CGEventFlagControl),
+        0x38 | 0x3C => Some(CGEventFlags::CGEventFlagShift),
+        0x3A | 0x3D => Some(CGEventFlags::CGEventFlagAlternate),
+        0x37 | 0x36 => Some(CGEventFlags::CGEventFlagCommand),
+        _ => None,
     }
+}
 
-    let flags = event.get_flags();
-    let ctrl_pressed = flags.contains(CGEventFlags::CGEventFlagControl);
-
-    if !ctrl_pressed {
-        return; // Only act on Ctrl press, not release
-    }
-
+/// Double-press detector with typing protection. Fires only when the second
+/// press lands within DOUBLE_PRESS_INTERVAL_MS AND no non-modifier KeyDown
+/// happened between the two presses. A clean fire resets (no triple-press);
+/// a dirty second press re-arms as a new first press.
+pub(crate) fn detect_double_press(last_press: &Mutex<Option<Instant>>) -> bool {
     let now = Instant::now();
-    let triggered = if let Ok(mut last) = LAST_CTRL_PRESS.lock() {
-        match *last {
-            Some(prev) if now.duration_since(prev).as_millis() as u64 <= DOUBLE_CTRL_INTERVAL_MS => {
-                *last = None; // Reset to prevent triple-press
-                true
-            }
-            _ => {
-                *last = Some(now);
-                false
+    let last_keydown = LAST_NONMOD_KEYDOWN.lock().ok().and_then(|cell| *cell);
+    let Ok(mut last) = last_press.lock() else { return false };
+    match *last {
+        Some(prev) if now.duration_since(prev).as_millis() as u64 <= DOUBLE_PRESS_INTERVAL_MS => {
+            match last_keydown {
+                Some(t) if t > prev => {
+                    *last = Some(now); // typing between presses — dirty
+                    false
+                }
+                _ => {
+                    *last = None; // reset: prevent triple-press
+                    true
+                }
             }
         }
-    } else {
-        false
-    };
-
-    if triggered {
-        log_native("double-ctrl shortcut detected");
-        let app = app.clone();
-        thread::spawn(move || {
-            trigger_popup_with_selection(&app);
-        });
+        _ => {
+            *last = Some(now);
+            false
+        }
     }
+}
+
+/// Handle modifier state changes for double-modifier shortcuts
+/// (popup's Ctrl+Ctrl; launcher's own detection is delegated).
+fn handle_flags_changed(app: &tauri::AppHandle, event: &CGEvent) {
+    if let ShortcutMode::DoubleModifier { key_code } = current_popup_shortcut() {
+        let pressed = modifier_flag(key_code)
+            .map(|flag| event.get_flags().contains(flag))
+            .unwrap_or(false);
+        if pressed && detect_double_press(&LAST_CTRL_PRESS) {
+            log_native("double-modifier popup shortcut detected");
+            let app = app.clone();
+            thread::spawn(move || {
+                trigger_popup_with_selection(&app);
+            });
+        }
+    }
+
+    // Launcher owns its double-modifier detection + trigger (top-level isolation).
+    crate::launcher::handle_flags_changed(app, event);
 }
 
 /// Show popup and read selected text — shared by KeyDown and FlagsChanged shortcut handlers.
@@ -3715,4 +3773,67 @@ extern "C" {
     fn CGRequestListenEventAccess() -> bool;
     fn CGPreflightPostEventAccess() -> bool;
     fn CGRequestPostEventAccess() -> bool;
+}
+
+// ---------------------------------------------------------------------------
+// Tests — shortcut parsing + double-press detection
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+
+    #[test]
+    fn parse_doubled_modifiers() {
+        for (text, expected) in [
+            ("ctrl+ctrl", KeyCode::CONTROL as u16),
+            ("Control+Control", KeyCode::CONTROL as u16),
+            ("Shift+Shift", KeyCode::SHIFT as u16),
+            ("Alt+Alt", KeyCode::OPTION as u16),
+            ("Option+Option", KeyCode::OPTION as u16),
+            ("Cmd+Cmd", KeyCode::COMMAND as u16),
+        ] {
+            match ShortcutMode::parse(text) {
+                Some(ShortcutMode::DoubleModifier { key_code }) => assert_eq!(key_code, expected, "{text}"),
+                other => panic!("{text} parsed to {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_combo_and_rejects() {
+        // legacy default still parses as a combo
+        assert!(matches!(
+            ShortcutMode::parse("Cmd+Shift+T"),
+            Some(ShortcutMode::KeyCombo { cmd: true, shift: true, ctrl: false, alt: false, key_code })
+                if key_code == KeyCode::ANSI_T as u16
+        ));
+        assert!(ShortcutMode::parse("shift").is_none());          // single token
+        assert!(ShortcutMode::parse("").is_none());
+        assert!(ShortcutMode::parse("a+b").is_none());            // no modifier
+    }
+
+    // Runs as ONE test: detect_double_press + LAST_NONMOD_KEYDOWN are global,
+    // parallel #[test]s would race on the shared static.
+    #[test]
+    fn double_press_sequences() {
+        let last: Mutex<Option<Instant>> = Mutex::new(None);
+
+        // clean double press fires; triple press does not re-fire
+        assert!(!detect_double_press(&last), "first press arms");
+        assert!(detect_double_press(&last), "clean second press fires");
+        assert!(!detect_double_press(&last), "third press only arms");
+
+        // typing between the two presses rejects AND re-arms — fresh scenario,
+        // reset the shared `last` so this block starts as a new first press.
+        if let Ok(mut cell) = last.lock() {
+            *cell = None;
+        }
+        assert!(!detect_double_press(&last), "arm again");
+        if let Ok(mut cell) = LAST_NONMOD_KEYDOWN.lock() {
+            *cell = Some(Instant::now());
+        }
+        assert!(!detect_double_press(&last), "dirty second press does not fire");
+        assert!(detect_double_press(&last), "clean follow-up press fires");
+    }
 }
