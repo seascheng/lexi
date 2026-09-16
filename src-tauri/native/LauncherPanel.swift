@@ -130,6 +130,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         searchField.font = .systemFont(ofSize: 13)
         (searchField.cell as? NSSearchFieldCell)?.sendsActionOnEndEditing = false
         searchField.wantsLayer = true
+        searchField.delegate = self
         root.addSubview(searchField)
 
         for (button, title) in [(foldersTabButton, "Folders"), (appsTabButton, "Apps")] {
@@ -235,7 +236,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         refreshFoldersData()
         switch tab {
         case .folders: rows = buildFolderRows()
-        case .apps: rows = [] // apps tab lands in Task 5
+        case .apps: rows = buildAppRows()
         }
         editorAppURL = Self.editorBundleIds.lazy.compactMap {
             NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)
@@ -410,6 +411,105 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         hide(notify: false)
     }
 
+    // MARK: running apps
+
+    private func buildAppRows() -> [Row] {
+        let filter = filterText
+        let own = ProcessInfo.processInfo.processIdentifier
+        var apps = NSWorkspace.shared.runningApplications.filter { app in
+            app.activationPolicy == .regular
+                && app.bundleIdentifier != nil
+                && app.processIdentifier != own
+                && (filter.isEmpty
+                    || (app.localizedName ?? "").lowercased().contains(filter))
+        }
+        let front = apps.first { $0.isActive }
+        apps.removeAll { $0 == front }
+        apps.sort { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+        if let front { apps.insert(front, at: 0) }
+        return apps.map { RunningAppItem(app: $0, name: $0.localizedName ?? $0.bundleIdentifier ?? "?") }
+            .map { Row.app($0) }
+    }
+
+    private func activateApp(_ item: RunningAppItem) {
+        if #available(macOS 14.0, *) {
+            _ = item.app.activate()
+        } else {
+            _ = item.app.activate(options: [.activateIgnoringOtherApps])
+        }
+        hide(notify: false)
+    }
+
+    private func activateRow(_ index: Int) {
+        guard index >= 0, index < rows.count else { return }
+        switch rows[index] {
+        case .folder(let item): openPath(item.path, target: .finder)
+        case .recent(let item): openPath(item.path, target: .finder)
+        case .app(let item): activateApp(item)
+        case .header: break
+        }
+    }
+
+    // MARK: keyboard
+
+    private func moveSelection(_ delta: Int) {
+        let selectable = selectableRowIndexes()
+        guard !selectable.isEmpty else { return }
+        let next: Int
+        if let current = selectable.firstIndex(of: tableView.selectedRow) {
+            let target = current + delta
+            next = selectable[min(max(target, 0), selectable.count - 1)]
+        } else {
+            next = delta > 0 ? selectable[0] : selectable[selectable.count - 1]
+        }
+        tableView.selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
+        tableView.scrollRowToVisible(next)
+    }
+
+    private func activateSelected() {
+        let row = tableView.selectedRow
+        if row >= 0, row < rows.count {
+            activateRow(row)
+        } else if let first = selectableRowIndexes().first {
+            activateRow(first)
+        }
+    }
+
+    // NSSearchFieldDelegate — arrows/table/Enter/Tab/Esc while the search
+    // field holds first responder.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        switch commandSelector {
+        case NSSelectorFromString("moveUp:"):
+            moveSelection(-1)
+            return true
+        case NSSelectorFromString("moveDown:"):
+            moveSelection(1)
+            return true
+        case NSSelectorFromString("insertNewline:"):
+            activateSelected()
+            return true
+        case NSSelectorFromString("insertTab:"):
+            tab = tab == .folders ? .apps : .folders
+            return true
+        case NSSelectorFromString("cancelOperation:"):
+            if !searchField.stringValue.isEmpty {
+                searchField.stringValue = ""
+                reload()
+            } else {
+                hide(notify: true)
+            }
+            return true
+        default:
+            return false
+        }
+    }
+
+    // NSSearchFieldDelegate — live filter.
+    func controlTextDidChange(_ obj: Notification) {
+        guard obj.object as? NSSearchField === searchField else { return }
+        reload()
+    }
+
     // MARK: NSTableViewDataSource / Delegate
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -459,7 +559,11 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
             }
             return cell
         case .app(let item):
-            return nil // app cells land in Task 5
+            let cell = reuse(LauncherAppCell.self, row: row)
+            cell.configure(item: item, theme: cardTheme) { [weak self] in
+                self?.activateApp(item)
+            }
+            return cell
         }
     }
 
@@ -599,5 +703,34 @@ final class LauncherRowView: NSTableRowView {
         guard isSelected else { return }
         fillColor.setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 8, dy: 2), xRadius: 7, yRadius: 7).fill()
+    }
+}
+
+/// Running-app row: app icon + localized name.
+final class LauncherAppCell: NSView {
+    private let iconView = NSImageView()
+    private let nameLabel = NSTextField(labelWithString: "")
+    private var onActivate: (() -> Void)?
+    private var didLayout = false
+
+    override func mouseDown(with event: NSEvent) { onActivate?() }
+
+    func configure(
+        item: LauncherPanelController.RunningAppItem,
+        theme: CardTheme,
+        _ handler: @escaping () -> Void
+    ) {
+        onActivate = handler
+        if !didLayout {
+            didLayout = true
+            iconView.frame = NSRect(x: 16, y: 7, width: 20, height: 20)
+            addSubview(iconView)
+            nameLabel.font = .systemFont(ofSize: 13)
+            nameLabel.frame = NSRect(x: 46, y: 9, width: 440, height: 16)
+            addSubview(nameLabel)
+        }
+        iconView.image = item.app.icon
+        nameLabel.stringValue = item.name
+        nameLabel.textColor = theme.foreground
     }
 }
