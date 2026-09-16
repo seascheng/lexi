@@ -158,6 +158,10 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("LauncherColumn"))
         tableView.addTableColumn(column)
         scrollView.documentView = tableView
+        // Without these the table renders zero rows on both tabs — the
+        // dataSource/delegate methods on self are the entire list pipeline.
+        tableView.dataSource = self
+        tableView.delegate = self
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
