@@ -107,7 +107,7 @@ struct CardTheme {
 /// systems: the legacy frosted `.menu` vibrancy with a hairline stroke.
 /// Returns (background, content, isGlass): set the panel's contentView to
 /// `background` and add all subviews to `content`.
-private func makePanelBackground(
+func makePanelBackground(
     frame: NSRect,
     cornerRadius: CGFloat
 ) -> (background: NSView, content: NSView, isGlass: Bool) {
@@ -145,7 +145,7 @@ private func makePanelBackground(
 }
 
 /// File logger usable from any class (the controller's log() is private).
-private enum FileLog {
+enum FileLog {
     static func write(_ message: String) {
         let line = "\(Date()) \(message)\n"
         guard let data = line.data(using: .utf8) else { return }
@@ -186,12 +186,12 @@ private func defaultToolbarActions() -> [ToolbarAction] {
     ]
 }
 
-private func hexString(_ color: NSColor) -> String {
+func hexString(_ color: NSColor) -> String {
     let c = color.usingColorSpace(.sRGB) ?? color
     return String(format: "#%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
 }
 
-private func lucideImage(for icon: String, title: String, color: NSColor? = nil) -> NSImage? {
+func lucideImage(for icon: String, title: String, color: NSColor? = nil) -> NSImage? {
     let stroke = color.map { "stroke=\"\(hexString($0))\"" } ?? "stroke=\"#000000\""
     let svg = """
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" \(stroke) stroke-width="2" stroke-linecap="round" stroke-linejoin="round">\(lucideMarkup(for: icon))</svg>
@@ -207,7 +207,7 @@ private func lucideImage(for icon: String, title: String, color: NSColor? = nil)
 
 /// Deterministic tag → hue mapping: the same tag always lands on the same
 /// traffic-light color in both themes (the row dot and the tag pill share it).
-private func tagColor(for tag: String, dark: Bool) -> NSColor {
+func tagColor(for tag: String, dark: Bool) -> NSColor {
     guard !tag.isEmpty else { return .clear }
     var hash: UInt64 = 5381
     for scalar in tag.unicodeScalars { hash = hash &* 33 &+ UInt64(scalar.value) }
@@ -216,7 +216,7 @@ private func tagColor(for tag: String, dark: Bool) -> NSColor {
                    brightness: dark ? 0.98 : 0.58, alpha: 1)
 }
 
-private func lucideMarkup(for icon: String) -> String {
+func lucideMarkup(for icon: String) -> String {
     switch icon {
     case "pin":
         return """
@@ -694,13 +694,13 @@ private final class ToolbarDragHandle: NSView {
 /// becoming key does NOT activate the app, so the source app keeps its focus
 /// while the card accepts typing.
 }
-private final class KeyablePanel: NSPanel {
+final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
 /// Borderless icon button with hover/press feedback (system-feel chrome):
 /// subtle fill on hover, stronger on press, corner radius to match chips.
-private final class HoverIconButton: NSButton {
+final class HoverIconButton: NSButton {
     private var hoverArea: NSTrackingArea?
     var baseAlpha: CGFloat = 0.10
     var pressAlpha: CGFloat = 0.16
@@ -877,6 +877,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var globalMouseMoveMonitor: Any?
     private var globalScrollMonitor: Any?
     private var notesPanel: NSPanel!
+    private lazy var launcherController: LauncherPanelController = {
+        let controller = LauncherPanelController()
+        controller.onHidden = { [weak self] in
+            self?.postAction(action: "launcher-hidden", text: "-")
+        }
+        return controller
+    }()
     private var notesContainer: NSView!
     private var notesContent: NSView!
     private var notesScrollView: NSScrollView!
@@ -2612,6 +2619,20 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             return
         }
 
+        if request.hasPrefix("POST /launcher-show ") {
+            DispatchQueue.main.async {
+                self.launcherController.show()
+            }
+            return
+        }
+
+        if request.hasPrefix("POST /launcher-hide ") {
+            DispatchQueue.main.async {
+                self.launcherController.hide(notify: false)
+            }
+            return
+        }
+
         if request.hasPrefix("POST /theme "),
            let body = request.components(separatedBy: "\r\n\r\n").last,
            let bodyData = body.data(using: .utf8),
@@ -2780,6 +2801,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             renderActiveRun()
             layoutResultCard()
         }
+        launcherController.applyTheme(dark: theme == .dark)
         log("theme applied \(theme.rawValue)")
     }
 
@@ -4336,10 +4358,6 @@ private struct ThemePayload: Decodable {
     let theme: String
 }
 
-let app = NSApplication.shared
-let delegate = SelectionToolbarApp()
-app.delegate = delegate
-app.run()
 
 private struct NotesShowPayload: Decodable {
     struct Note: Decodable {

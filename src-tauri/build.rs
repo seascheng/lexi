@@ -47,6 +47,8 @@ fn build_native_selection_toolbar() {
         .args([
             "swiftc",
             "native/SelectionToolbarHelper.swift",
+            "native/LauncherPanel.swift",
+            "native/main.swift",
             "-o",
             "native/LexiSelectionHelper.app/Contents/MacOS/LexiSelectionHelper",
             "-framework",
@@ -83,4 +85,6 @@ fn build_native_selection_toolbar() {
     }
 
     println!("cargo:rerun-if-changed=native/SelectionToolbarHelper.swift");
+    println!("cargo:rerun-if-changed=native/LauncherPanel.swift");
+    println!("cargo:rerun-if-changed=native/main.swift");
 }
