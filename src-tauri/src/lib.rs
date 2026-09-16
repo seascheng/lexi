@@ -9,6 +9,7 @@ use commands::ai::{run_ai_prompt, run_ai_prompt_stream};
 use commands::speech::speak_text;
 use commands::tools::execute_tool;
 use cursor::cursor_position;
+use launcher::set_launcher_shortcut;
 use native_toolbar::{
     configure_native_toolbar, handoff_to_app_cmd, hide_native_toolbar, popup_position,
     set_excluded_toolbar_apps, set_handoff_target, set_native_toolbar_actions,
@@ -47,6 +48,7 @@ pub fn run() {
             set_native_toolbar_enabled,
             set_native_toolbar_theme,
             set_popup_shortcut,
+            set_launcher_shortcut,
             speak_text,
             insert_at_focus,
         ])
@@ -68,6 +70,7 @@ pub fn run() {
             }
             setup_tray(app)?;
             native_toolbar::setup_native_toolbar(app)?;
+            launcher::initialize(app);
             Ok(())
         })
         .build(tauri::generate_context!())

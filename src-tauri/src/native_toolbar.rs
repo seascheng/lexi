@@ -327,7 +327,7 @@ pub(crate) fn save_word_entry(
     }
 }
 
-fn toolbar_port() -> Option<u16> {
+pub(crate) fn toolbar_port() -> Option<u16> {
     TOOLBAR_PORT
         .get_or_init(|| Mutex::new(None))
         .lock()
@@ -713,7 +713,7 @@ impl ShortcutMode {
         }
     }
 
-    fn parse(shortcut: &str) -> Option<Self> {
+    pub(crate) fn parse(shortcut: &str) -> Option<Self> {
         let lower = shortcut.trim().to_lowercase();
 
         // Double-modifier patterns: "Ctrl+Ctrl", "Shift+Shift", "Alt+Alt", "Cmd+Cmd"
@@ -1764,6 +1764,10 @@ fn handle_system_event(
             thread::spawn(move || {
                 trigger_popup_with_selection(&app);
             });
+        }
+        CGEventType::KeyDown if crate::launcher::is_launcher_hotkey(event) => {
+            log_native("launcher shortcut key detected");
+            thread::spawn(crate::launcher::show_launcher);
         }
         CGEventType::KeyDown if is_copy_command(event) => {
             // User pressed Cmd+C. Record what they copied (fresh for 5s) —
@@ -3110,7 +3114,7 @@ fn wait_for_helper(toolbar_port: u16) {
     }
 }
 
-fn post_to_helper(port: u16, path: &str, body: &str) -> std::io::Result<()> {
+pub(crate) fn post_to_helper(port: u16, path: &str, body: &str) -> std::io::Result<()> {
     let mut stream = TcpStream::connect((IPC_HOST, port))?;
     write!(
         stream,
@@ -3143,6 +3147,11 @@ fn dispatch_toolbar_action(
     // CARD_UP never goes stale and swallows later stream events.
     if action.action == "card-hidden" || action.action == "card-cleared" {
         CARD_UP.store(false, std::sync::atomic::Ordering::Relaxed);
+        return Ok(());
+    }
+    // Launcher panel dismissal report — informational only (no state to clear).
+    if action.action == "launcher-hidden" {
+        log_native("launcher hidden");
         return Ok(());
     }
     // Manual input surface: open the card on AiForm + IdleState (no run).
