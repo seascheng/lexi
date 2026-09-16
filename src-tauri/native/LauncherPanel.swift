@@ -94,6 +94,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     // MARK: show / hide
 
     func show() {
+        requestProtectedFolderAccessIfNeeded()
         reload()
         placePanel()
         searchField.stringValue = ""
@@ -293,13 +294,39 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     }
 
     // MARK: tagged folders (Spotlight metadata)
+    private var didRequestProtectedAccess = false
+
+    /// TCC silently filters Desktop/Documents/Downloads items out of
+    /// NSMetadataQuery results for processes without folder permission (why
+    /// the first run showed 3 of 17 tagged folders). One listing attempt per
+    /// protected folder triggers the system prompt (Info.plist usage
+    /// descriptions required); a grant persists for the app, and the query
+    /// re-runs on the next show (5s throttle).
+    private func requestProtectedFolderAccessIfNeeded() {
+        guard !didRequestProtectedAccess else { return }
+        didRequestProtectedAccess = true
+        // Off the main thread: the TCC prompt BLOCKS the listing call until
+        // answered, and show() must never freeze behind a dialog the user
+        // may not notice. One prompt set total; grants persist per app.
+        DispatchQueue.global(qos: .utility).async {
+            let home = URL(fileURLWithPath: NSHomeDirectory())
+            for folder in ["Desktop", "Documents", "Downloads"] {
+                _ = try? FileManager.default.contentsOfDirectory(
+                    atPath: home.appendingPathComponent(folder).path
+                )
+            }
+        }
+    }
 
     private func refreshFoldersData() {
         if let last = lastQueryAt, Date().timeIntervalSince(last) < 5 { return }
         stopMetadataQuery()
         let query = NSMetadataQuery()
-        query.predicate = NSPredicate(format: "kMDItemUserTags == '*'")
-        query.searchScopes = [NSHomeDirectory()]
+        // `== '*'` compiles to a LITERAL match (always empty) — LIKE keeps
+        // the wildcard semantics and matches any tagged item (verified:
+        // == gives 0 results, LIKE gives 17 on this machine).
+        query.predicate = NSPredicate(format: "%K LIKE '*'", "kMDItemUserTags")
+        query.searchScopes = [URL(fileURLWithPath: NSHomeDirectory())]
         NotificationCenter.default.addObserver(
             self, selector: #selector(metadataQueryDidFinish(_:)),
             name: .NSMetadataQueryDidFinishGathering, object: query
@@ -332,6 +359,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
             items.append(FolderItem(path: path, name: url.lastPathComponent, tag: tag))
         }
         query.enableUpdates()
+        FileLog.write("launcher folders query: raw=\(query.results.count) folders=\(items.count) sample=\(items.prefix(3).map(\.path).joined(separator: " | "))")
         stopMetadataQuery()
         taggedFolders = items.sorted {
             ($0.tag, $0.name.lowercased()) < ($1.tag, $1.name.lowercased())

@@ -37,6 +37,12 @@ fn build_native_selection_toolbar() {
   <string>0.1.0</string>
   <key>LSUIElement</key>
   <true/>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>Lexi lists folders you tagged on your Desktop in the launcher panel.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>Lexi lists folders you tagged in your Documents folder in the launcher panel.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>Lexi lists folders you tagged in your Downloads folder in the launcher panel.</string>
 </dict>
 </plist>
 "#,
