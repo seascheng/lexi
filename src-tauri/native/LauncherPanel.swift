@@ -8,7 +8,7 @@ import AppKit
 /// `makePanelBackground`, `CardTheme`, `lucideImage`, `tagColor`, `FileLog`
 /// (SelectionToolbarHelper.swift) and the TCP dispatch in
 /// `SelectionToolbarApp.handleRequestData`.
-final class LauncherPanelController: NSObject, NSWindowDelegate {
+final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     /// Fired whenever the panel hides itself (Esc / focus loss); the app
     /// controller wires this to its action channel ("launcher-hidden").
     var onHidden: (() -> Void)?
@@ -47,6 +47,19 @@ final class LauncherPanelController: NSObject, NSWindowDelegate {
     struct RunningAppItem { let app: NSRunningApplication; let name: String }
 
     var rows: [Row] = []
+
+    // folders data
+    private var taggedFolders: [FolderItem] = []
+    private var recents: [RecentItem] = LauncherPanelController.loadRecents()
+    private var openFailures: [String: Int] = [:]
+    private var metadataQuery: NSMetadataQuery?
+    private var lastQueryAt: Date?
+    private var editorAppURL: URL?
+
+    enum OpenTarget { case finder, editor, terminal }
+
+    /// First installed editor wins (spec §4.4).
+    private static let editorBundleIds = ["com.microsoft.VSCode", "dev.zed.Zed", "com.sublimetext.4"]
 
     private var filterText: String {
         searchField.stringValue.trimmingCharacters(in: .whitespaces).lowercased()
@@ -216,18 +229,375 @@ final class LauncherPanelController: NSObject, NSWindowDelegate {
         panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
     }
 
-    // MARK: data (empty shell — Task 4/5 fill in)
+    // MARK: data
 
     func reload() {
-        rows = []
+        refreshFoldersData()
+        switch tab {
+        case .folders: rows = buildFolderRows()
+        case .apps: rows = [] // apps tab lands in Task 5
+        }
+        editorAppURL = Self.editorBundleIds.lazy.compactMap {
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)
+        }.first
         tableView.reloadData()
-        emptyLabel.isHidden = false
-        emptyLabel.stringValue = "No tagged folders — tag folders in Finder to list them here"
+        let selectable = selectableRowIndexes()
+        if let first = selectable.first {
+            tableView.selectRowIndexes(IndexSet(integer: first), byExtendingSelection: false)
+        }
+        let empty = rows.isEmpty
+        emptyLabel.isHidden = !empty
+        emptyLabel.stringValue = tab == .folders
+            ? "No tagged folders — tag folders in Finder to list them here"
+            : "No matching apps"
         placePanel()
+    }
+
+    private func selectableRowIndexes() -> [Int] {
+        rows.indices.filter { row in
+            if case .header = rows[row] { return false }
+            return true
+        }
+    }
+
+    private func buildFolderRows() -> [Row] {
+        let filter = filterText
+        var out: [Row] = []
+        let matching = taggedFolders.filter { item in
+            filter.isEmpty
+                || item.name.lowercased().contains(filter)
+                || item.path.lowercased().contains(filter)
+        }
+        let grouped = Dictionary(grouping: matching) { $0.tag.isEmpty ? "Untagged" : $0.tag }
+        for tag in grouped.keys.sorted() {
+            out.append(.header(tag))
+            out += grouped[tag]!
+                .sorted { $0.name.lowercased() < $1.name.lowercased() }
+                .map { .folder($0) }
+        }
+        let recentMatches = recents.filter { item in
+            filter.isEmpty
+                || item.path.lowercased().contains(filter)
+                || URL(fileURLWithPath: item.path).lastPathComponent.lowercased().contains(filter)
+        }
+        if !recentMatches.isEmpty {
+            out.append(.header("Recent"))
+            out += recentMatches.map { .recent($0) }
+        }
+        return out
+    }
+
+    // MARK: tagged folders (Spotlight metadata)
+
+    private func refreshFoldersData() {
+        if let last = lastQueryAt, Date().timeIntervalSince(last) < 5 { return }
+        stopMetadataQuery()
+        let query = NSMetadataQuery()
+        query.predicate = NSPredicate(format: "kMDItemUserTags == '*'")
+        query.searchScopes = [NSHomeDirectory()]
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(metadataQueryDidFinish(_:)),
+            name: .NSMetadataQueryDidFinishGathering, object: query
+        )
+        query.start()
+        metadataQuery = query
+        lastQueryAt = Date()
+    }
+
+    private func stopMetadataQuery() {
+        if let query = metadataQuery {
+            NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidFinishGathering, object: query)
+            query.stop()
+        }
+        metadataQuery = nil
+    }
+
+    @objc private func metadataQueryDidFinish(_ notification: Notification) {
+        guard let query = notification.object as? NSMetadataQuery else { return }
+        query.disableUpdates()
+        var items: [FolderItem] = []
+        for result in query.results {
+            guard let item = result as? NSMetadataItem,
+                  let path = item.value(forAttribute: NSMetadataItemPathKey) as? String
+            else { continue }
+            let url = URL(fileURLWithPath: path)
+            guard (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
+            let rawTags = (item.value(forAttribute: "kMDItemUserTags") as? [String]) ?? []
+            let tag = rawTags.map(Self.normalizedTag).first ?? ""
+            items.append(FolderItem(path: path, name: url.lastPathComponent, tag: tag))
+        }
+        query.enableUpdates()
+        stopMetadataQuery()
+        taggedFolders = items.sorted {
+            ($0.tag, $0.name.lowercased()) < ($1.tag, $1.name.lowercased())
+        }
+        if panel.isVisible && tab == .folders { reload() }
+    }
+
+    /// Finder writes the 7 default color tags with a leading symbol scalar
+    /// (e.g. "🔴红色") — strip leading symbol/emoji scalars, keep the name.
+    static func normalizedTag(_ raw: String) -> String {
+        let scalars = raw.unicodeScalars.drop { scalar in
+            scalar.value >= 0x1F000 || (scalar.value >= 0x2190 && scalar.value <= 0x2BFF)
+        }
+        return String(String.UnicodeScalarView(scalars)).trimmingCharacters(in: .whitespaces)
+    }
+
+    // MARK: recents (helper-local persistence)
+
+    private static func loadRecents() -> [RecentItem] {
+        guard let data = UserDefaults.standard.data(forKey: recentsKey),
+              let items = try? JSONDecoder().decode([RecentItem].self, from: data)
+        else { return [] }
+        return items.sorted { $0.lastAt > $1.lastAt }
+    }
+
+    private func persistRecents() {
+        if let data = try? JSONEncoder().encode(recents) {
+            UserDefaults.standard.set(data, forKey: Self.recentsKey)
+        }
+    }
+
+    /// Record an open attempt. A failing path is not re-inserted; after 3
+    /// failures the entry is dropped entirely (spec §7).
+    private func recordOpen(path: String, ok: Bool) {
+        let previous = recents.first { $0.path == path }
+        recents.removeAll { $0.path == path }
+        if ok {
+            recents.insert(
+                RecentItem(path: path, count: (previous?.count ?? 0) + 1, lastAt: Date().timeIntervalSince1970),
+                at: 0
+            )
+            openFailures[path] = nil
+        } else {
+            let failures = (openFailures[path] ?? 0) + 1
+            if failures >= 3 {
+                openFailures[path] = nil
+            } else {
+                openFailures[path] = failures
+            }
+        }
+        if recents.count > 10 { recents = Array(recents.prefix(10)) }
+        persistRecents()
+    }
+
+    // MARK: open actions
+
+    private func openPath(_ path: String, target: OpenTarget) {
+        guard FileManager.default.fileExists(atPath: path) else {
+            recordOpen(path: path, ok: false)
+            if panel.isVisible && tab == .folders { reload() }
+            return
+        }
+        let url = URL(fileURLWithPath: path)
+        switch target {
+        case .finder:
+            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+        case .editor:
+            if let editor = editorAppURL {
+                let config = NSWorkspace.OpenConfiguration()
+                NSWorkspace.shared.open([url], withApplicationAt: editor, configuration: config)
+            } else {
+                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+            }
+        case .terminal:
+            if let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") {
+                let config = NSWorkspace.OpenConfiguration()
+                NSWorkspace.shared.open([url], withApplicationAt: terminal, configuration: config)
+            }
+        }
+        recordOpen(path: path, ok: true)
+        hide(notify: false)
+    }
+
+    // MARK: NSTableViewDataSource / Delegate
+
+    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        guard row < rows.count else { return Self.rowHeight }
+        return rowHeight(for: rows[row])
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard row < rows.count else { return nil }
+        switch rows[row] {
+        case .header(let title):
+            let cell = reuse(LauncherHeaderCell.self, row: row)
+            cell.configure(title: title, theme: cardTheme)
+            return cell
+        case .folder(let item):
+            let cell = reuse(LauncherFolderCell.self, row: row)
+            cell.configure(
+                item: item,
+                theme: cardTheme,
+                showsEditor: editorAppURL != nil,
+                missing: !FileManager.default.fileExists(atPath: item.path)
+            ) { [weak self] action in
+                guard let self else { return }
+                switch action {
+                case .row: self.openPath(item.path, target: .finder)
+                case .editor: self.openPath(item.path, target: .editor)
+                case .terminal: self.openPath(item.path, target: .terminal)
+                }
+            }
+            return cell
+        case .recent(let item):
+            let cell = reuse(LauncherFolderCell.self, row: row)
+            cell.configure(
+                item: FolderItem(path: item.path, name: URL(fileURLWithPath: item.path).lastPathComponent, tag: ""),
+                theme: cardTheme,
+                showsEditor: editorAppURL != nil,
+                missing: !FileManager.default.fileExists(atPath: item.path)
+            ) { [weak self] action in
+                guard let self else { return }
+                switch action {
+                case .row: self.openPath(item.path, target: .finder)
+                case .editor: self.openPath(item.path, target: .editor)
+                case .terminal: self.openPath(item.path, target: .terminal)
+                }
+            }
+            return cell
+        case .app(let item):
+            return nil // app cells land in Task 5
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let view = tableView.makeView(
+            withIdentifier: NSUserInterfaceItemIdentifier("LauncherRowView"),
+            owner: self
+        ) as? LauncherRowView ?? LauncherRowView()
+        view.identifier = NSUserInterfaceItemIdentifier("LauncherRowView")
+        view.fillColor = cardTheme.selectedFill
+        return view
+    }
+
+    private func reuse<T: NSView>(_ type: T.Type, row: Int) -> T {
+        let identifier = NSUserInterfaceItemIdentifier(String(describing: type))
+        if let reused = tableView.makeView(withIdentifier: identifier, owner: self) as? T {
+            return reused
+        }
+        let view = T(frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: rowHeight(for: rows[row])))
+        view.identifier = identifier
+        return view
     }
 }
 
 /// Top-down layout container (row 0 = the top edge).
 final class FlippedView: NSView {
     override var isFlipped: Bool { true }
+}
+
+/// Section header row (tag name / "Recent").
+final class LauncherHeaderCell: NSView {
+    private let label = NSTextField(labelWithString: "")
+    private var didLayout = false
+
+    func configure(title: String, theme: CardTheme) {
+        label.stringValue = title.uppercased()
+        label.font = .systemFont(ofSize: 10, weight: .semibold)
+        label.textColor = theme.tertiaryText
+        if !didLayout {
+            didLayout = true
+            label.frame = NSRect(x: 16, y: 6, width: 480, height: 14)
+            addSubview(label)
+        }
+    }
+}
+
+/// Folder / recent row: tag dot, name, parent path, editor + terminal buttons.
+final class LauncherFolderCell: NSView {
+    enum Action { case row, editor, terminal }
+
+    private let dot = NSView()
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let pathLabel = NSTextField(labelWithString: "")
+    private let editorButton = HoverIconButton(frame: .zero)
+    private let terminalButton = HoverIconButton(frame: .zero)
+    private var onAction: ((Action) -> Void)?
+    private var hoverArea: NSTrackingArea?
+    private var didLayout = false
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(
+            rect: bounds, options: [.mouseEnteredAndExited, .activeAlways],
+            owner: self, userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseDown(with event: NSEvent) { onAction?(.row) }
+
+    func configure(
+        item: LauncherPanelController.FolderItem,
+        theme: CardTheme,
+        showsEditor: Bool,
+        missing: Bool,
+        _ handler: @escaping (Action) -> Void
+    ) {
+        onAction = handler
+        alphaValue = missing ? 0.45 : 1.0
+        if !didLayout {
+            didLayout = true
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = 3
+            dot.frame = NSRect(x: 16, y: 14, width: 6, height: 6)
+            addSubview(dot)
+
+            nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
+            nameLabel.frame = NSRect(x: 30, y: 8, width: 320, height: 16)
+            addSubview(nameLabel)
+
+            pathLabel.font = .systemFont(ofSize: 11)
+            pathLabel.frame = NSRect(x: 30, y: 3, width: 320, height: 12)
+            addSubview(pathLabel)
+
+            terminalButton.frame = NSRect(x: 448, y: 6, width: 22, height: 22)
+            terminalButton.toolTip = "Open in Terminal"
+            addSubview(terminalButton)
+
+            editorButton.frame = NSRect(x: 474, y: 6, width: 22, height: 22)
+            editorButton.toolTip = "Open in Editor"
+            addSubview(editorButton)
+        }
+        nameLabel.stringValue = item.name
+        let parent = (item.path as NSString).deletingLastPathComponent
+        pathLabel.stringValue = parent.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        dot.layer?.backgroundColor = item.tag.isEmpty
+            ? NSColor.clear.cgColor
+            : tagColor(for: item.tag, dark: theme.isDark).cgColor
+        dot.isHidden = item.tag.isEmpty
+        nameLabel.textColor = theme.foreground
+        pathLabel.textColor = theme.tertiaryText
+
+        editorButton.isHidden = !showsEditor
+        if let editorImage = lucideImage(for: "code", title: "Editor", color: theme.secondaryText) {
+            editorButton.image = editorImage
+        }
+        if let terminalImage = lucideImage(for: "terminal", title: "Terminal", color: theme.secondaryText) {
+            terminalButton.image = terminalImage
+        }
+        editorButton.target = self
+        editorButton.action = #selector(editorClicked)
+        terminalButton.target = self
+        terminalButton.action = #selector(terminalClicked)
+    }
+
+    @objc private func editorClicked() { onAction?(.editor) }
+    @objc private func terminalClicked() { onAction?(.terminal) }
+}
+
+/// Selection capsule row view (selectedFill on activation).
+final class LauncherRowView: NSTableRowView {
+    var fillColor: NSColor = .clear
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard isSelected else { return }
+        fillColor.setFill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 8, dy: 2), xRadius: 7, yRadius: 7).fill()
+    }
 }
