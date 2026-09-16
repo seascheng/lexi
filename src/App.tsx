@@ -72,6 +72,11 @@ function MainWindow() {
       }).catch((error) => {
         console.warn("Failed to sync popup shortcut", error);
       });
+      void invoke("set_launcher_shortcut", {
+        shortcut: settings.launcherShortcut,
+      }).catch((error) => {
+        console.warn("Failed to sync launcher shortcut", error);
+      });
       void invoke("set_excluded_toolbar_apps", {
         apps: settings.excludedToolbarApps ?? [],
       }).catch((error) => {

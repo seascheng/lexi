@@ -218,6 +218,17 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
                     onChange={(shortcut) => setDraft({ ...draft, popupShortcut: shortcut })}
                   />
                 </Field>
+                <Field label="Show launcher shortcut" inline hint="Opens the launcher panel from any Space.">
+                  <Select
+                    value={draft.launcherShortcut}
+                    onChange={(event) => setDraft({ ...draft, launcherShortcut: event.target.value })}
+                  >
+                    <option value="Shift+Shift">Double Shift</option>
+                    <option value="Alt+Alt">Double Option</option>
+                    <option value="Cmd+Cmd">Double Command</option>
+                    <option value="Cmd+Shift+L">Cmd+Shift+L</option>
+                  </Select>
+                </Field>
               </SettingsCard>
             )}
 

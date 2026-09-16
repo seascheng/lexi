@@ -167,6 +167,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   apiKey: "",
   model: "gpt-4o-mini",
   popupShortcut: "Cmd+Shift+T",
+  launcherShortcut: "Shift+Shift",
   autoStart: false,
 };
 

@@ -51,6 +51,7 @@ export interface AppSettings {
   apiKey: string;
   model: string;
   popupShortcut: string;
+  launcherShortcut: string;
   autoStart: boolean;
 }
 
