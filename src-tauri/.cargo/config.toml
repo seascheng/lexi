@@ -1,0 +1,10 @@
+# Xcode 27 beta workaround (2026-09-15):
+# Xcode 27's new ld emits proc-macro dylibs whose LINKEDIT string table is
+# only 4-byte aligned — macOS 26's dyld rejects them ("mis-aligned LINKEDIT
+# string pool") and the sqlx-macros build dies. Every older linker, in turn,
+# cannot parse the Xcode 27 SDK's .tbd files (arm64e.x1-macos).
+# Fix: link against the Command Line Tools' own SDK + ld (same generation).
+# Remove this file after upgrading to a fixed Xcode.
+[env]
+SDKROOT = "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
+RUSTFLAGS = "-C link-arg=-B/Library/Developer/CommandLineTools/usr/bin/"

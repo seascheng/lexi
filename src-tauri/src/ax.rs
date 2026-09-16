@@ -59,6 +59,11 @@ extern "C" {
     ) -> bool;
     pub(crate) fn AXUIElementPerformAction(element: AXUIElementRef, action: CFStringRef) -> i32;
     pub(crate) fn IsSecureEventInputEnabled() -> bool;
+    pub(crate) fn AXUIElementSetMessagingTimeout(
+        element: AXUIElementRef,
+        timeout: f32,
+    ) -> i32;
+    pub(crate) fn CFBooleanGetValue(boolean: core_foundation::boolean::CFBooleanRef) -> bool;
 }
 
 extern "C" {
@@ -85,6 +90,26 @@ pub(crate) fn accessibility_string_attribute(
 
         let value = CFType::wrap_under_create_rule(value);
         value.downcast::<CFString>().map(|text| text.to_string())
+    }
+}
+
+/// Boolean attribute of an AX element (`AXEnabled`, …).
+pub(crate) fn accessibility_bool_attribute(
+    element: AXUIElementRef,
+    attribute: &'static str,
+) -> Option<bool> {
+    unsafe {
+        let attr = CFString::from_static_string(attribute);
+        let mut value: CFTypeRef = ptr::null();
+        if AXUIElementCopyAttributeValue(element, attr.as_concrete_TypeRef(), &mut value)
+            != AX_ERROR_SUCCESS
+            || value.is_null()
+        {
+            return None;
+        }
+        let is_true = CFBooleanGetValue(value as core_foundation::boolean::CFBooleanRef);
+        CFRelease(value);
+        Some(is_true)
     }
 }
 

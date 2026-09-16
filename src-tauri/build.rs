@@ -11,7 +11,7 @@ fn build_native_selection_toolbar() {
     use std::process::Command;
 
     // Ad-hoc signing for development. For production, use a stable identity via Keychain Access.
-    const SIGNING_IDENTITY: &str = "Lexicon Local Code Signing";
+    const SIGNING_IDENTITY: &str = "Apple Development: chengweipeng123@163.com (D8YJ3P5B53)";
 
     let app_dir = "native/LexiSelectionHelper.app";
     let contents_dir = format!("{app_dir}/Contents");

@@ -6,6 +6,7 @@ import { saveSettings } from "../lib/database";
 import { errorMessage } from "../lib/errors";
 import { isTauriRuntime } from "../lib/platform";
 import { Field, Input, Select, SettingsCard, FieldDivider, Textarea, ToggleSwitch } from "../components/ui/Field";
+import { cn } from "../lib/cn";
 import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 
 interface SettingsPageProps {
@@ -25,11 +26,11 @@ const ACCENT_OPTIONS: { value: AccentColor; color: string }[] = [
 type Section = "appearance" | "popup" | "general" | "ai" | "about";
 
 const SECTIONS: Array<{ id: Section; label: string; icon: JSX.Element }> = [
-  { id: "appearance", label: "Appearance", icon: <Palette size={16} /> },
-  { id: "popup", label: "Popup", icon: <PanelTop size={16} /> },
-  { id: "general", label: "General", icon: <Cog size={16} /> },
-  { id: "ai", label: "AI API", icon: <Sparkles size={16} /> },
-  { id: "about", label: "About", icon: <Info size={16} /> },
+  { id: "appearance", label: "Appearance", icon: <Palette size={15} /> },
+  { id: "popup", label: "Popup", icon: <PanelTop size={15} /> },
+  { id: "general", label: "General", icon: <Cog size={15} /> },
+  { id: "ai", label: "AI API", icon: <Sparkles size={15} /> },
+  { id: "about", label: "About", icon: <Info size={15} /> },
 ];
 
 export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps) {
@@ -108,17 +109,18 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
   return (
     <div className="flex min-h-full flex-col md:h-full">
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        {/* Section list — goty's left column: horizontal chips below md, 216px column above */}
-        <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/30 p-2 md:w-[216px] md:flex-col md:overflow-visible md:border-b-0 md:border-r md:p-2.5">
+        <nav className="flex shrink-0 gap-0.5 overflow-x-auto border-b border-border/30 p-2 md:w-[200px] md:flex-col md:overflow-visible md:border-b-0 md:border-r md:p-2.5">
           {SECTIONS.map(({ id, label, icon }) => {
             const active = section === id;
             return (
               <button
-                className={`flex h-10 shrink-0 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium transition ${
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex h-7 shrink-0 items-center gap-2 rounded-md px-2 text-[13px] font-medium transition-colors",
                   active
                     ? "bg-strong/10 text-strong"
-                    : "text-content hover:bg-strong/5 hover:text-strong"
-                }`}
+                    : "text-muted hover:bg-strong/5 hover:text-strong",
+                )}
                 key={id}
                 onClick={() => setSection(id)}
                 type="button"
@@ -288,18 +290,18 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
             {section === "about" && (
               <section className="mx-auto w-full max-w-[640px]">
                 <header>
-                  <h3 className="text-[17px] font-semibold tracking-tight text-strong">About</h3>
-                  <p className="mt-1 text-[11.5px] leading-relaxed text-muted">Lexi — translate, collect, review.</p>
+                  <h3 className="text-[15px] font-semibold tracking-tight text-strong">About</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-muted">Lexi — translate, collect, review.</p>
                 </header>
-                <div className="mt-4 rounded-xl border border-border bg-panel shadow-sm">
+                <div className="mt-3.5 rounded-xl border border-border/70 bg-panel shadow-sm">
                   <div className="px-4 pb-3.5 pt-3.5">
-                    <div className="text-[10.5px] font-semibold uppercase tracking-wide text-muted">Version</div>
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Version</div>
                     <div className="mt-0.5 font-mono text-[13px] text-strong">0.1.0</div>
                   </div>
                   <div className="mx-4 border-t border-border/40" />
                   <div className="flex items-center gap-2 px-4 py-3.5">
-                    <span className={`h-[7px] w-[7px] rounded-full ${isTauriRuntime() ? "bg-green-500" : "bg-muted/60"}`} />
-                    <span className="text-[11.5px] text-muted">
+                    <span className={cn("size-1.5 rounded-full", isTauriRuntime() ? "bg-emerald-500" : "bg-muted/60")} />
+                    <span className="text-xs text-muted">
                       {isTauriRuntime() ? "Desktop build — data stored in SQLite." : "Browser preview — data stored in localStorage."}
                     </span>
                   </div>
@@ -312,11 +314,18 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
 
       {/* Status strip — goty's 26pt bottom bar */}
       <div className="mt-auto flex h-[26px] shrink-0 items-center justify-between gap-3 border-t border-border/30 px-3">
-        <span className="truncate text-[11.5px] text-muted">Changes save automatically.</span>
+        <span className="truncate text-xs text-muted">Changes save automatically.</span>
         {saveError ? (
-          <span className="truncate text-[11.5px] text-danger">{saveError}</span>
+          <span className="truncate text-xs text-danger">{saveError}</span>
         ) : (
-          <span className="shrink-0 text-[11.5px] text-muted">
+          <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted">
+            <span
+              aria-hidden
+              className={cn(
+                "size-1.5 rounded-full",
+                saveState === "saving" ? "bg-amber-500" : "bg-emerald-500",
+              )}
+            />
             {saveState === "saving" ? "Saving…" : "All changes saved"}
           </span>
         )}
@@ -335,9 +344,10 @@ interface ThemeButtonProps {
 function ThemeButton({ active, icon, label, onClick }: ThemeButtonProps) {
   return (
     <button
-      className={`flex h-6 items-center justify-center gap-1.5 rounded px-2.5 text-xs font-medium transition ${
-        active ? "bg-strong/10 text-strong shadow-sm" : "text-muted hover:text-strong"
-      }`}
+      className={cn(
+        "flex h-[22px] items-center justify-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors",
+        active ? "bg-panel text-strong shadow-sm" : "text-muted hover:text-strong",
+      )}
       onClick={onClick}
       type="button"
     >
@@ -453,11 +463,12 @@ function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
 
   return (
     <button
-      className={`h-[30px] min-w-28 rounded-md border px-2.5 text-center font-mono text-xs transition outline-none ${
+      className={cn(
+        "h-7 min-w-28 rounded-md border px-2.5 text-center font-mono text-xs transition outline-none",
         recording
-          ? "border-accent bg-accent/10 text-accent"
-          : "border-border bg-input text-strong focus:border-accent"
-      }`}
+          ? "border-strong/50 bg-strong/10 text-strong"
+          : "border-border/70 bg-input text-strong hover:border-strong/40 focus:border-strong/50",
+      )}
       onClick={() => setRecording(true)}
       onBlur={() => setRecording(false)}
       type="button"

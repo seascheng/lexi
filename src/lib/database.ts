@@ -197,7 +197,7 @@ export async function listAiFeatures(): Promise<AiFeature[]> {
   const db = await getSqlDatabase();
   const rows = await db.select<AiFeatureRow[]>(
     `SELECT id, name, kind, prompt_template, output_mode, enabled, sort_order,
-            auto_save_to_vocabulary, target_language, speech_enabled, icon, is_builtin, created_at, updated_at
+            auto_save_to_vocabulary, target_language, speech_enabled, thinking, icon, is_builtin, created_at, updated_at
      FROM ai_features
      ORDER BY sort_order ASC, name ASC`,
   );
@@ -226,8 +226,8 @@ export async function saveAiFeature(feature: AiFeature) {
   await db.execute(
     `INSERT INTO ai_features
       (id, name, kind, prompt_template, output_mode, enabled, sort_order,
-       auto_save_to_vocabulary, target_language, speech_enabled, icon, is_builtin, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)
+       auto_save_to_vocabulary, target_language, speech_enabled, thinking, icon, is_builtin, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13, $14)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        kind = excluded.kind,
@@ -238,6 +238,7 @@ export async function saveAiFeature(feature: AiFeature) {
        auto_save_to_vocabulary = excluded.auto_save_to_vocabulary,
        target_language = excluded.target_language,
        speech_enabled = excluded.speech_enabled,
+       thinking = excluded.thinking,
        icon = excluded.icon,
        is_builtin = excluded.is_builtin,
        updated_at = excluded.updated_at`,
@@ -252,6 +253,7 @@ export async function saveAiFeature(feature: AiFeature) {
       normalized.autoSaveToVocabulary ? 1 : 0,
       normalized.targetLanguage,
       normalized.speechEnabled ? 1 : 0,
+      normalized.thinkingEnabled ? 1 : 0,
       normalized.icon,
       normalized.isBuiltin ? 1 : 0,
       now,
@@ -563,6 +565,7 @@ interface AiFeatureRow {
   auto_save_to_vocabulary: number;
   target_language: string | null;
   speech_enabled?: number | null;
+  thinking?: number | null;
   icon?: string | null;
   is_builtin?: number | null;
   created_at: string;
@@ -581,6 +584,7 @@ function aiFeatureFromRow(row: AiFeatureRow): AiFeature {
     autoSaveToVocabulary: row.auto_save_to_vocabulary === 1,
     targetLanguage: row.target_language ?? "",
     speechEnabled: row.speech_enabled === 1,
+    thinkingEnabled: row.thinking === 1,
     icon: parseFeatureIcon(row.icon, parseAiFeatureKind(row.kind)),
     isBuiltin: row.is_builtin === 1,
     createdAt: row.created_at,
@@ -640,6 +644,7 @@ function normalizedAiFeature(feature: Partial<AiFeature>): AiFeature {
     targetLanguage: isTranslation ? stringValue(feature.targetLanguage).trim() || DEFAULT_TRANSLATION_FEATURE.targetLanguage : "",
     speechEnabled: typeof feature.speechEnabled === "boolean" ? feature.speechEnabled : isTranslation,
     icon: parseFeatureIcon(stringValue(feature.icon), builtInFeatureKind(isTranslation) ?? parseAiFeatureKind(stringValue(feature.kind))),
+    thinkingEnabled: feature.thinkingEnabled === true,
     isBuiltin: feature.isBuiltin === true,
     createdAt: stringValue(feature.createdAt),
     updatedAt: stringValue(feature.updatedAt),

@@ -140,6 +140,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/010_cleanup_duplicate_features.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 11,
+            description: "add per-feature thinking toggle",
+            sql: include_str!("../migrations/011_feature_thinking.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

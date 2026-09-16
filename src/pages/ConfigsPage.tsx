@@ -329,6 +329,7 @@ export function ConfigsPage() {
         autoSaveToVocabulary: false,
         targetLanguage: "",
         speechEnabled: false,
+        thinkingEnabled: false,
         icon: "wand",
         isBuiltin: false,
       },
@@ -420,9 +421,9 @@ export function ConfigsPage() {
               : "__none__";
 
   return (
-    <div className="grid h-full min-h-0 overflow-hidden lg:grid-cols-[180px_1fr]">
+    <div className="grid h-full min-h-0 overflow-hidden lg:grid-cols-[200px_1fr]">
       {/* Left Panel */}
-      <div className="grid h-full min-h-0 content-start gap-1 overflow-y-auto border-r border-border/30 px-1 py-2 pr-3 mr-4">
+      <div className="grid h-full min-h-0 content-start gap-0.5 overflow-y-auto border-r border-border/30 p-2">
         {/* Workspace Section */}
         <NavItem
           icon={<PanelIcon />}
@@ -549,7 +550,7 @@ export function ConfigsPage() {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="mt-2 text-xs font-semibold uppercase tracking-wider text-muted">
+    <h3 className="mb-0.5 mt-2 px-2 text-[11px] font-medium uppercase tracking-wide text-muted">
       {children}
     </h3>
   );
@@ -572,19 +573,19 @@ function NavItem({
 }) {
   return (
     <button
-      className={`flex items-center gap-2 rounded-md px-2 py-1 text-left transition ${
+      className={`flex h-7 items-center gap-2 rounded-md px-2 text-left transition-colors ${
         indent ? "pl-6" : ""
       } ${
         active
-          ? "bg-accent text-accentForeground"
-          : "text-muted hover:bg-surface hover:text-strong"
+          ? "bg-strong/10 text-strong"
+          : "text-muted hover:bg-strong/5 hover:text-strong"
       }`}
       onClick={onClick}
       type="button"
     >
       {icon}
-      <span className="min-w-0 flex-1 truncate text-sm">{label}</span>
-      {badge ? <span className="text-[10px] text-muted">{badge}</span> : null}
+      <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{label}</span>
+      {badge ? <span className="text-[10px] text-muted/80">{badge}</span> : null}
     </button>
   );
 }
@@ -705,8 +706,8 @@ function ToolbarConfigPanel({
     <>
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Toolbar Config</h2>
-          <p className="text-sm text-muted">
+          <h2 className="text-[15px] font-semibold">Toolbar Config</h2>
+          <p className="text-xs text-muted">
             Drag to reorder. Toggle to show/hide.
           </p>
         </div>
@@ -719,14 +720,14 @@ function ToolbarConfigPanel({
       {/* Preview — mimics native macOS toolbar */}
       <div className="flex justify-center py-2">
         <div
-          className="inline-flex h-[30px] items-center overflow-hidden rounded-[8px] shadow-lg"
+          className="inline-flex h-7 items-center overflow-hidden rounded-[8px] shadow-lg"
           style={{
             background: previewStyle.background,
             opacity: toolbarEnabled ? 1 : 0.55,
           }}
         >
           <div
-            className="flex h-[30px] w-[18px] cursor-grab items-center justify-center active:cursor-grabbing"
+            className="flex h-7 w-4 cursor-grab items-center justify-center active:cursor-grabbing"
             style={{ color: previewStyle.handle }}
             title="Move toolbar"
           >
@@ -734,12 +735,12 @@ function ToolbarConfigPanel({
           </div>
           {enabledItems.map((item) => (
             <div
-              className="flex items-center justify-center rounded-md"
+              className="mx-[3px] flex items-center justify-center rounded-md"
               key={item.id}
-              style={{ width: 34, height: 30, color: previewStyle.icon }}
+              style={{ width: 30, height: 22, color: previewStyle.icon }}
               title={item.name}
             >
-              <FeatureIcon icon={item.icon} size={16} />
+              <FeatureIcon icon={item.icon} size={14} />
             </div>
           ))}
           {enabledItems.length === 0 && (
@@ -765,12 +766,12 @@ function ToolbarConfigPanel({
             ref={(el) => {
               rowRefs.current[idx] = el;
             }}
-            className={`flex items-center gap-2 rounded-md border px-2.5 py-2 transition select-none ${
+            className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition select-none ${
               dragIdx === idx
-                ? "border-accent bg-accent/10 opacity-50"
+                ? "border border-strong/40 bg-strong/10 opacity-50"
                 : dropIdx === idx
-                  ? "border-accent bg-accent/5"
-                  : "border-border bg-surface hover:bg-surfaceHover"
+                  ? "border border-strong/40 bg-strong/10"
+                  : "bg-strong/5 hover:bg-strong/10"
             }`}
           >
             <div
@@ -792,7 +793,7 @@ function ToolbarConfigPanel({
               </svg>
             </div>
             <FeatureIcon icon={item.icon} size={15} />
-            <span className="min-w-0 flex-1 truncate text-sm text-strong">
+            <span className="min-w-0 flex-1 truncate text-[13px] text-strong">
               {item.name}
             </span>
             <span className="text-[10px] text-muted">
@@ -920,19 +921,19 @@ function WorkspaceConfigPanel({
   return (
     <>
       <div>
-        <h2 className="text-lg font-semibold">Workspace</h2>
-        <p className="text-sm text-muted">
+        <h2 className="text-[15px] font-semibold">Workspace</h2>
+        <p className="text-xs text-muted">
           Manage popup panels. Drag to reorder, toggle to show/hide.
         </p>
       </div>
 
       {/* Preview — popup panel tabs */}
       <div className="flex justify-center py-2">
-        <div className="inline-flex items-center gap-0.5 rounded-md bg-surface p-0.5">
+        <div className="inline-flex items-center gap-0.5 rounded-md bg-strong/5 p-0.5">
           {enabledPanels.map((panel) => (
             <div
               key={panel.id}
-              className="flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium text-strong bg-accent/20"
+              className="flex items-center gap-1 rounded bg-strong/10 px-2 py-0.5 text-xs font-medium text-strong"
             >
               <FeatureIcon icon={panel.icon} size={12} />
               {panel.name}
@@ -956,12 +957,12 @@ function WorkspaceConfigPanel({
             ref={(el) => {
               rowRefs.current[idx] = el;
             }}
-            className={`flex items-center gap-2 rounded-md border px-2.5 py-2 transition select-none ${
+            className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition select-none ${
               dragIdx === idx
-                ? "border-accent bg-accent/10 opacity-50"
+                ? "border border-strong/40 bg-strong/10 opacity-50"
                 : dropIdx === idx
-                  ? "border-accent bg-accent/5"
-                  : "border-border bg-surface hover:bg-surfaceHover"
+                  ? "border border-strong/40 bg-strong/10"
+                  : "bg-strong/5 hover:bg-strong/10"
             }`}
           >
             <div
@@ -983,7 +984,7 @@ function WorkspaceConfigPanel({
               </svg>
             </div>
             <FeatureIcon icon={panel.icon} size={15} />
-            <span className="min-w-0 flex-1 truncate text-sm text-strong">
+            <span className="min-w-0 flex-1 truncate text-[13px] text-strong">
               {panel.name}
             </span>
             <ToggleSwitch
@@ -1061,15 +1062,15 @@ function PanelConfigPanel({
   return (
     <>
       <div>
-        <h2 className="text-lg font-semibold">Panel Config</h2>
-        <p className="text-sm text-muted">
+        <h2 className="text-[15px] font-semibold">Panel Config</h2>
+        <p className="text-xs text-muted">
           Configure action buttons in the popup input area.
         </p>
       </div>
 
       {/* Preview — popup action bar */}
       <div className="flex justify-center py-2">
-        <div className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-surface px-2 py-1.5">
+        <div className="inline-flex items-center gap-0.5 rounded-lg border border-border/70 bg-strong/5 px-2 py-1.5">
           {enabledItems.map((item) => (
             <div
               className="flex h-7 w-7 items-center justify-center rounded-md text-strong"
@@ -1097,12 +1098,12 @@ function PanelConfigPanel({
             ref={(el) => {
               rowRefs.current[idx] = el;
             }}
-            className={`flex items-center gap-2 rounded-md border px-2.5 py-2 transition select-none ${
+            className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition select-none ${
               dragIdx === idx
-                ? "border-accent bg-accent/10 opacity-50"
+                ? "border border-strong/40 bg-strong/10 opacity-50"
                 : dropIdx === idx
-                  ? "border-accent bg-accent/5"
-                  : "border-border bg-surface hover:bg-surfaceHover"
+                  ? "border border-strong/40 bg-strong/10"
+                  : "bg-strong/5 hover:bg-strong/10"
             }`}
           >
             <div
@@ -1124,7 +1125,7 @@ function PanelConfigPanel({
               </svg>
             </div>
             <FeatureIcon icon={item.icon} size={15} />
-            <span className="min-w-0 flex-1 truncate text-sm text-strong">
+            <span className="min-w-0 flex-1 truncate text-[13px] text-strong">
               {item.name}
             </span>
             <span className="text-[10px] text-muted">
@@ -1158,8 +1159,8 @@ function ToolConfigPanel({
     <>
       <div className="flex items-start justify-between gap-2.5">
         <div>
-          <h2 className="text-lg font-semibold">{tool.name}</h2>
-          <p className="text-sm text-muted">{TOOL_DESCRIPTIONS[tool.id]}</p>
+          <h2 className="text-[15px] font-semibold">{tool.name}</h2>
+          <p className="text-xs text-muted">{TOOL_DESCRIPTIONS[tool.id]}</p>
         </div>
       </div>
 
@@ -1168,8 +1169,8 @@ function ToolConfigPanel({
       </Field>
 
       {tool.id === "copy" && (
-        <div className="rounded-md bg-surface/50 px-3 py-2">
-          <p className="text-sm text-muted">
+        <div className="rounded-md bg-strong/5 px-3 py-2">
+          <p className="text-[13px] text-muted">
             Copies selected text to clipboard. No additional configuration.
           </p>
         </div>
@@ -1316,10 +1317,10 @@ function FeatureConfigPanel({
     <>
       <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold">
+          <h2 className="text-[15px] font-semibold">
             {activeFeature ? "Edit feature" : "New feature"}
           </h2>
-          <p className="text-sm text-muted">
+          <p className="text-xs text-muted">
             {draft.kind === "translation"
               ? "Built-in translation feature for selected text."
               : "Plain text AI result shown in the popup workspace."}
@@ -1368,6 +1369,18 @@ function FeatureConfigPanel({
         />
       </Field>
 
+      <div className="flex items-center justify-between rounded-md bg-surface/50 px-3 py-2">
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium text-strong">Thinking mode</div>
+          <div className="text-xs leading-5 text-muted">
+            Let the model reason before answering. Slower first token, deeper analysis.
+          </div>
+        </div>
+        <ToggleSwitch
+          checked={draft.thinkingEnabled}
+          onChange={(thinkingEnabled) => onUpdate({ thinkingEnabled })}
+        />
+      </div>
       <div className="rounded-md bg-surface/50 px-3 py-2 text-xs leading-5 text-muted">
         Output:{" "}
         {draft.outputMode === "translation_json"
@@ -1511,7 +1524,7 @@ function NoteTagConfig() {
       {/* Tag list */}
       <div className="grid gap-1">
         {tags.map((tag) => (
-          <div key={tag.id} className="flex items-center gap-2 rounded-md bg-surface/50 px-2.5 py-1.5">
+          <div key={tag.id} className="flex items-center gap-2 rounded-md bg-strong/5 px-2.5 py-1.5 transition-colors hover:bg-strong/10">
             {editingId === tag.id ? (
               <>
                 <Input
@@ -1525,7 +1538,7 @@ function NoteTagConfig() {
               </>
             ) : (
               <>
-                <span className="flex-1 text-sm text-strong">{tag.name}</span>
+                <span className="flex-1 text-[13px] text-strong">{tag.name}</span>
                 <Button onClick={() => startRename(tag)} variant="ghost" className="h-6 min-h-6 px-1 text-xs text-muted/50 hover:text-strong">
                   Rename
                 </Button>

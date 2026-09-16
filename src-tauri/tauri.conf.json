@@ -35,7 +35,7 @@
       "app"
     ],
     "macOS": {
-      "signingIdentity": "Lexicon Local Code Signing"
+      "signingIdentity": "Apple Development: chengweipeng123@163.com (D8YJ3P5B53)"
     },
     "resources": [
       "native/LexiSelectionHelper.app"

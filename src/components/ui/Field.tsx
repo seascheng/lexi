@@ -14,10 +14,10 @@ interface FieldProps {
 export function Field({ label, children, hint, inline, className }: FieldProps) {
   if (inline) {
     return (
-      <div className={cn("flex h-14 items-center justify-between gap-3 px-4", className)}>
+      <div className={cn("flex min-h-14 items-center justify-between gap-3 px-4 py-2", className)}>
         <div className="min-w-0">
-          <div className="truncate text-[13px] font-medium text-strong">{label}</div>
-          {hint ? <div className="mt-0.5 truncate text-[11px] leading-relaxed text-muted">{hint}</div> : null}
+          <div className="truncate text-[13px] font-medium leading-tight text-strong">{label}</div>
+          {hint ? <div className="mt-1 text-xs leading-snug text-muted">{hint}</div> : null}
         </div>
         <div className="shrink-0">{children}</div>
       </div>
@@ -36,7 +36,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
   return (
     <input
       className={cn(
-        "h-[30px] rounded-md border border-border bg-input px-2.5 text-sm text-strong outline-none transition placeholder:text-muted focus:border-accent",
+        "h-7 rounded-md border border-border/70 bg-input px-2.5 text-[13px] text-strong outline-none transition placeholder:text-muted focus:border-strong/50",
         className,
       )}
       {...props}
@@ -48,7 +48,7 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
   return (
     <textarea
       className={cn(
-        "min-h-20 rounded-md border border-border bg-input px-2.5 py-2 text-sm text-strong outline-none transition placeholder:text-muted focus:border-accent",
+        "min-h-20 rounded-md border border-border/70 bg-input px-2.5 py-1.5 text-[13px] text-strong outline-none transition placeholder:text-muted focus:border-strong/50",
         className,
       )}
       {...props}
@@ -61,7 +61,7 @@ export function Select({ className, children, ...props }: SelectHTMLAttributes<H
     <div className="relative inline-flex">
       <select
         className={cn(
-          "h-[30px] cursor-pointer appearance-none rounded-md border border-border bg-transparent pl-2.5 pr-7 text-sm text-strong outline-none transition hover:border-strong/40 focus:border-accent",
+          "h-7 cursor-pointer appearance-none rounded-md border border-border/70 bg-transparent pl-2.5 pr-6 text-[13px] text-strong outline-none transition hover:border-strong/40 focus:border-strong/50",
           className,
         )}
         {...props}
@@ -127,10 +127,10 @@ export function SettingsCard({
   return (
     <section className={cn("mx-auto w-full max-w-[640px]", className)}>
       <header>
-        <h3 className="text-[17px] font-semibold tracking-tight text-strong">{title}</h3>
-        {description ? <p className="mt-1 text-[11.5px] leading-relaxed text-muted">{description}</p> : null}
+        <h3 className="text-[15px] font-semibold tracking-tight text-strong">{title}</h3>
+        {description ? <p className="mt-1 text-xs leading-relaxed text-muted">{description}</p> : null}
       </header>
-      <div className="mt-4 rounded-xl border border-border bg-panel shadow-sm">{children}</div>
+      <div className="mt-3.5 rounded-xl border border-border/70 bg-panel shadow-sm">{children}</div>
     </section>
   );
 }

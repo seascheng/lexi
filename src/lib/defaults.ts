@@ -41,6 +41,7 @@ export const DEFAULT_TRANSLATION_FEATURE: AiFeature = {
   autoSaveToVocabulary: true,
   targetLanguage: "Chinese",
   speechEnabled: true,
+  thinkingEnabled: false,
   icon: "languages",
   isBuiltin: true,
 };
@@ -80,6 +81,7 @@ export const DEFAULT_EXTRACT_FEATURE: AiFeature = {
   autoSaveToVocabulary: false,
   targetLanguage: "Chinese",
   speechEnabled: false,
+  thinkingEnabled: false,
   icon: "highlighter",
   isBuiltin: true,
 };
@@ -116,6 +118,7 @@ export const DEFAULT_REWRITE_FEATURE: AiFeature = {
   autoSaveToVocabulary: false,
   targetLanguage: "Chinese",
   speechEnabled: false,
+  thinkingEnabled: false,
   icon: "wand",
   isBuiltin: true,
 };
@@ -139,6 +142,7 @@ export const DEFAULT_AI_FEATURE: AiFeature = {
   autoSaveToVocabulary: false,
   targetLanguage: "Chinese",
   speechEnabled: false,
+  thinkingEnabled: false,
   icon: "sparkles",
   isBuiltin: true,
 };

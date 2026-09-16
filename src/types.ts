@@ -75,6 +75,7 @@ export interface AiFeature {
   autoSaveToVocabulary: boolean;
   targetLanguage: string;
   speechEnabled: boolean;
+  thinkingEnabled: boolean;
   icon: AiFeatureIcon;
   isBuiltin: boolean;
   createdAt?: string;

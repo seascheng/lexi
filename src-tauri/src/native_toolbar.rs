@@ -1,8 +1,9 @@
 use crate::cursor::{cursor_position, mouse_location, CursorPosition};
 use crate::ax::{
-    accessibility_string_attribute, ax_children, ax_focused_application,
-    copy_ax_element_attribute, copy_marker_range, drain_autorelease_pool, frontmost_pid,
-    new_autorelease_pool, objc_getClass, objc_msgSend, sel_registerName, AX_ERROR_SUCCESS,
+    accessibility_bool_attribute, accessibility_string_attribute, ax_children,
+    ax_focused_application, copy_ax_element_attribute, copy_marker_range,
+    drain_autorelease_pool, frontmost_pid, new_autorelease_pool, objc_getClass, objc_msgSend,
+    sel_registerName, AXUIElementSetMessagingTimeout, AX_ERROR_SUCCESS,
     AXUIElementCopyAttributeValue, AXUIElementCopyElementAtPosition,
     AXUIElementCopyParameterizedAttributeValue, AXUIElementCreateSystemWide, AXUIElementGetPid,
     AXUIElementPerformAction, AXValueGetValue, AXUIElementRef, CFArrayGetCount,
@@ -19,6 +20,82 @@ use core_graphics::event::{
 use core_graphics::display::CGDisplay;
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use serde::{Deserialize, Serialize};
+
+// Window-bounds FFI for the drag detector: CGWindowList (the window server)
+// answers for every app, including self-drawn editors whose degenerate AX
+// trees expose no AXFocusedWindow at all (Sublime).
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGWindowListCopyWindowInfo(options: u32, relative_to: u32) -> *const std::ffi::c_void;
+    fn CGRectMakeWithDictionaryRepresentation(
+        dict: *const std::ffi::c_void,
+        rect: *mut core_graphics::geometry::CGRect,
+    ) -> bool;
+}
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    fn CFDictionaryGetValue(
+        dict: *const std::ffi::c_void,
+        key: CFStringRef,
+    ) -> *const std::ffi::c_void;
+    fn CFNumberGetValue(
+        number: *const std::ffi::c_void,
+        the_type: isize,
+        value_ptr: *mut std::ffi::c_void,
+    ) -> bool;
+}
+
+/// Origin (CG global top-left coords — the same space CGEvent locations
+/// use) of the frontmost normal window owned by `pid`, via CGWindowList.
+/// Layer-0 filter skips menus, desktop and overlay windows.
+unsafe fn cg_window_origin(pid: i32) -> Option<(f64, f64)> {
+    const ON_SCREEN_ONLY: u32 = 1 << 0;
+    let list = CGWindowListCopyWindowInfo(ON_SCREEN_ONLY, 0);
+    if list.is_null() {
+        return None;
+    }
+    let count = CFArrayGetCount(list);
+    let mut result = None;
+    for i in 0..count {
+        let dict = CFArrayGetValueAtIndex(list, i);
+        if dict.is_null() {
+            continue;
+        }
+        let pid_key = CFString::from_static_string("kCGWindowOwnerPID");
+        let value = CFDictionaryGetValue(dict, pid_key.as_concrete_TypeRef());
+        let mut owner: i32 = 0;
+        if value.is_null()
+            || !CFNumberGetValue(value, 3, &mut owner as *mut i32 as *mut std::ffi::c_void)
+            || owner != pid
+        {
+            continue;
+        }
+        let layer_key = CFString::from_static_string("kCGWindowLayer");
+        let layer_value = CFDictionaryGetValue(dict, layer_key.as_concrete_TypeRef());
+        let mut layer: i32 = -1;
+        if !layer_value.is_null()
+            && CFNumberGetValue(layer_value, 3, &mut layer as *mut i32 as *mut std::ffi::c_void)
+            && layer != 0
+        {
+            continue;
+        }
+        let bounds_key = CFString::from_static_string("kCGWindowBounds");
+        let bounds = CFDictionaryGetValue(dict, bounds_key.as_concrete_TypeRef());
+        if bounds.is_null() {
+            continue;
+        }
+        let mut rect = core_graphics::geometry::CGRect {
+            origin: core_graphics::geometry::CGPoint { x: 0.0, y: 0.0 },
+            size: core_graphics::geometry::CGSize { width: 0.0, height: 0.0 },
+        };
+        if CGRectMakeWithDictionaryRepresentation(bounds, &mut rect) {
+            result = Some((rect.origin.x, rect.origin.y));
+            break;
+        }
+    }
+    CFRelease(list);
+    result
+}
 use std::env;
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Read, Write};
@@ -291,7 +368,7 @@ fn show_result_card(app: &tauri::AppHandle, text: &str, feature_id: &str) {
     let Some(rows) = sqlite_query_json(
         app,
         &format!(
-            "SELECT name, prompt_template, output_mode, IFNULL(target_language,'') AS target_language, IFNULL(icon,'wand') AS icon, auto_save_to_vocabulary FROM ai_features WHERE id = '{escaped_id}';"
+            "SELECT name, prompt_template, output_mode, IFNULL(target_language,'') AS target_language, IFNULL(icon,'wand') AS icon, auto_save_to_vocabulary, IFNULL(thinking,0) AS thinking FROM ai_features WHERE id = '{escaped_id}';"
         ),
     ) else {
         log_native("card: feature not found");
@@ -357,6 +434,7 @@ fn show_result_card(app: &tauri::AppHandle, text: &str, feature_id: &str) {
         output_mode: feature["output_mode"].as_str().unwrap_or("plain_text").to_string(),
         target_language: Some(feature["target_language"].as_str().unwrap_or("").to_string())
             .filter(|t| !t.is_empty()),
+        thinking_enabled: feature["thinking"].as_i64().unwrap_or(0) == 1,
     };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -1411,6 +1489,12 @@ struct ClickState {
     /// `None` = still pending, `Some(None)` = no selection, `Some(Some(t))` =
     /// the selected text. Compared on mouse-up to reject stale selections.
     pre_selection: Arc<Mutex<Option<Option<String>>>>,
+    /// Focused-window origin at mouse-down (same Option<Option> contract).
+    /// A window that moved by mouse-up was DRAGGED (title bar / resize /
+    /// space-drag) — a text selection never moves the window. Self-drawn
+    /// editors report `AXWindow` for their whole text area, so the role gate
+    /// can't reject these drags anymore; this check can, exactly.
+    pre_window_origin: Arc<Mutex<Option<Option<(f64, f64)>>>>,
 }
 
 fn spawn_selection_monitor(app: tauri::AppHandle, toolbar_port: u16) {
@@ -1460,11 +1544,13 @@ fn handle_system_event(
             // work is deferred to worker threads.
             let loc = event.location();
             let pre_selection: Arc<Mutex<Option<Option<String>>>> = Arc::new(Mutex::new(None));
+            let pre_window_origin: Arc<Mutex<Option<Option<(f64, f64)>>>> = Arc::new(Mutex::new(None));
             if let Ok(mut state) = click_state.lock() {
                 *state = Some(ClickState {
                     down_x: loc.x,
                     down_y: loc.y,
                     pre_selection: pre_selection.clone(),
+                    pre_window_origin: pre_window_origin.clone(),
                 });
             }
 
@@ -1472,12 +1558,29 @@ fn handle_system_event(
             // Snapshot the selection NOW, before the app processes this
             // mouse-down and mutates it — on mouse-up we compare against it so
             // a stale selection (still shown by browsers after a plain click)
-            // doesn't pop the toolbar. Runs off the tap thread.
+            // doesn't pop the toolbar. Runs off the tap thread. The focused
+            // window's origin is snapshotted the same way: a window that moved
+            // by mouse-up was dragged, not text-selected.
             let app = app.clone();
             thread::spawn(move || {
                 if !toolbar_enabled_for_app(&app) || active_toolbar_actions().is_none() {
                     return;
                 }
+                // Window origin FIRST: even a degenerate AX tree (Sublime —
+                // bare window element) answers AXFocusedWindow/AXPosition
+                // fast, while the selection read below can hang for the
+                // default 6s timeout on such apps. The mouse-up drag check
+                // needs the origin captured well before release.
+                let origin = unsafe { frontmost_pid() }.and_then(|pid| unsafe {
+                    cg_window_origin(pid)
+                });
+                if let Ok(mut cell) = pre_window_origin.lock() {
+                    *cell = Some(origin);
+                }
+
+                // Snapshot the selection NOW, before the app processes this
+                // mouse-down and mutates it — on mouse-up we compare against it
+                // so a stale selection doesn't pop the toolbar.
                 let _selection = selection_read_guard();
                 let pre = read_selected_text_via_ax().map(|s| s.trim().to_string());
                 if let Ok(mut cell) = pre_selection.lock() {
@@ -1487,9 +1590,10 @@ fn handle_system_event(
         }
         CGEventType::LeftMouseUp => {
             let state = click_state.lock().ok().and_then(|mut s| s.take());
-            let Some(ClickState { down_x, down_y, pre_selection }) = state else {
+            let Some(ClickState { down_x, down_y, pre_selection, pre_window_origin }) = state else {
                 return CallbackResult::Keep;
             };
+
 
             // Cheap, non-AX work only — see LeftMouseDown. Everything slow runs
             // on a worker thread so the tap never blocks.
@@ -1533,6 +1637,43 @@ fn handle_system_event(
                 // fallbacks, so they never pop the toolbar.
                 if !is_text_area_at_position(down_x, down_y) {
                     return;
+                }
+
+                // A moved window between down and up = the press was a window
+                // drag (title bar, resize, space-drag) — never a selection,
+                // regardless of what the copy tiers would still find from an
+                // older selection. `None` (no window / read failed) never
+                // blocks; a still-pending snapshot (fast drag before the
+                // down-worker's AX round-trip) gets a short grace wait.
+                let mut pre_origin = pre_window_origin
+                    .lock()
+                    .ok()
+                    .and_then(|mut s| s.take().flatten());
+                if pre_origin.is_none() {
+                    for _ in 0..20 {
+                        thread::sleep(Duration::from_millis(10));
+                        pre_origin = pre_window_origin
+                            .lock()
+                            .ok()
+                            .and_then(|mut s| s.take().flatten());
+                        if pre_origin.is_some() {
+                            break;
+                        }
+                    }
+                }
+                match pre_origin {
+                    Some(pre) => {
+                        let moved = unsafe { frontmost_pid() }
+                            .and_then(|pid| unsafe { cg_window_origin(pid) })
+                            .map(|now| (now.0 - pre.0).abs() > 1.0 || (now.1 - pre.1).abs() > 1.0);
+                        if moved == Some(true) {
+                            log_native("window moved during press — drag, not selection; skipping");
+                            return;
+                        }
+                    }
+                    None => {
+                        log_native("window-origin snapshot unavailable; drag check skipped");
+                    }
                 }
 
                 // The selection must be NEW: identical to what was selected
@@ -1696,9 +1837,14 @@ fn is_text_area_at_position(x: f64, y: f64) -> bool {
 
         let role = accessibility_string_attribute(element, "AXRole");
         CFRelease(element as CFTypeRef);
-
+        // NO `AXWindow` here: self-drawn editors report the bare window for
+        // their whole text area (Sublime, terminals, some Electron hosts) —
+        // blocking it gates out their ONLY path (openclip's default
+        // skipRoles excludes it too). Window-background drags stay safe via
+        // the selection-gesture check plus the copy tiers' pasteboard-bump
+        // guard: no real selection → no toolbar.
         match role.as_deref() {
-            Some("AXWindow") | Some("AXToolbar") | Some("AXButton") |
+            Some("AXToolbar") | Some("AXButton") |
             Some("AXPopUpButton") | Some("AXCheckBox") | Some("AXRadioButton") |
             Some("AXMenuBar") | Some("AXMenuBarItem") | Some("AXMenuItem") |
             Some("AXScrollBar") | Some("AXSlider") | Some("AXStepper") |
@@ -2249,8 +2395,12 @@ fn read_selected_text_via_menu() -> Option<String> {
         log_native("menu-read: no focused application");
         return None;
     };
+    // A hung app must never block the worker: bound every AX round-trip
+    // against it (openclip AXMenuNavigator sets this before each read).
+    unsafe { AXUIElementSetMessagingTimeout(app, 1.5) };
     if let Some(pid) = unsafe { frontmost_pid() } {
-        log_native(&format!("menu-read: focused app pid={pid}"));
+        let bundle = unsafe { frontmost_bundle_id() }.unwrap_or_else(|| "?".into());
+        log_native(&format!("menu-read: focused app pid={pid} ({bundle})"));
     }
 
     let result = unsafe { find_copy_menu_item(app) }.and_then(|copy_item| {
@@ -2273,13 +2423,18 @@ unsafe fn perform_menu_copy_and_read(
     pre_text: Option<&str>,
 ) -> Option<String> {
     let count_before = pasteboard_change_count();
+    // Bound every AX round-trip against a hung app (openclip sets this on
+    // the item before AXPress).
+    unsafe { AXUIElementSetMessagingTimeout(copy_item, 1.5) };
 
     let action = CFString::from_static_string("AXPress");
     let _ = AXUIElementPerformAction(copy_item, action.as_concrete_TypeRef());
 
-    // Copy is async — poll the pasteboard changeCount (max ~250ms).
+    // Copy is async — poll the pasteboard changeCount on the per-app budget
+    // (browsers resolve clipboard writes over async IPC and need longer).
+    let budget_ms = clipboard_poll_budget_ms();
     let mut bumped = false;
-    for _ in 0..25 {
+    for _ in 0..(budget_ms / 10).max(1) {
         thread::sleep(Duration::from_millis(10));
         if pasteboard_change_count() > count_before {
             bumped = true;
@@ -2287,8 +2442,10 @@ unsafe fn perform_menu_copy_and_read(
         }
     }
 
-    // Read the selection BEFORE restoring (restore overwrites it).
+    // Read the selection BEFORE restoring (restore overwrites it), after a
+    // short settle so a multi-write clipboard update lands fully first.
     let text = if bumped {
+        thread::sleep(Duration::from_millis(PASTEBOARD_RESTORE_DELAY_MS));
         read_pasteboard_string_via_pb()
     } else {
         None
@@ -2359,23 +2516,35 @@ fn read_selected_text_via_cmd_c() -> Option<String> {
 
 pub(crate) const CMD_KEYCODE: u16 = 0x37; // kVK_Command
 
-/// Post the full Cmd+C sequence to `pid`, wait for the pasteboard, read, restore.
+/// Post the full Cmd+C sequence, wait for the pasteboard, read, restore.
+///
+/// Events go to the SESSION tap (not `post_to_pid`), built on a
+/// `combinedSessionState` source with the 0x8 hardware bit set — the
+/// openclip `SessionEventTapPoster` recipe. Chromium-family and self-drawn
+/// editors (Chrome, Electron hosts, Sublime) ignore pid-posted synthetic
+/// keyboard events, but session-tap events ride the normal dispatch path
+/// and are honored like real keys.
 unsafe fn post_cmd_c_and_read(pid: i32, pre_text: Option<&str>) -> Option<String> {
     let count_before = pasteboard_change_count();
+    let bundle = frontmost_bundle_id().unwrap_or_else(|| "?".into());
     let cmd = CGEventFlags::CGEventFlagCommand;
 
-    let cmd_down = flags_changed_event(CMD_KEYCODE, cmd)?;
-    cmd_down.post_to_pid(pid);
-    let c_down = key_event(KeyCode::ANSI_C, true, cmd)?;
-    c_down.post_to_pid(pid);
-    let c_up = key_event(KeyCode::ANSI_C, false, cmd)?;
-    c_up.post_to_pid(pid);
-    let cmd_up = flags_changed_event(CMD_KEYCODE, CGEventFlags::empty())?;
-    cmd_up.post_to_pid(pid);
+    let cmd_down = session_flags_changed_event(CMD_KEYCODE, cmd)?;
+    cmd_down.post(CGEventTapLocation::Session);
+    let c_down = session_key_event(KeyCode::ANSI_C, true, cmd)?;
+    c_down.post(CGEventTapLocation::Session);
+    let c_up = session_key_event(KeyCode::ANSI_C, false, cmd)?;
+    c_up.post(CGEventTapLocation::Session);
+    let cmd_up = session_flags_changed_event(CMD_KEYCODE, CGEventFlags::empty())?;
+    cmd_up.post(CGEventTapLocation::Session);
 
-    // Cmd+C is async — poll the pasteboard changeCount (max ~300ms).
+    let budget_ms = clipboard_poll_budget_ms();
+    log_native(&format!(
+        "cmdc-read: session-tap Cmd+C posted to pid {pid} ({bundle}), poll budget {budget_ms}ms"
+    ));
+
     let mut bumped = false;
-    for _ in 0..30 {
+    for _ in 0..(budget_ms / 10).max(1) {
         thread::sleep(Duration::from_millis(10));
         if pasteboard_change_count() > count_before {
             bumped = true;
@@ -2384,6 +2553,9 @@ unsafe fn post_cmd_c_and_read(pid: i32, pre_text: Option<&str>) -> Option<String
     }
 
     let text = if bumped {
+        // Give the app's (possibly multi-write) clipboard update a moment to
+        // land before reading — restoring immediately races the late writes.
+        thread::sleep(Duration::from_millis(PASTEBOARD_RESTORE_DELAY_MS));
         read_pasteboard_string_via_pb()
     } else {
         None
@@ -2396,6 +2568,49 @@ unsafe fn post_cmd_c_and_read(pid: i32, pre_text: Option<&str>) -> Option<String
         return None;
     }
     text
+}
+
+/// Chromium-family and browser frontmost apps resolve clipboard writes
+/// through asynchronous multi-process IPC — they need a longer changeCount
+/// poll budget than native apps (openclip PasteboardCopyEngine.pollingTimeout).
+fn clipboard_poll_budget_ms() -> u64 {
+    let bundle = unsafe { frontmost_bundle_id() }.unwrap_or_default();
+    let slow = bundle.starts_with("com.google.Chrome")
+        || bundle.starts_with("org.mozilla.")
+        || bundle.starts_with("com.apple.Safari")
+        || bundle.starts_with("com.microsoft.edgemac")
+        || bundle.starts_with("com.brave.")
+        || bundle.starts_with("company.thebrowser.")
+        || bundle.contains("electron")
+        || bundle == "com.goty.ai";
+    if slow { 800 } else { 400 }
+}
+
+/// How long to let the app's clipboard writes settle before we read and
+/// restore (openclip `pasteboardRestoreDelay`).
+const PASTEBOARD_RESTORE_DELAY_MS: u64 = 120;
+
+/// A copy-synthesis key event: combinedSessionState source + the 0x8 bit
+/// hardware events carry (openclip SessionEventTapPoster's resolvedFlags).
+unsafe fn session_key_event(
+    keycode: u16,
+    key_down: bool,
+    flags: CGEventFlags,
+) -> Option<CGEvent> {
+    let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).ok()?;
+    let event = CGEvent::new_keyboard_event(source, keycode, key_down).ok()?;
+    event.set_flags(flags | CGEventFlags::from_bits_retain(0x8));
+    Some(event)
+}
+
+/// A copy-synthesis FlagsChanged event on the same session source.
+unsafe fn session_flags_changed_event(keycode: u16, flags: CGEventFlags) -> Option<CGEvent> {
+    let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).ok()?;
+    let event = CGEvent::new(source).ok()?;
+    event.set_type(CGEventType::FlagsChanged);
+    event.set_flags(flags | CGEventFlags::from_bits_retain(0x8));
+    event.set_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE, keycode as i64);
+    Some(event)
 }
 
 /// A FlagsChanged event — used to press/release a modifier key (here, Cmd) so
@@ -2430,9 +2645,15 @@ unsafe fn find_copy_menu_item(app: AXUIElementRef) -> Option<AXUIElementRef> {
         return None;
     }
     let menubar = menubar_value as AXUIElementRef;
-    let menus = ax_children(menubar);
+    let mut menus = ax_children(menubar);
     CFRelease(menubar as CFTypeRef);
     log_native(&format!("menu-read: {} top-level menu(s)", menus.len()));
+
+    // The Edit menu is standardly the 4th top-level menu (index 3) — search
+    // it first, then the rest (openclip AXMenuNavigator.findMenuItem).
+    if menus.len() > 3 {
+        menus.swap(0, 3);
+    }
 
     let mut seen: Vec<String> = Vec::new();
     let found = find_copy_in_menus(&menus, &mut seen, 0);
@@ -2452,16 +2673,24 @@ unsafe fn find_copy_menu_item(app: AXUIElementRef) -> Option<AXUIElementRef> {
     found
 }
 
-/// Recursive depth-first walk of menu items. Matches an item if its localized
-/// title is a known "Copy", or if its keyboard shortcut is Cmd+C
-/// (`AXMenuItemCmdChar == "c"`, locale-independent). `seen` collects item titles
-/// for diagnostics when nothing matches.
+/// Match by the menu item's action identifier — `copy:` is the standard
+/// selector Copy items carry, independent of localization (openclip
+/// matches `identifier == "copy:"` first).
+unsafe fn is_copy_by_identifier(item: AXUIElementRef) -> bool {
+    accessibility_string_attribute(item, "AXIdentifier").map(|id| id == "copy:") == Some(true)
+}
+/// Recursive depth-first walk of menu items. An item matches when its
+/// action identifier is `copy:` (localization-agnostic), its keyboard
+/// shortcut is Cmd+C (`AXMenuItemCmdChar == "c"`), or its localized title
+/// is a known "Copy" — AND it is enabled (pressing a disabled Copy is a
+/// wasted round-trip: no selection). `seen` collects item titles for
+/// diagnostics when nothing matches. (openclip AXMenuNavigator parity.)
 unsafe fn find_copy_in_menus(
     menus: &[AXUIElementRef],
     seen: &mut Vec<String>,
     depth: u32,
 ) -> Option<AXUIElementRef> {
-    if depth > 4 {
+    if depth > 8 {
         return None;
     }
     for menu in menus {
@@ -2475,7 +2704,13 @@ unsafe fn find_copy_in_menus(
             if !clean.is_empty() && seen.len() < 80 {
                 seen.push(clean);
             }
-            if found_idx.is_none() && (is_copy_menu_title(&title) || is_copy_by_shortcut(*item)) {
+            let enabled = accessibility_bool_attribute(*item, "AXEnabled");
+            if found_idx.is_none()
+                && enabled.unwrap_or(true)
+                && (is_copy_by_identifier(*item)
+                    || is_copy_menu_title(&title)
+                    || is_copy_by_shortcut(*item))
+            {
                 found_idx = Some(i);
             }
         }
@@ -2736,7 +2971,15 @@ pub(crate) fn forward_card_event(
     translation_json: Option<&str>,
     saved: bool,
 ) {
-    if !CARD_UP.load(std::sync::atomic::Ordering::Relaxed) {
+    let up = CARD_UP.load(std::sync::atomic::Ordering::Relaxed);
+    if !up || done {
+        log_native(&format!(
+            "card-event: run={run_id} done={done} up={up} port={:?} chunk_len={}",
+            toolbar_port(),
+            chunk.map(str::len).unwrap_or(0)
+        ));
+    }
+    if !up {
         return;
     }
     let Some(port) = toolbar_port() else { return };
@@ -2749,7 +2992,9 @@ pub(crate) fn forward_card_event(
         "saved": saved,
     });
     if let Ok(body) = serde_json::to_string(&payload) {
-        let _ = post_to_helper(port, "/result-event", &body);
+        if let Err(err) = post_to_helper(port, "/result-event", &body) {
+            log_native(&format!("card-event: post failed: {err}"));
+        }
     }
 }
 

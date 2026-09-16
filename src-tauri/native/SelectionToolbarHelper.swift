@@ -69,14 +69,24 @@ struct CardTheme {
         return secondaryText
     }
 
-    /// tty7 recipe: surface lifted toward the foreground.
-    var hoverFill: NSColor { blend(background, toward: foreground, fraction: isDark ? 0.08 : 0.055) }
+    /// Surface fills are translucent overlays, never opaque blends: the
+    /// panels float on Liquid Glass (or the legacy frosted material), and
+    /// an opaque rectangle reads as a foreign patch on it. Dark themes
+    /// lift with white alpha, light themes shade with black alpha — the
+    /// same rule the toolbar buttons, tag dropdown and run chips use.
+    var hoverFill: NSColor {
+        (isDark ? NSColor.white : NSColor.black).withAlphaComponent(isDark ? 0.08 : 0.055)
+    }
 
     /// One step stronger than hover — the input field surface.
-    var inputFill: NSColor { blend(background, toward: foreground, fraction: isDark ? 0.11 : 0.07) }
+    var inputFill: NSColor {
+        (isDark ? NSColor.white : NSColor.black).withAlphaComponent(isDark ? 0.10 : 0.06)
+    }
 
     /// Selection capsule: same-hue emphasis, not accent blue (goty style).
-    var selectedFill: NSColor { blend(background, toward: foreground, fraction: isDark ? 0.22 : 0.16) }
+    var selectedFill: NSColor {
+        (isDark ? NSColor.white : NSColor.black).withAlphaComponent(isDark ? 0.18 : 0.12)
+    }
 
     /// Icon tint sits near the full foreground.
     var iconTint: NSColor { blend(background, toward: foreground, fraction: 0.85) }
@@ -88,6 +98,50 @@ struct CardTheme {
     var dangerFill: NSColor {
         NSColor(calibratedRed: 0.78, green: 0.22, blue: 0.25, alpha: 1)
     }
+}
+
+/// Panel background material for the three floating surfaces (toolbar bar,
+/// notes list, result card). macOS 26+: Liquid Glass — `NSGlassEffectView`
+/// draws its own rounded shape, tint and specular edge, and content must
+/// live in its `contentView` (z-order is only guaranteed there). Older
+/// systems: the legacy frosted `.menu` vibrancy with a hairline stroke.
+/// Returns (background, content, isGlass): set the panel's contentView to
+/// `background` and add all subviews to `content`.
+private func makePanelBackground(
+    frame: NSRect,
+    cornerRadius: CGFloat
+) -> (background: NSView, content: NSView, isGlass: Bool) {
+    if #available(macOS 26.0, *) {
+        let glass = NSGlassEffectView(frame: frame)
+        glass.autoresizingMask = [.width, .height]
+        glass.cornerRadius = cornerRadius
+        // Key-window focus ring: when the panel becomes key, AppKit paints
+        // the system focus stroke around the glass's RECTANGULAR frame — a
+        // square outline visible outside the rounded glass. Noise on a
+        // floating utility surface: rings off, and clip the layer to the
+        // same radius so any system edge follows the arc, not the frame.
+        glass.focusRingType = .none
+        glass.wantsLayer = true
+        glass.layer?.cornerRadius = cornerRadius
+        glass.layer?.masksToBounds = true
+        let content = NSView(frame: glass.bounds)
+        content.autoresizingMask = [.width, .height]
+        content.focusRingType = .none
+        glass.contentView = content
+        return (glass, content, true)
+    }
+    let vibrancy = NSVisualEffectView(frame: frame)
+    vibrancy.autoresizingMask = [.width, .height]
+    // PopClip-style frosted bar: the material adapts to whatever is behind
+    // it; the accent stroke keeps the edge legible over any background.
+    vibrancy.material = .menu
+    vibrancy.blendingMode = .behindWindow
+    vibrancy.state = .active
+    vibrancy.wantsLayer = true
+    vibrancy.layer?.cornerRadius = cornerRadius
+    vibrancy.layer?.borderWidth = 0.5
+    vibrancy.layer?.masksToBounds = true
+    return (vibrancy, vibrancy, false)
 }
 
 /// File logger usable from any class (the controller's log() is private).
@@ -107,10 +161,10 @@ private enum FileLog {
 private let IPC_HOST = "127.0.0.1"
 private let ACTION_PORT: UInt16 = 43876  // legacy fallback; real port comes from --action-port
 
-private let toolbarHandleWidth: CGFloat = 18
-private let toolbarSegmentWidth: CGFloat = 34
-private let toolbarHeight: CGFloat = 30
-private let toolbarIconSize: CGFloat = 16
+private let toolbarHandleWidth: CGFloat = 16
+private let toolbarSegmentWidth: CGFloat = 30
+private let toolbarHeight: CGFloat = 28
+private let toolbarIconSize: CGFloat = 14
 private let toolbarVerticalGap: CGFloat = 6
 private let notesPanelWidth: CGFloat = 380
 private let resultCardWidth: CGFloat = 420
@@ -149,6 +203,17 @@ private func lucideImage(for icon: String, title: String, color: NSColor? = nil)
     image.size = NSSize(width: toolbarIconSize, height: toolbarIconSize)
     image.accessibilityDescription = title
     return image
+}
+
+/// Deterministic tag → hue mapping: the same tag always lands on the same
+/// traffic-light color in both themes (the row dot and the tag pill share it).
+private func tagColor(for tag: String, dark: Bool) -> NSColor {
+    guard !tag.isEmpty else { return .clear }
+    var hash: UInt64 = 5381
+    for scalar in tag.unicodeScalars { hash = hash &* 33 &+ UInt64(scalar.value) }
+    let hue = CGFloat(hash % 360) / 360.0
+    return NSColor(hue: hue, saturation: dark ? 0.62 : 0.72,
+                   brightness: dark ? 0.98 : 0.58, alpha: 1)
 }
 
 private func lucideMarkup(for icon: String) -> String {
@@ -507,6 +572,7 @@ private final class ToolbarButton: NSButton {
 
     private func setup() {
         wantsLayer = true
+        // Small-radius highlight: the inset capsule gets a quiet 6pt corner.
         layer?.cornerRadius = 6
         layer?.masksToBounds = true
         isBordered = false
@@ -592,13 +658,12 @@ private final class ToolbarDragHandle: NSView {
         super.draw(dirtyRect)
         let color = theme.iconColor.withAlphaComponent(theme == .dark ? 0.55 : 0.42)
         color.setStroke()
-
         let path = NSBezierPath()
-        path.lineWidth = 1.5
+        path.lineWidth = 1.25
         path.lineCapStyle = .round
-        let top = bounds.midY + 5
-        let bottom = bounds.midY - 5
-        for x in [bounds.midX - 2.5, bounds.midX + 2.5] {
+        let top = bounds.midY + 4
+        let bottom = bounds.midY - 4
+        for x in [bounds.midX - 2, bounds.midX + 2] {
             path.move(to: NSPoint(x: x, y: bottom))
             path.line(to: NSPoint(x: x, y: top))
         }
@@ -681,11 +746,18 @@ private final class HoverIconButton: NSButton {
 /// "scroll up and down" in place.
 private final class HorizontalOnlyClip: NSScrollView {
     weak var verticalForward: NSScrollView?
+    /// Notes list: vertical deltas must reach THIS scroll view's table
+    /// (native scrolling) instead of being dropped like the one-line strips.
+    var allowsVertical = false
 
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func scrollWheel(with event: NSEvent) {
         if abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) {
+            if allowsVertical {
+                super.scrollWheel(with: event)
+                return
+            }
             if let forward = verticalForward {
                 forward.scrollWheel(with: event)
             }
@@ -790,7 +862,7 @@ private final class CardResizeZone: NSView {
 
 final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var panel: NSPanel!
-    private var container: NSVisualEffectView!
+    private var container: NSView!
     private var dragHandle: ToolbarDragHandle!
     private var buttons: [ToolbarButton] = []
     private var actions = defaultToolbarActions()
@@ -805,14 +877,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var globalMouseMoveMonitor: Any?
     private var globalScrollMonitor: Any?
     private var notesPanel: NSPanel!
-    private var notesContainer: NSVisualEffectView!
+    private var notesContainer: NSView!
     private var notesContent: NSView!
     private var notesScrollView: NSScrollView!
     private var notesRows: [(view: NSView, label: NSTextField, index: Int)] = []
     private var notesCount = 0
     private var notesSelectedIndex = 0
     private var resultPanel: NSPanel!
-    private var resultContainer: NSVisualEffectView!
+    private var resultContainer: NSView!
     private var resultTabsView: NSView!
     private var resultTabsClip: HorizontalOnlyClip!
     private var resultTrashButton: NSButton!
@@ -938,19 +1010,12 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         panel.isMovableByWindowBackground = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
-        container = NSVisualEffectView(frame: panel.contentView?.bounds ?? .zero)
-        container.autoresizingMask = [.width, .height]
-        // PopClip-style frosted bar: the material adapts to whatever is behind
-        // it; the accent stroke keeps the edge legible over any background.
-        container.material = .menu
-        container.blendingMode = .behindWindow
-        container.state = .active
-        container.wantsLayer = true
-        container.layer?.cornerRadius = 8.5
-        container.layer?.borderWidth = 0.5
-        container.layer?.masksToBounds = true
-
-        panel.contentView = container
+        let (background, content, _) = makePanelBackground(
+            frame: panel.contentView?.bounds ?? .zero,
+            cornerRadius: 8.5
+        )
+        panel.contentView = background
+        container = content
         dragHandle = ToolbarDragHandle(frame: NSRect(x: 0, y: 0, width: toolbarHandleWidth, height: toolbarHeight))
         dragHandle.autoresizingMask = [.height]
         dragHandle.theme = theme
@@ -1064,12 +1129,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let button = ToolbarButton(
             frame: NSRect(
                 x: toolbarHandleWidth + CGFloat(index) * toolbarSegmentWidth,
-                y: 0,
+                // Inset capsule: 3pt of bar breathing room above and below the
+                // highlight, so hover/press never touches the bar's edges.
+                y: 3,
                 width: toolbarSegmentWidth,
-                height: toolbarHeight
+                height: toolbarHeight - 6
             )
         )
-        button.autoresizingMask = [.height]
+        button.autoresizingMask = []
         button.identifier = NSUserInterfaceItemIdentifier(action.id)
         button.toolTip = action.title
         button.image = lucideImage(for: action.icon, title: action.title)
@@ -1100,15 +1167,12 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         notesPanel.hidesOnDeactivate = false
         notesPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
-        notesContainer = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: notesPanelWidth, height: 200))
-        notesContainer.material = .menu
-        notesContainer.blendingMode = .behindWindow
-        notesContainer.state = .active
-        notesContainer.wantsLayer = true
-        notesContainer.layer?.cornerRadius = 10
-        notesContainer.layer?.borderWidth = 0.5
-        notesContainer.layer?.masksToBounds = true
-        notesPanel.contentView = notesContainer
+        let (notesBackground, notesBackgroundContent, _) = makePanelBackground(
+            frame: NSRect(x: 0, y: 0, width: notesPanelWidth, height: 200),
+            cornerRadius: 10
+        )
+        notesPanel.contentView = notesBackground
+        notesContainer = notesBackgroundContent
 
         notesScrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: notesPanelWidth, height: 200))
         notesScrollView.drawsBackground = false
@@ -1224,10 +1288,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         for row in notesRows {
             let selected = row.index == index
             row.view.layer?.backgroundColor = selected
-                ? NSColor.controlAccentColor.cgColor
+                ? cardTheme.selectedFill.cgColor
                 : NSColor.clear.cgColor
             row.label.textColor = selected
-                ? .white
+                ? cardTheme.foreground
                 : (theme == .dark ? NSColor.white.withAlphaComponent(0.9) : NSColor.black.withAlphaComponent(0.85))
         }
         if scroll {
@@ -1331,23 +1395,25 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         resultPanel.delegate = self
         resultPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
-        resultContainer = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 240))
-        resultContainer.material = .menu
-        resultContainer.blendingMode = .behindWindow
-        resultContainer.state = .active
-        resultContainer.wantsLayer = true
-        resultContainer.layer?.cornerRadius = 12
-        resultContainer.layer?.borderWidth = 0.5
-        resultContainer.layer?.masksToBounds = true
-        // Clip wrapper: the VisualEffectView material draws past manual corner
-        // radii on current macOS — wrap and mask so only the rounded card shows
-        // (fixes the grey-rounded + white-squared double edge).
-        let clip = NSView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 240))
-        clip.wantsLayer = true
-        clip.layer?.cornerRadius = 12
-        clip.layer?.masksToBounds = true
-        resultPanel.contentView = clip
-        clip.addSubview(resultContainer)
+        let (resultBackground, resultContent, isGlass) = makePanelBackground(
+            frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 240),
+            cornerRadius: 12
+        )
+        resultContainer = resultContent
+        if isGlass {
+            // Glass draws its own rounded shape — no clip wrapper needed.
+            resultPanel.contentView = resultBackground
+        } else {
+            // Legacy: the vibrancy material draws past manual corner radii —
+            // wrap and mask so only the rounded card shows (grey-rounded +
+            // white-squared double edge fix).
+            let clip = NSView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 240))
+            clip.wantsLayer = true
+            clip.layer?.cornerRadius = 12
+            clip.layer?.masksToBounds = true
+            resultPanel.contentView = clip
+            clip.addSubview(resultBackground)
+        }
 
         // Panel tab strip (top): panel switcher (Actions/Notes/Review, the
         // Panel Config list) + close. WebView FloatingFrame parity.
@@ -1544,6 +1610,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         // Notes tab: browsable note rows (click = copy).
         cardNotesClip = HorizontalOnlyClip(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
         cardNotesClip.drawsBackground = false
+        cardNotesClip.allowsVertical = true
         cardNotesClip.hasVerticalScroller = true
         cardNotesClip.autohidesScrollers = true
         cardNotesClip.scrollerStyle = .overlay
@@ -2558,7 +2625,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         if request.hasPrefix("GET /debug-state ") || request.hasPrefix("POST /debug-state ") {
             DispatchQueue.main.async {
                 let runs = self.cardRuns.map { "\($0.id)|\($0.status)|len=\($0.text.count)" }.joined(separator: "; ")
-                let state = "notesSel=\(self.notesTableView?.selectedRow ?? -99) notesCount=\(self.cardNotesItems.count) runsBar=\(NSStringFromRect(self.resultRunsBar.frame)) tabsClip=\(NSStringFromRect(self.resultTabsClip.frame)) doc=\(NSStringFromRect(self.resultTabsClip.documentView?.frame ?? .zero)) trash=\(NSStringFromRect(self.resultTrashButton.frame)) chips=\(self.runChipViews.count) activeRunId=\(self.activeRunId ?? "-") panel=\(self.activePanel) pinned=\(self.cardPinned) runs=[\(runs)] tvLen=\(self.resultTextView.textStorage?.length ?? 0) scrollHidden=\(self.resultScrollView.isHidden) scroll=\(NSStringFromRect(self.resultScrollView.frame)) tv=\(NSStringFromRect(self.resultTextView.frame)) container=\(NSStringFromRect(self.resultContainer.frame)) panelFrame=\(NSStringFromRect(self.resultPanel.frame)) input=\(NSStringFromRect(self.inputContainer.frame)) tvInset=\(self.inputTextView.textContainerInset) tvFrame=\(self.inputTextView.frame) actions=\(self.cardActions.count)"
+                let notesVis = NSStringFromRect(self.cardNotesClip.contentView.visibleRect)
+                let notesDoc = NSStringFromRect(self.cardNotesClip.documentView?.frame ?? .zero)
+                let state = "notesSel=\(self.notesTableView?.selectedRow ?? -99) notesCount=\(self.cardNotesItems.count) notesVis=\(notesVis) notesDoc=\(notesDoc) runsBar=\(NSStringFromRect(self.resultRunsBar.frame)) tabsClip=\(NSStringFromRect(self.resultTabsClip.frame)) doc=\(NSStringFromRect(self.resultTabsClip.documentView?.frame ?? .zero)) trash=\(NSStringFromRect(self.resultTrashButton.frame)) chips=\(self.runChipViews.count) activeRunId=\(self.activeRunId ?? "-") panel=\(self.activePanel) pinned=\(self.cardPinned) runs=[\(runs)] tvLen=\(self.resultTextView.textStorage?.length ?? 0) scrollHidden=\(self.resultScrollView.isHidden) scroll=\(NSStringFromRect(self.resultScrollView.frame)) tv=\(NSStringFromRect(self.resultTextView.frame)) container=\(NSStringFromRect(self.resultContainer.frame)) panelFrame=\(NSStringFromRect(self.resultPanel.frame)) input=\(NSStringFromRect(self.inputContainer.frame)) tvInset=\(self.inputTextView.textContainerInset) tvFrame=\(self.inputTextView.frame) actions=\(self.cardActions.count)"
                 self.log("STATE \(state)")
                 self.log("DEBUG \(state)")
             }
@@ -3203,7 +3272,10 @@ private final class VerticallyCenteredTextFieldCell: NSTextFieldCell {
 }
 
 private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
-    let iconView = NSImageView(frame: NSRect(x: 10, y: 23, width: 18, height: 18))
+    /// Traffic-light dot tinted by the note's tag hue (replaces the old
+    /// per-row file glyph — same icon on every row carried no information).
+    private let tagDot = NSView()
+    private var tagName = ""
     let titleLabel = NSTextField(labelWithString: "")
     let contentLabel = NSTextField(labelWithString: "")
     private var tagLabel: NSTextField?
@@ -3226,7 +3298,9 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        addSubview(iconView)
+        tagDot.wantsLayer = true
+        tagDot.layer?.cornerRadius = 4
+        addSubview(tagDot)
         addSubview(titleLabel)
         addSubview(contentLabel)
 
@@ -3234,7 +3308,7 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         centeredCell.stringValue = "" // bare cells ship titled "Field"
         centeredCell.isEditable = true
         centeredCell.isBordered = false
-        centeredCell.font = .systemFont(ofSize: 13, weight: .semibold)
+        centeredCell.font = .systemFont(ofSize: 13, weight: .medium)
         centeredCell.lineBreakMode = .byTruncatingTail
         centeredCell.usesSingleLineMode = true
         titleEditor.cell = centeredCell
@@ -3280,9 +3354,9 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         titleEditor.layer?.backgroundColor = themeColors.inputFill.cgColor
         titleEditor.layer?.borderColor = themeColors.hairline.cgColor
         titleLabel.textColor = inverted ? themeColors.background : themeColors.foreground
-        contentLabel.textColor = inverted ? themeColors.background.withAlphaComponent(0.8) : themeColors.tertiaryText
-        iconView.contentTintColor = inverted ? themeColors.background : themeColors.secondaryText
-        deleteButton?.contentTintColor = inverted ? themeColors.background : themeColors.secondaryText
+        contentLabel.textColor = inverted ? themeColors.background.withAlphaComponent(0.8) : themeColors.secondaryText
+        deleteButton?.contentTintColor = inverted ? themeColors.background : themeColors.tertiaryText
+        refreshTagColors()
         if let tagButton {
             tagButton.contentTintColor = inverted ? themeColors.background : themeColors.secondaryText
             tagButton.layer?.backgroundColor = inverted
@@ -3307,17 +3381,16 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
                    onDelete: ((Int64) -> Void)?,
                    onRename: ((Int64, String) -> Void)? = nil,
                    onTagPicked: ((Int64, NSView) -> Void)? = nil) {
-        iconView.image = lucideImage(for: "file-text", title: note.name)
-        iconView.imageScaling = .scaleProportionallyDown
 
         noteId = note.id
         self.onRename = onRename
+        tagName = (note.tags ?? []).first ?? ""
         let titleText = note.name.isEmpty ? String(note.content.prefix(40)) : note.name
         titleLabel.stringValue = titleText
         if titleEditor.isHidden {
             titleEditor.stringValue = titleText
         }
-        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.maximumNumberOfLines = 1
         titleLabel.cell?.truncatesLastVisibleLine = true
@@ -3325,8 +3398,7 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         titleLabel.toolTip = note.content
 
         contentLabel.stringValue = note.content
-        contentLabel.font = .systemFont(ofSize: 11)
-        contentLabel.lineBreakMode = .byTruncatingTail
+        contentLabel.font = .systemFont(ofSize: 12)
         contentLabel.maximumNumberOfLines = 1
         contentLabel.cell?.truncatesLastVisibleLine = true
         contentLabel.cell?.wraps = false
@@ -3359,24 +3431,45 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
             deleteButton.removeFromSuperview()
         }
         if let id = note.id, let onDelete {
-            let button = NSButton(title: "✕", target: nil, action: nil)
-            button.bezelStyle = .regularSquare
+            let button = NSButton(image: lucideImage(for: "x", title: "Delete note") ?? NSImage(),
+                                  target: self,
+                                  action: #selector(deleteTapped))
             button.isBordered = false
-            button.font = .systemFont(ofSize: 9)
-            button.alphaValue = 0.55
-            button.contentTintColor = .secondaryLabelColor
+            button.imageScaling = .scaleProportionallyDown
             button.toolTip = "Delete note"
             button.identifier = NSUserInterfaceItemIdentifier(String(id))
             self.onDelete = onDelete
-        if let onTagPicked {
-            self.onTagPicked = onTagPicked
-        }
-            button.target = self
-            button.action = #selector(deleteTapped)
             deleteButton = button
             addSubview(button)
         }
         needsLayout = true
+        refreshTagColors()
+    }
+
+    /// One hue per tag: the leading dot AND the pill text/fill share it, so
+    /// tags are tellable apart pre-attentively (traffic-light language).
+    private func refreshTagColors() {
+        let dark = themeColors.isDark
+        if tagName.isEmpty {
+            tagDot.isHidden = true
+        } else {
+            tagDot.isHidden = false
+            tagDot.layer?.backgroundColor = tagColor(for: tagName, dark: dark).cgColor
+        }
+        if let tagButton, !tagName.isEmpty {
+            let color = tagColor(for: tagName, dark: dark)
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            tagButton.attributedTitle = NSAttributedString(
+                string: tagName,
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 10, weight: .medium),
+                    .foregroundColor: color,
+                    .paragraphStyle: paragraph,
+                ]
+            )
+            tagButton.layer?.backgroundColor = color.withAlphaComponent(dark ? 0.16 : 0.12).cgColor
+        }
     }
 
     @objc private func deleteTapped(_ sender: NSButton) {
@@ -3447,19 +3540,20 @@ private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     override func layout() {
         super.layout()
         let w = bounds.width
-        // goty tty7 proportions: 14pt icon slot deep in the pill, the
-        // two-line text block against the icon's midline, trailing column
-        // (tag pill + delete) sharing one right margin.
-        iconView.frame = NSRect(x: 12, y: bounds.midY - 7, width: 14, height: 14)
-        deleteButton?.frame = NSRect(x: w - 26, y: bounds.midY - 8, width: 16, height: 16)
+        // Content-first rows (Notes/Mail language): the tag-colored dot
+        // rides the title line at the pill's own 14pt inset, the two-line
+        // text block follows; the trailing column (tag pill + delete)
+        // shares one right margin.
+        tagDot.frame = NSRect(x: 14, y: 24, width: 8, height: 8)
+        deleteButton?.frame = NSRect(x: w - 28, y: bounds.midY - 9, width: 18, height: 18)
         let hasTag = tagButton != nil
         if hasTag {
-            tagButton!.frame = NSRect(x: w - 26 - 6 - tagWidth, y: bounds.midY - 8, width: tagWidth, height: 16)
+            tagButton!.frame = NSRect(x: w - 28 - 6 - tagWidth, y: bounds.midY - 8, width: tagWidth, height: 16)
         }
-        let textX: CGFloat = 32
-        let trailingX: CGFloat = (hasTag ? (w - 26 - 6 - tagWidth) : w - 26) - 8
-        titleLabel.frame = NSRect(x: textX, y: 21, width: trailingX - textX, height: 15)
-        contentLabel.frame = NSRect(x: textX, y: 5, width: trailingX - textX, height: 14)
+        let textX: CGFloat = 30
+        let trailingX: CGFloat = (hasTag ? (w - 28 - 6 - tagWidth) : w - 28) - 6
+        titleLabel.frame = NSRect(x: textX, y: 20, width: max(trailingX - textX, 24), height: 16)
+        contentLabel.frame = NSRect(x: textX, y: 4, width: max(trailingX - textX, 24), height: 15)
         // Rename editor: same text origin as the title label, grown downward.
         titleEditor.frame = NSRect(
             x: titleLabel.frame.minX - 2,
@@ -3702,6 +3796,7 @@ private final class RowPickButton: NSButton {
         fatalError("programmatic only")
     }
 }
+
 
 /// Tag pill: a borderless button that fires on ANY click inside its bounds.
 private final class TagPillButton: NSButton {

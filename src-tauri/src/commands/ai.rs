@@ -29,6 +29,9 @@ pub struct AiRunRequest {
     pub prompt_template: String,
     pub output_mode: String,
     pub target_language: Option<String>,
+    /// Per-feature deepseek thinking mode. Off = send `thinking.disabled`
+    /// (fast first token); on = omit the param and let the model think.
+    pub thinking_enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -103,18 +106,22 @@ async fn request_completion(request: &AiRunRequest, text: &str) -> Result<String
         "Follow the user prompt exactly. Return the answer directly without markdown fences unless requested."
     };
 
+    let mut body = serde_json::json!({
+        "model": request.model,
+        "messages": [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.2
+    });
+    if !request.thinking_enabled {
+        body["thinking"] = serde_json::json!({"type": "disabled"});
+    }
     let response = client
         .post(url)
         .header(CONTENT_TYPE, "application/json")
         .header(AUTHORIZATION, format!("Bearer {}", request.api_key))
-        .json(&serde_json::json!({
-            "model": request.model,
-            "messages": [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.2
-        }))
+        .json(&body)
         .send()
         .await
         .map_err(|error| format!("AI request failed: {error}"))?;
@@ -249,20 +256,29 @@ async fn stream_completion(
         "Follow the user prompt exactly. Return the answer directly without markdown fences unless requested."
     };
 
-    log_ai(&format!("run_id={run_id} POST {url} model={}", request.model));
+    let t_start = Instant::now();
+    let prompt_chars = prompt.chars().count();
+    log_ai(&format!("run_id={run_id} POST {url} model={} prompt_chars={prompt_chars}", request.model));
+    let mut body = serde_json::json!({
+        "model": request.model,
+        "messages": [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.2,
+        "stream": true
+    });
+    // deepseek-v4-flash defaults to thinking mode: ~10s of reasoning_content
+    // before the first visible token. Thinking ON = omit the param (server
+    // default); OFF = explicit disable for fast TTFT.
+    if !request.thinking_enabled {
+        body["thinking"] = serde_json::json!({"type": "disabled"});
+    }
     let response = client
         .post(&url)
         .header(CONTENT_TYPE, "application/json")
         .header(AUTHORIZATION, format!("Bearer {}", request.api_key))
-        .json(&serde_json::json!({
-            "model": request.model,
-            "messages": [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.2,
-            "stream": true
-        }))
+        .json(&body)
         .send()
         .await
         .map_err(|error| {
@@ -279,8 +295,11 @@ async fn stream_completion(
         crate::native_toolbar::forward_card_event(run_id, None, true, Some(&msg), None, false);
         return Err(msg);
     }
-    log_ai(&format!("run_id={run_id} response ok, streaming"));
+    let t_headers_ms = t_start.elapsed().as_millis();
+    log_ai(&format!("run_id={run_id} response ok, streaming (headers {t_headers_ms}ms, prompt_chars={prompt_chars})"));
 
+    let mut t_first_content_ms: Option<u128> = None;
+    let mut saw_reasoning = false;
     let is_translation_json = request.output_mode == "translation_json";
     let mut stream = response.bytes_stream();
     // Byte-level buffer: TCP segments split multi-byte UTF-8 characters mid-
@@ -291,7 +310,7 @@ async fn stream_completion(
     let mut buffer: Vec<u8> = Vec::new();
     let mut accumulated = String::new();
     let mut pending_emit = String::new();
-    let mut last_emit = Instant::now();
+    let mut last_emit = t_start;
 
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|error| format!("Stream read error: {error}"))?;
@@ -312,7 +331,26 @@ async fn stream_completion(
             }
 
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&data) {
+                if !saw_reasoning
+                    && parsed["choices"][0]["delta"]
+                        .get("reasoning_content")
+                        .map(|v| !v.is_null())
+                        .unwrap_or(false)
+                {
+                    saw_reasoning = true;
+                    log_ai(&format!(
+                        "run_id={run_id} reasoning_content detected at {}ms",
+                        t_start.elapsed().as_millis()
+                    ));
+                }
                 if let Some(content) = parsed["choices"][0]["delta"]["content"].as_str() {
+                    if t_first_content_ms.is_none() && !content.is_empty() {
+                        t_first_content_ms = Some(t_start.elapsed().as_millis());
+                        log_ai(&format!(
+                            "run_id={run_id} first content token at {}ms (headers {t_headers_ms}ms, reasoning={saw_reasoning})",
+                            t_first_content_ms.unwrap()
+                        ));
+                    }
                     accumulated.push_str(content);
 
                     // For translation_json, don't stream raw JSON — accumulate silently
@@ -335,8 +373,9 @@ async fn stream_completion(
         }
     }
     log_ai(&format!(
-        "run_id={run_id} stream ended, accumulated_len={}",
-        accumulated.len()
+        "run_id={run_id} stream ended, accumulated_len={} total_ms={} ttft_ms={t_first_content_ms:?} reasoning={saw_reasoning}",
+        accumulated.len(),
+        t_start.elapsed().as_millis()
     ));
 
     // Process any remaining buffer

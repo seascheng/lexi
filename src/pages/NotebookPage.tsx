@@ -1,4 +1,4 @@
-import { Check, Plus, Search, Trash2, X } from "lucide-react";
+import { Check, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { NoteEntry, TagEntry } from "../types";
 import {
@@ -97,74 +97,53 @@ export function NotebookPage() {
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-2.5">
         <div>
-          <h2 className="text-lg font-semibold">Notebook</h2>
-          <p className="text-sm text-muted">{filteredNotes.length} of {notes.length} notes</p>
+          <h2 className="text-[15px] font-semibold">Notebook</h2>
+          <p className="text-xs text-muted">{filteredNotes.length} of {notes.length} notes</p>
         </div>
         <div className="flex items-center gap-1.5">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" size={14} />
             <Input
-              className="pl-9"
+              className="w-56 pl-8"
               onChange={(event) => { setQuery(event.target.value); resetPage(); }}
               placeholder="Search notes"
               value={query}
             />
           </div>
-          <Button onClick={() => void handleAddNote()} icon={<Plus size={16} />}>New Note</Button>
+          <Button onClick={() => void handleAddNote()} icon={<Plus size={14} />}>New Note</Button>
         </div>
       </div>
 
-      {/* Tag tabs */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <button
-          onClick={() => { setActiveTag("all"); resetPage(); }}
-          className={cn(
-            "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-            activeTag === "all"
-              ? "bg-accent text-accentForeground"
-              : "bg-surface/50 text-muted hover:bg-surface hover:text-strong",
-          )}
-        >
-          All
-        </button>
-        {tags.map((tag) => (
+      {/* Tag filter chips */}
+      <div className="flex flex-wrap items-center gap-1">
+        {["all", ...tags.map((tag) => tag.name)].map((name) => (
           <button
-            key={tag.id}
-            onClick={() => { setActiveTag(tag.name); resetPage(); }}
+            key={name}
+            onClick={() => { setActiveTag(name); resetPage(); }}
             className={cn(
-              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-              activeTag === tag.name
-                ? "bg-accent text-accentForeground"
-                : "bg-surface/50 text-muted hover:bg-surface hover:text-strong",
+              "h-6 rounded-full px-2.5 text-xs font-medium transition-colors",
+              activeTag === name
+                ? "bg-strong/10 text-strong"
+                : "text-muted hover:bg-strong/5 hover:text-strong",
             )}
           >
-            {tag.name}
+            {name === "all" ? "All" : name}
           </button>
         ))}
       </div>
 
       {/* Note list */}
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border/60">
-        <div className="sticky top-0 z-10 grid grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-border/60 bg-panel/95 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-muted backdrop-blur">
-          <span>Note</span>
-          <span className="w-20 text-center">Tag</span>
-          <span className="w-16" />
-        </div>
-
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="divide-y divide-border/40">
-          {pageNotes.map((note, index) => {
+          {pageNotes.map((note) => {
             const isEditing = editingId === note.id;
             return (
               <div
                 key={note.id}
-                className={cn(
-                  "transition-colors",
-                  index % 2 === 1 ? "bg-surface/20" : "",
-                  isEditing ? "bg-surface/40" : "hover:bg-surface/30",
-                )}
+                className={cn("group transition-colors", isEditing ? "bg-strong/5" : "hover:bg-strong/5")}
               >
                 {isEditing ? (
-                  <div className="grid gap-2 px-3 py-2">
+                  <div className="grid gap-2 px-3 py-2.5">
                     <Input
                       onChange={(e) => setEditName(e.target.value)}
                       placeholder="Note name (optional)"
@@ -177,18 +156,24 @@ export function NotebookPage() {
                       value={editContent}
                     />
                     <div className="flex items-center gap-2">
-                      <Button onClick={() => void handleSaveEdit()} variant="primary" icon={<Check size={14} />} className="h-7 text-xs">Save</Button>
-                      <Button onClick={cancelEdit} variant="ghost" icon={<X size={14} />} className="h-7 text-xs">Cancel</Button>
+                      <Button onClick={() => void handleSaveEdit()} variant="primary" icon={<Check size={13} />} className="h-6 text-xs">Save</Button>
+                      <Button onClick={cancelEdit} variant="ghost" icon={<X size={13} />} className="h-6 text-xs">Cancel</Button>
                     </div>
                   </div>
                 ) : (
-                  <div className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-2 px-3 py-2">
-                    <div className="min-w-0 truncate">
-                      {note.name && <span className="text-sm font-bold text-strong">{note.name}: </span>}
-                      <span className="text-sm text-content/80">{note.content}</span>
+                  <div className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-2.5 px-3 py-1.5">
+                    <div className="min-w-0 py-0.5">
+                      {note.name ? (
+                        <>
+                          <div className="truncate text-[13px] font-medium leading-[18px] text-strong">{note.name}</div>
+                          <div className="truncate text-xs leading-[16px] text-muted">{note.content}</div>
+                        </>
+                      ) : (
+                        <div className="truncate text-[13px] leading-[18px] text-content/90">{note.content}</div>
+                      )}
                     </div>
                     <Select
-                      className="h-7 w-20 text-xs"
+                      className="h-[22px] w-auto rounded-full border-transparent bg-strong/5 pl-2 pr-5 text-[11px] text-content/70 hover:border-border/60 hover:bg-strong/10"
                       onChange={(e) => void handleChangeTag(note.id, e.target.value)}
                       value={note.tags[0] ?? ""}
                     >
@@ -196,20 +181,20 @@ export function NotebookPage() {
                         <option key={tag.id} value={tag.name}>{tag.name}</option>
                       ))}
                     </Select>
-                    <div className="flex w-16 items-center justify-end gap-1">
+                    <div className="flex w-14 items-center justify-end gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
                       <Button
+                        aria-label="Edit note"
                         onClick={() => startEdit(note)}
                         variant="ghost"
-                        className="h-6 min-h-6 px-1 text-xs text-muted/50 hover:text-strong"
-                      >
-                        Edit
-                      </Button>
+                        icon={<Pencil size={13} />}
+                        className="h-6 min-h-6 w-6 px-0 text-muted/70 hover:text-strong"
+                      />
                       <Button
                         aria-label="Delete note"
                         onClick={() => void handleDeleteNote(note.id)}
                         variant="ghost"
                         icon={<Trash2 size={13} />}
-                        className="h-6 min-h-6 w-6 px-0 text-muted/50 hover:text-red-500"
+                        className="h-6 min-h-6 w-6 px-0 text-muted/70 hover:text-red-500"
                       />
                     </div>
                   </div>
@@ -220,19 +205,19 @@ export function NotebookPage() {
         </div>
 
         {pageNotes.length === 0 ? (
-          <div className="px-3 py-6 text-center text-sm text-muted">
+          <div className="px-3 py-8 text-center text-[13px] text-muted">
             {notes.length === 0 ? "No notes yet. Use the Note tool to save text." : "No notes match this filter."}
           </div>
         ) : null}
 
         {/* Pagination */}
         {totalPages > 1 ? (
-          <div className="flex items-center justify-center gap-3 border-t border-border/40 py-2.5 text-sm">
+          <div className="flex items-center justify-center gap-3 border-t border-border/40 py-2 text-[13px]">
             <Button
               disabled={safeCurrentPage <= 1}
               onClick={() => { setCurrentPage((p) => p - 1); setEditingId(null); }}
               variant="ghost"
-              className="text-xs"
+              className="h-6 text-xs"
             >
               Prev
             </Button>
@@ -243,7 +228,7 @@ export function NotebookPage() {
               disabled={safeCurrentPage >= totalPages}
               onClick={() => { setCurrentPage((p) => p + 1); setEditingId(null); }}
               variant="ghost"
-              className="text-xs"
+              className="h-6 text-xs"
             >
               Next
             </Button>

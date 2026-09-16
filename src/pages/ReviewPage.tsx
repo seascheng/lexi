@@ -192,8 +192,8 @@ function ReviewToolbar({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div>
-            <h2 className="text-lg font-semibold">Review</h2>
-            <p className="text-sm text-muted">{dueCount} due / {completed} completed</p>
+            <h2 className="text-[15px] font-semibold">Review</h2>
+            <p className="text-xs text-muted">{dueCount} due / {completed} completed</p>
           </div>
         </div>
         <div className="flex items-center gap-2">

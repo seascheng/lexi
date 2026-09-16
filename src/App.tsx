@@ -15,7 +15,7 @@ import {
 } from "./lib/database";
 import { syncNativeToolbar } from "./lib/nativeToolbar";
 import { isTauriRuntime } from "./lib/platform";
-import { Button } from "./components/ui/Button";
+import { cn } from "./lib/cn";
 import { VocabularyPage } from "./pages/VocabularyPage";
 import { ReviewPage } from "./pages/ReviewPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -33,8 +33,6 @@ const navItems: Array<{ page: Page; label: string; icon: JSX.Element; dividerBef
 ];
 
 export default function App() {
-  const params = useMemo(() => new URLSearchParams(window.location.search), []);
-
   return <MainWindow />;
 }
 
@@ -155,40 +153,52 @@ function MainWindow() {
         <aside className="app-sidebar md:sticky md:top-0 md:h-screen">
           <div className={`flex h-full flex-col border-b border-border/30 transition-all duration-200 md:border-b-0 md:border-r ${sidebarCollapsed ? "py-4 px-2.5" : "p-4"}`}>
             <div className="flex items-center gap-2.5 px-1">
-              <img src={logoUrl} alt="Lexi" className="app-logo h-8 w-8 shrink-0" />
+              <img src={logoUrl} alt="Lexi" className="app-logo h-7 w-7 shrink-0" />
               {!sidebarCollapsed && (
-                <h1 className="truncate font-mono text-base font-bold tracking-widest">Lexi</h1>
+                <h1 className="truncate text-[15px] font-semibold tracking-tight">Lexi</h1>
               )}
             </div>
 
-            <nav className="mt-5 grid gap-1.5">
+            <nav className="mt-4 grid gap-0.5">
               {navItems.map((item) => (
                 <Fragment key={item.page}>
                   {item.dividerBefore && (
-                    <div className="my-1 border-t border-border/30" />
+                    <div className="my-1.5 border-t border-border/30" />
                   )}
-                  <Button
-                    className="justify-start"
-                    icon={item.icon}
+                  <button
+                    aria-current={page === item.page ? "page" : undefined}
+                    className={cn(
+                      "flex h-7 items-center gap-2 rounded-md px-2 text-[13px] font-medium transition-colors",
+                      sidebarCollapsed ? "justify-center px-0" : "",
+                      page === item.page
+                        ? "bg-strong/10 text-strong"
+                        : "text-muted hover:bg-strong/5 hover:text-strong",
+                    )}
                     onClick={() => setPage(item.page)}
-                    variant={page === item.page ? "primary" : "ghost"}
                     title={sidebarCollapsed ? item.label : undefined}
+                    type="button"
                   >
+                    <span className={cn("shrink-0 [&>svg]:h-[15px] [&>svg]:w-[15px]")}>{item.icon}</span>
                     {!sidebarCollapsed && item.label}
-                  </Button>
+                  </button>
                 </Fragment>
               ))}
             </nav>
 
             <div className="mt-auto pt-2">
-              <Button
-                className={sidebarCollapsed ? "justify-center" : "justify-start"}
-                icon={sidebarCollapsed ? <PanelLeft size={17} /> : <PanelLeftClose size={17} />}
-                variant="ghost"
+              <button
+                className={cn(
+                  "flex h-7 items-center gap-2 rounded-md text-[13px] font-medium text-muted transition-colors hover:bg-strong/5 hover:text-strong",
+                  sidebarCollapsed ? "justify-center px-0 w-full" : "px-2",
+                )}
                 onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                type="button"
               >
+                <span className="shrink-0 [&>svg]:h-[15px] [&>svg]:w-[15px]">
+                  {sidebarCollapsed ? <PanelLeft size={15} /> : <PanelLeftClose size={15} />}
+                </span>
                 {!sidebarCollapsed && "Collapse"}
-              </Button>
+              </button>
             </div>
           </div>
         </aside>
