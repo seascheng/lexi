@@ -257,9 +257,8 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
-        // Vertical breathing room comes from the FRAME inset in layoutChrome
-        // — contentInsets on a tableView-backed scroller skews the clip
-        // view's visible rect (rows went blank).
+        // Vertical breathing room comes from the FRAME inset in layoutChrome.
+        root.addSubview(scrollView)
         // Double-click pastes, same as Enter.
         tableView.target = self
         tableView.action = #selector(rowDoubleClicked)
@@ -476,6 +475,10 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             reloadNotes(tag: tag)
         }
         tableView.reloadData()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            FileLog.write("CLIP render rows=\(self.rows.count) tableFrame=\(NSStringFromRect(self.tableView.frame)) scrollFrame=\(NSStringFromRect(self.scrollView.frame)) visible=\(NSStringFromRect(self.scrollView.contentView.documentVisibleRect)) doc=\(NSStringFromRect(self.scrollView.documentView?.frame ?? .zero))")
+        }
         updateFooter()
         updateEmptyState()
         if let firstSelectable = rows.indices.first(where: {
