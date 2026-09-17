@@ -742,7 +742,9 @@ final class ClipCell: NSView {
             previewLabel.maximumNumberOfLines = 2
         }
         let iconSize = ClipboardMonitor.iconDisplaySize
-        iconView.frame = NSRect(x: 14, y: (height - iconSize) / 2, width: iconSize, height: iconSize)
+        // Equal gaps: 8pt edge→icon, 8pt icon→text (icon ends at 8+24=32,
+        // text column starts at 40).
+        iconView.frame = NSRect(x: 8, y: (height - iconSize) / 2, width: iconSize, height: iconSize)
 
         nameLabel.isHidden = true
         pathLabel.isHidden = true
@@ -757,14 +759,14 @@ final class ClipCell: NSView {
                 nameLabel.stringValue = item.previewText ?? ""
                 nameLabel.lineBreakMode = .byTruncatingTail
                 nameLabel.cell?.usesSingleLineMode = true
-                nameLabel.frame = NSRect(x: 46, y: (height - 16) / 2, width: 456, height: 16)
+                nameLabel.frame = NSRect(x: 40, y: (height - 16) / 2, width: 462, height: 16)
                 nameLabel.isHidden = false
             } else {
                 previewLabel.font = .systemFont(ofSize: 13)
                 previewLabel.textColor = theme.foreground
                 previewLabel.stringValue = item.previewText ?? ""
                 previewLabel.maximumNumberOfLines = 2
-                previewLabel.frame = NSRect(x: 46, y: 7, width: 456, height: height - 14)
+                previewLabel.frame = NSRect(x: 40, y: 7, width: 462, height: height - 14)
                 previewLabel.isHidden = false
             }
         case .file:
@@ -774,19 +776,19 @@ final class ClipCell: NSView {
             nameLabel.stringValue = url.lastPathComponent
             nameLabel.lineBreakMode = .byTruncatingTail
             nameLabel.cell?.usesSingleLineMode = true
-            nameLabel.frame = NSRect(x: 46, y: height - 24, width: 456, height: 16)
+            nameLabel.frame = NSRect(x: 40, y: height - 24, width: 462, height: 16)
             nameLabel.isHidden = false
             pathLabel.font = .systemFont(ofSize: 11)
             pathLabel.textColor = theme.tertiaryText
             pathLabel.stringValue = url.deletingLastPathComponent().path
             pathLabel.lineBreakMode = .byTruncatingMiddle
             pathLabel.cell?.usesSingleLineMode = true
-            pathLabel.frame = NSRect(x: 46, y: 8, width: 456, height: 14)
+            pathLabel.frame = NSRect(x: 40, y: 8, width: 462, height: 14)
             pathLabel.isHidden = false
         case .image:
             if let thumbnail {
                 thumbnailView.image = thumbnail
-                thumbnailView.frame = NSRect(x: 46, y: (height - 40) / 2, width: 40, height: 40)
+                thumbnailView.frame = NSRect(x: 40, y: (height - 40) / 2, width: 40, height: 40)
                 thumbnailView.isHidden = false
             }
             // Without a decoded thumbnail yet, a quiet placeholder keeps the
@@ -794,7 +796,7 @@ final class ClipCell: NSView {
             previewLabel.font = .systemFont(ofSize: 12)
             previewLabel.textColor = theme.tertiaryText
             previewLabel.stringValue = "图片"
-            previewLabel.frame = NSRect(x: 44, y: (height - 16) / 2, width: 28, height: 16)
+            previewLabel.frame = NSRect(x: 40, y: (height - 16) / 2, width: 28, height: 16)
             previewLabel.isHidden = thumbnail != nil
         }
         iconView.image = sourceIcon
