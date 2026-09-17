@@ -14,8 +14,8 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     var onHidden: (() -> Void)?
 
     private static let panelWidth: CGFloat = 520
-    private static let rowHeight: CGFloat = 34
-    private static let headerHeight: CGFloat = 26
+    private static let rowHeight: CGFloat = 42
+    private static let headerHeight: CGFloat = 28
     private static let maxListHeight: CGFloat = 11 * LauncherPanelController.rowHeight
     private static let chromeHeight: CGFloat = 88 // search 12+26+8 + tabs 24+8 + bottom pad 10
     private static let recentsKey = "launcher.recents"
@@ -192,9 +192,9 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     }
 
     private func styleChrome() {
-        searchField.layer?.backgroundColor = cardTheme.inputFill.cgColor
-        searchField.layer?.borderColor = cardTheme.hairline.cgColor
-        searchField.layer?.borderWidth = 0.5
+        // NSSearchField draws its own themed rounded chrome; painting the
+        // backing layer (previous attempt) showed a SQUARE gray box behind
+        // it. Its colors now come from the panel's vibrant appearance.
         emptyLabel.textColor = cardTheme.tertiaryText
         syncTabButtons()
     }
@@ -556,7 +556,12 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         switch rows[row] {
         case .header(let title):
             let cell = reuse(LauncherHeaderCell.self, row: row)
-            cell.configure(title: title, theme: cardTheme)
+            // Tag groups wear their tag color (matches the row dots);
+            // "Recent" stays a quiet secondary.
+            let color = title == "Recent"
+                ? cardTheme.secondaryText
+                : tagColor(for: title, dark: cardTheme.isDark)
+            cell.configure(title: title, color: color)
             return cell
         case .folder(let item):
             let cell = reuse(LauncherFolderCell.self, row: row)
@@ -630,13 +635,13 @@ final class LauncherHeaderCell: NSView {
     private let label = NSTextField(labelWithString: "")
     private var didLayout = false
 
-    func configure(title: String, theme: CardTheme) {
+    func configure(title: String, color: NSColor) {
         label.stringValue = title.uppercased()
         label.font = .systemFont(ofSize: 10, weight: .semibold)
-        label.textColor = theme.tertiaryText
+        label.textColor = color
         if !didLayout {
             didLayout = true
-            label.frame = NSRect(x: 16, y: 6, width: 480, height: 14)
+            label.frame = NSRect(x: 16, y: 8, width: 480, height: 14)
             addSubview(label)
         }
     }
@@ -681,22 +686,25 @@ final class LauncherFolderCell: NSView {
             didLayout = true
             dot.wantsLayer = true
             dot.layer?.cornerRadius = 3
-            dot.frame = NSRect(x: 16, y: 14, width: 6, height: 6)
+            dot.frame = NSRect(x: 16, y: 18, width: 6, height: 6)
             addSubview(dot)
 
             nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
-            nameLabel.frame = NSRect(x: 30, y: 8, width: 320, height: 16)
+            // Two stacked lines in a NON-flipped cell: y measured from the
+            // BOTTOM. Name on top, path below — the old frames (y 8 and 3)
+            // overlapped by 7pt.
+            nameLabel.frame = NSRect(x: 30, y: 23, width: 340, height: 15)
             addSubview(nameLabel)
 
             pathLabel.font = .systemFont(ofSize: 11)
-            pathLabel.frame = NSRect(x: 30, y: 3, width: 320, height: 12)
+            pathLabel.frame = NSRect(x: 30, y: 5, width: 340, height: 13)
             addSubview(pathLabel)
 
-            terminalButton.frame = NSRect(x: 448, y: 6, width: 22, height: 22)
+            terminalButton.frame = NSRect(x: 448, y: 10, width: 22, height: 22)
             terminalButton.toolTip = "Open in Terminal"
             addSubview(terminalButton)
 
-            editorButton.frame = NSRect(x: 474, y: 6, width: 22, height: 22)
+            editorButton.frame = NSRect(x: 474, y: 10, width: 22, height: 22)
             editorButton.toolTip = "Open in Editor"
             addSubview(editorButton)
         }
@@ -708,13 +716,13 @@ final class LauncherFolderCell: NSView {
             : tagColor(for: item.tag, dark: theme.isDark).cgColor
         dot.isHidden = item.tag.isEmpty
         nameLabel.textColor = theme.foreground
-        pathLabel.textColor = theme.tertiaryText
+        pathLabel.textColor = theme.secondaryText
 
         editorButton.isHidden = !showsEditor
-        if let editorImage = lucideImage(for: "code", title: "Editor", color: theme.secondaryText) {
+        if let editorImage = lucideImage(for: "code", title: "Editor", color: theme.iconTint) {
             editorButton.image = editorImage
         }
-        if let terminalImage = lucideImage(for: "terminal", title: "Terminal", color: theme.secondaryText) {
+        if let terminalImage = lucideImage(for: "terminal", title: "Terminal", color: theme.iconTint) {
             terminalButton.image = terminalImage
         }
         editorButton.target = self
@@ -755,10 +763,10 @@ final class LauncherAppCell: NSView {
         onActivate = handler
         if !didLayout {
             didLayout = true
-            iconView.frame = NSRect(x: 16, y: 7, width: 20, height: 20)
+            iconView.frame = NSRect(x: 16, y: 11, width: 20, height: 20)
             addSubview(iconView)
             nameLabel.font = .systemFont(ofSize: 13)
-            nameLabel.frame = NSRect(x: 46, y: 9, width: 440, height: 16)
+            nameLabel.frame = NSRect(x: 46, y: 13, width: 440, height: 16)
             addSubview(nameLabel)
         }
         iconView.image = item.app.icon
