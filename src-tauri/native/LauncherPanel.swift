@@ -1024,14 +1024,19 @@ final class FolderChipView: NSView {
     }
 }
 
-/// Selection capsule row view (selectedFill on activation).
+/// Selection capsule row view (selectedFill on activation). Panels tune
+/// `insetDx`/`insetDy` to their row rhythm — launcher uses the 8/2 default;
+/// the clipboard panel tightens dx so the capsule padding around its row
+/// content stays symmetric.
 final class LauncherRowView: NSTableRowView {
     var fillColor: NSColor = .clear
+    var insetDx: CGFloat = 8
+    var insetDy: CGFloat = 2
 
     override func drawSelection(in dirtyRect: NSRect) {
         guard isSelected else { return }
         fillColor.setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 8, dy: 2), xRadius: 7, yRadius: 7).fill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: insetDx, dy: insetDy), xRadius: 7, yRadius: 7).fill()
     }
 }
 
