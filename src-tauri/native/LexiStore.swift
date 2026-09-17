@@ -464,3 +464,70 @@ extension LexiStore {
         sqlite3_step(statement)
     }
 }
+
+/// One entry of the shared action registry (`toolbar_tools` blob): the
+/// toolbar scope and the card's Actions-tab scope each read their columns.
+struct LexiToolEntry: Codable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    var enabled: Bool
+    var sortOrder: Int
+    var panelEnabled: Bool
+    var panelSortOrder: Int
+    var icon: String
+    var config: [String: String]
+}
+
+extension LexiStore {
+    /// The shared action registry. Storage stays the `toolbar_tools` JSON
+    /// blob until the Rust readers die at cutover; normalization into an
+    /// `actions` table happens in that same step (one writer, one format).
+    static func toolbarTools() -> [LexiToolEntry] {
+        guard let raw = setting("toolbar_tools"),
+              let data = raw.data(using: .utf8),
+              let rows = try? JSONDecoder().decode([LexiToolEntry].self, from: data)
+        else { return [] }
+        return rows
+    }
+
+    static func saveToolbarTools(_ entries: [LexiToolEntry]) {
+        guard let data = try? JSONEncoder().encode(entries),
+              let raw = String(data: data, encoding: .utf8) else { return }
+        setSetting("toolbar_tools", raw)
+    }
+
+    /// App bundle ids where the selection toolbar stays hidden.
+    static func excludedToolbarApps() -> [String] {
+        guard let raw = setting("excludedToolbarApps"),
+              let data = raw.data(using: .utf8),
+              let list = try? JSONSerialization.jsonObject(with: data) as? [String]
+        else { return ["com.apple.finder"] }
+        return list
+    }
+
+    static func saveExcludedToolbarApps(_ list: [String]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: list),
+              let raw = String(data: data, encoding: .utf8) else { return }
+        setSetting("excludedToolbarApps", raw)
+    }
+
+    /// The card's remembered frame ({"x":…,"y":…} / {"width":…,"height":…}).
+    static func cardFrame() -> (origin: CGPoint?, size: CGSize?) {
+        var origin: CGPoint?
+        var size: CGSize?
+        if let raw = setting("popupCardPosition"), let data = raw.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Double] {
+            origin = CGPoint(x: object["x"] ?? 0, y: object["y"] ?? 0)
+        }
+        if let raw = setting("popupCardSize"), let data = raw.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Double] {
+            size = CGSize(width: object["width"] ?? 420, height: object["height"] ?? 420)
+        }
+        return (origin, size)
+    }
+
+    static func resetCardFrame() {
+        setSetting("popupCardPosition", "{\"x\":0,\"y\":0}")
+        setSetting("popupCardSize", "{\"width\":420,\"height\":420}")
+    }
+}

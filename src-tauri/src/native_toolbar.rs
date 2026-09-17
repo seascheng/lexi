@@ -256,6 +256,9 @@ static CARD_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 /// Pid of the selection helper — selection reads inside our own UI (the
 /// rename editor's select-all) must never trigger the toolbar.
 static HELPER_PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+/// Set by the native status item's Quit: the watchdog must not resurrect
+/// the helper while the app is going down.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static CARD_AUTO_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Last theme the frontend pushed. The helper defaults to dark and its
@@ -3118,6 +3121,18 @@ fn dispatch_toolbar_action(
         return Ok(());
     }
 
+    // Native status item's Quit: stop the watchdog, terminate the helper,
+    // then take the app down with it.
+    if action.action == "quit-lexi" {
+        log_native("quit requested from native status item");
+        QUITTING.store(true, std::sync::atomic::Ordering::Relaxed);
+        std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(300));
+            std::process::exit(0);
+        });
+        return Ok(());
+    }
+
     // Native settings window live-sync: the change already lives in the
     // helper (it applied it in-process) — only the caches need updating so
     // watchdog re-pushes preserve the user's values.
@@ -3770,6 +3785,9 @@ fn spawn_helper_watchdog(app: tauri::AppHandle, action_port: u16, toolbar_port: 
         let mut last_launch = Instant::now();
         loop {
             thread::sleep(Duration::from_secs(10));
+            if QUITTING.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
             if TcpStream::connect((IPC_HOST, toolbar_port)).is_ok() {
                 continue;
             }

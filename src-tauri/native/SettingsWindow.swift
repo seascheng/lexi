@@ -75,7 +75,7 @@ final class SettingsNavigationState {
 /// The settings sidebar's flat tab list, grouped for display. New pages
 /// join here as the migration proceeds.
 enum SettingsTab: CaseIterable, Identifiable {
-    case general, appearance, ai, shortcuts, vocabulary, review, notebook, configs
+    case general, appearance, ai, shortcuts, vocabulary, review, notebook, configs, toolbar, card, clipboard, launcher
 
     var id: Self { self }
 
@@ -89,6 +89,10 @@ enum SettingsTab: CaseIterable, Identifiable {
         case .review: "Review"
         case .notebook: "Notebook"
         case .configs: "Configs"
+        case .toolbar: "Toolbar"
+        case .card: "Card & Notes"
+        case .clipboard: "Clipboard"
+        case .launcher: "Launcher"
         }
     }
 
@@ -102,12 +106,16 @@ enum SettingsTab: CaseIterable, Identifiable {
         case .review: "brain"
         case .notebook: "notebook-pen"
         case .configs: "list.bullet.rectangle"
+        case .toolbar: "uiwindow.arrangement.behind.single"
+        case .card: "rectangle.inset.filled"
+        case .clipboard: "doc.on.clipboard"
+        case .launcher: "rocket"
         }
     }
 }
 
 enum SettingsSection: CaseIterable, Identifiable {
-    case general, study
+    case general, study, surfaces
 
     var id: Self { self }
 
@@ -115,6 +123,7 @@ enum SettingsSection: CaseIterable, Identifiable {
         switch self {
         case .general: "General"
         case .study: "Study"
+        case .surfaces: "Surfaces"
         }
     }
 
@@ -122,6 +131,7 @@ enum SettingsSection: CaseIterable, Identifiable {
         switch self {
         case .general: [.general, .appearance, .ai, .shortcuts]
         case .study: [.vocabulary, .review, .notebook, .configs]
+        case .surfaces: [.toolbar, .card, .clipboard, .launcher]
         }
     }
 }
@@ -280,6 +290,10 @@ struct LexiSettingsDetail: View {
             case .review: ReviewPane()
             case .notebook: NotebookPane()
             case .configs: ConfigsPane()
+            case .toolbar: ToolbarConfigPane()
+            case .card: CardConfigPane()
+            case .clipboard: ClipboardConfigPane()
+            case .launcher: LauncherConfigPane()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

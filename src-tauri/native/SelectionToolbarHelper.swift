@@ -1081,6 +1081,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         buildNotesPanel()
         buildResultCard()
         installMouseMonitors()
+        installStatusItem()
         startDisplayServer()
         // Clipboard capture: own store + 0.5s poller, started once the TCP
         // server is up so suspend/resume posts can flow both ways.
@@ -1151,6 +1152,43 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         applyActions(actions)
     }
 
+    // MARK: - Status item
+
+    private var statusItem: NSStatusItem?
+
+    /// Menu-bar presence: the native successor to the tauri tray.
+    private func installStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Lexi")
+        let menu = NSMenu()
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(statusSettingsClicked), keyEquivalent: ",")
+        let launcherItem = NSMenuItem(title: "Open Launcher", action: #selector(statusLauncherClicked), keyEquivalent: "l")
+        let quitItem = NSMenuItem(title: "Quit Lexi", action: #selector(statusQuitClicked), keyEquivalent: "q")
+        for entry in [settingsItem, launcherItem, quitItem] { entry.target = self }
+        menu.addItem(settingsItem)
+        menu.addItem(launcherItem)
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(quitItem)
+        item.menu = menu
+        statusItem = item
+    }
+
+    @objc private func statusSettingsClicked() {
+        showSettingsWindow()
+    }
+
+    @objc private func statusLauncherClicked() {
+        launcherController.show()
+    }
+
+    @objc private func statusQuitClicked() {
+        postAction(action: "quit-lexi", text: "-")
+        // Rust exits and takes the app down; the fallback covers a hung
+        // parent so Quit never dead-ends.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            NSApp.terminate(nil)
+        }
+    }
     private func installMouseMonitors() {
         let downMask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
 
