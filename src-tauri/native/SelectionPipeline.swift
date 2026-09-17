@@ -149,6 +149,7 @@ final class SelectionPipeline {
             return
         }
 
+        // Full AX chain (direct → range slice → web-area markers).
         let axText = Self.readSelectedText()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var text = axText
         var source = "ax"
@@ -174,25 +175,158 @@ final class SelectionPipeline {
         }
     }
 
-    /// Tier-1 read: kAXSelectedText on the focused element of the focused
-    /// app (native macOS apps only — web areas and menu-copy are Layer 2 /
-    /// Rust's job during dual-track).
+    /// The full read chain: focused AX text → AXValue+range slice → web-area
+    /// markers. (The copied fallback lives in handleMouseUp.) Ported from
+    /// read_selected_text_via_ax / _ax_range / _web_area.
     static func readSelectedText() -> String? {
         let system = AXUIElementCreateSystemWide()
-        var focused: CFTypeRef?
+        var focusedRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
-            system, kAXFocusedUIElementAttribute as CFString, &focused
-        ) == .success, let element = focused else { return nil }
+            system, kAXFocusedUIElementAttribute as CFString, &focusedRef
+        ) == .success, let raw = focusedRef else { return nil }
+        // The AX API guarantees the CF type on success; the compiler rejects
+        // both `as?` (always-succeeds) and `as` (not convertible) for CF
+        // class references — bit-cast is the canonical bridge.
+        let focused = unsafeBitCast(raw, to: AXUIElement.self)
 
-        // Remote apps get a short leash: the default 6s timeout would stall
-        // the worker queue on a hung app.
-        AXUIElementSetMessagingTimeout(element as! AXUIElement, 0.3)
+        // Self-selection guard: our own editors (rename select-all etc.)
+        // are UI, not a user selection in a source app.
+        var pid: Int32 = 0
+        AXUIElementGetPid(focused, &pid)
+        if pid == ProcessInfo.processInfo.processIdentifier {
+            return nil
+        }
+        AXUIElementSetMessagingTimeout(focused, 0.3)
 
-        // Core Foundation objects are auto-managed in Swift — no CFRelease.
+        // Tier 1: direct attribute.
+        if let text = axStringAttribute(focused, kAXSelectedTextAttribute as CFString),
+           !text.isEmpty {
+            return text
+        }
+
+        // Tier 2: AXValue sliced by AXSelectedTextRange — terminals expose
+        // no AXSelectedText but do expose value + range.
+        if let text = readSelectedTextViaAxRange(focused) {
+            return text
+        }
+
+        // Tier 3: web-area text markers (Chrome/Safari/Edge/Arc/Electron).
+        if let text = readSelectedTextViaWebArea() {
+            return text
+        }
+        return nil
+    }
+
+    private static func axStringAttribute(_ element: AXUIElement, _ attribute: CFString) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let string = value as? String else { return nil }
+        return string
+    }
+
+    /// AXValue + AXSelectedTextRange slice. The range is UTF-16 based —
+    /// NSString slicing is exact here (byte slicing would tear multibyte).
+    private static func readSelectedTextViaAxRange(_ element: AXUIElement) -> String? {
+        guard let full = axStringAttribute(element, kAXValueAttribute as CFString) else { return nil }
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
-            element as! AXUIElement, kAXSelectedTextAttribute as CFString, &value
-        ) == .success, let text = value as? String else { return nil }
-        return text
+            element, kAXSelectedTextRangeAttribute as CFString, &value
+        ) == .success, let raw = value else { return nil }
+        let axValue = unsafeBitCast(raw, to: AXValue.self)
+
+        var range = CFRange(location: 0, length: 0)
+        guard AXValueGetValue(axValue, .cfRange, &range), range.length > 0 else { return nil }
+        if range.location == kCFNotFound { range.location = 0 }
+        let text = full as NSString
+        let nsRange = NSRange(location: range.location, length: range.length)
+        guard nsRange.location < text.length,
+              NSMaxRange(nsRange) <= text.length else { return nil }
+        return text.substring(with: nsRange)
+    }
+
+    /// Web selection via text markers: the focused element's (or the web
+    /// area's) AXSelectedTextMarkerRange resolved through the parameterized
+    /// AXStringForTextMarkerRange — no Cmd+C, no clipboard.
+    private static func readSelectedTextViaWebArea() -> String? {
+        let system = AXUIElementCreateSystemWide()
+        var appRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            system, kAXFocusedApplicationAttribute as CFString, &appRef
+        ) == .success, let raw = appRef else { return nil }
+        let app = unsafeBitCast(raw, to: AXUIElement.self)
+        AXUIElementSetMessagingTimeout(app, 0.5)
+
+        // The focused element comes from the application — the system-wide
+        // focused element is a classic stale-read source.
+        guard let focused = axCopyElementAttribute(app, kAXFocusedUIElementAttribute as CFString),
+              let webArea = findWebAreaAncestor(focused)
+                  ?? findWebAreaInFocusedWindow(app)
+        else { return nil }
+
+        // Retry briefly: the renderer can lag the selection gesture.
+        for attempt in 0..<3 {
+            if attempt > 0 { Thread.sleep(forTimeInterval: 0.05) }
+            guard let markerRange = copyMarkerRange(focused) ?? copyMarkerRange(webArea) else { continue }
+            var out: CFTypeRef?
+            guard AXUIElementCopyParameterizedAttributeValue(
+                webArea, "AXStringForTextMarkerRange" as CFString, markerRange, &out
+            ) == .success, let text = out as? String,
+                !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { continue }
+            return text
+        }
+        return nil
+    }
+
+    private static func axCopyElementAttribute(_ element: AXUIElement, _ attribute: CFString) -> AXUIElement? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let raw = value else { return nil }
+        return unsafeBitCast(raw, to: AXUIElement.self)
+    }
+
+    /// Bounded ancestor walk hunting the AXWebArea (WebKit + Chromium both
+    /// render web content under that role).
+    private static func findWebAreaAncestor(_ element: AXUIElement) -> AXUIElement? {
+        var current = element
+        for _ in 0..<25 {
+            guard let parent = axCopyElementAttribute(current, kAXParentAttribute as CFString) else { break }
+            current = parent
+            if axStringAttribute(current, kAXRoleAttribute as CFString) == "AXWebArea" {
+                return current
+            }
+        }
+        return nil
+    }
+
+    /// Focused window's first AXWebArea descendant, depth-first and bounded
+    /// (selecting static page text can leave focus at the window level).
+    private static func findWebAreaInFocusedWindow(_ app: AXUIElement) -> AXUIElement? {
+        guard let window = axCopyElementAttribute(app, kAXFocusedWindowAttribute as CFString) else { return nil }
+        return findWebAreaDescendant(window, depth: 6)
+    }
+
+    private static func findWebAreaDescendant(_ element: AXUIElement, depth: Int) -> AXUIElement? {
+        guard depth > 0 else { return nil }
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value) == .success,
+              let children = value as? [AXUIElement] else { return nil }
+        for child in children {
+            if axStringAttribute(child, kAXRoleAttribute as CFString) == "AXWebArea" {
+                return child
+            }
+            if let deeper = findWebAreaDescendant(child, depth: depth - 1) {
+                return deeper
+            }
+        }
+        return nil
+    }
+
+    private static func copyMarkerRange(_ element: AXUIElement) -> AXValue? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element, "AXSelectedTextMarkerRange" as CFString, &value
+        ) == .success, let raw = value else { return nil }
+        return unsafeBitCast(raw, to: AXValue.self)
     }
 }
