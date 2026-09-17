@@ -465,6 +465,36 @@ extension LexiStore {
     }
 }
 
+extension LexiStore {
+    /// The Note tool's write: a note row plus its default tag binding.
+    static func insertNote(content: String, tag: String = "Tmp") {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "INSERT INTO notes (name, content, created_at) VALUES (NULL, ?1, strftime('%Y-%m-%d %H:%M:%S','now'));",
+            -1, &statement, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, content, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(statement) == SQLITE_DONE else { return }
+
+        let id = sqlite3_last_insert_rowid(db)
+        var link: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "INSERT OR IGNORE INTO tags (name) VALUES (?1); INSERT INTO note_tags (note_id, tag_id) SELECT ?2, id FROM tags WHERE name = ?1;",
+            -1, &link, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(link) }
+        sqlite3_bind_text(link, 1, tag, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int64(link, 2, id)
+        sqlite3_step(link)
+    }
+}
+
 /// One entry of the shared action registry (`toolbar_tools` blob): the
 /// toolbar scope and the card's Actions-tab scope each read their columns.
 struct LexiToolEntry: Codable, Identifiable, Hashable {

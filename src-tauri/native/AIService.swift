@@ -219,6 +219,44 @@ extension SelectionToolbarApp {
     }
 }
 
+// MARK: - Builtin tools
+
+/// Local executions for the toolbar/card builtin tools — parity with the
+/// Rust execute_tool bodies. Handoff stays on Rust (needs activation +
+/// text injection; disabled by default).
+enum LexiTools {
+    static func copy(text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
+    static func search(text: String) {
+        let config = LexiStore.toolbarToolConfig(id: "search")
+        let engine = config["engine"] ?? "google"
+        let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
+
+        let url: String
+        switch engine {
+        case "bing": url = "https://www.bing.com/search?q=\(encoded)"
+        case "duckduckgo": url = "https://duckduckgo.com/?q=\(encoded)"
+        case "custom":
+            url = (config["customUrl"] ?? "").replacingOccurrences(of: "{query}", with: encoded)
+        default: url = "https://www.google.com/search?q=\(encoded)"
+        }
+        guard !url.isEmpty, let target = URL(string: url) else {
+            FileLog.write("TOOL search: no URL configured")
+            return
+        }
+        NSWorkspace.shared.open(target)
+    }
+
+    static func note(text: String) {
+        LexiStore.insertNote(content: text)
+        FileLog.write("TOOL note saved len=\(text.count)")
+    }
+}
+
 struct RuntimeError: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }

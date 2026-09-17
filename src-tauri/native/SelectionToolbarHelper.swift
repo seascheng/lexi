@@ -3100,14 +3100,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func applyTheme(_ themeName: String) {
         theme = ToolbarTheme(rawValue: themeName) ?? .dark
-        // With the vibrancy material the panel background comes from the
-        // system; the theme only pins the appearance (so a forced light/dark
-        // choice still applies) and the accent stroke color.
-        panel.appearance = theme == .dark
-            ? NSAppearance(named: .vibrantDark)
-            : NSAppearance(named: .vibrantLight)
-        // Contrast scrim: raw glass washes out on dark wallpapers — a
-        // theme-tinted veil under the content keeps panels legible anywhere.
         let scrim = PanelStyle.scrim(dark: theme == .dark).cgColor
         container.layer?.backgroundColor = scrim
         dragHandle.theme = theme
@@ -3227,12 +3219,17 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         guard let action = sender.identifier?.rawValue, !selectedText.isEmpty else {
             return
         }
-        // Phase 2: AI features and speech run in-process; the remaining
-        // built-in tools (copy/search/note/handoff) still route through
-        // Rust until Phase 3.
+        // Speech + builtin tools run in-process; handoff still routes
+        // through Rust (activation + injection, disabled by default).
         if action == "read" || action == "speak" {
             LexiSpeech.shared.speak(text: selectedText)
-        } else if action == "copy" || action == "search" || action == "note" || action == "handoff" {
+        } else if action == "copy" {
+            LexiTools.copy(text: selectedText)
+        } else if action == "search" {
+            LexiTools.search(text: selectedText)
+        } else if action == "note" {
+            LexiTools.note(text: selectedText)
+        } else if action == "handoff" {
             postAction(action: action, text: selectedText)
         } else {
             runFeatureLocally(featureId: action, text: selectedText)
@@ -3480,10 +3477,22 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private func submitInput(kind: String, id: String) {
         let text = inputTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        // Phase 2: features and speech run in-process; built-in tools
-        // still route through Rust until Phase 3.
+        // Speech + builtin tools run in-process; handoff stays on Rust
+        // (activation + injection, disabled by default).
         if id == "read" || id == "speak" {
             LexiSpeech.shared.speak(text: text)
+            return
+        }
+        if id == "copy" {
+            LexiTools.copy(text: text)
+            return
+        }
+        if id == "search" {
+            LexiTools.search(text: text)
+            return
+        }
+        if id == "note" {
+            LexiTools.note(text: text)
             return
         }
         if kind == "feature" {
