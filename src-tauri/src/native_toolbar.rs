@@ -1774,7 +1774,8 @@ fn handle_system_event(
             // paste target must never receive it. Everything else keeps
             // passing through (CallbackResult::Keep below).
             log_native("clipboard shortcut key detected");
-            thread::spawn(crate::clipboard::show_clipboard);
+            let app = app.clone();
+            thread::spawn(move || crate::clipboard::show_clipboard(&app));
             return CallbackResult::Drop;
         }
         CGEventType::KeyDown if is_copy_command(event) => {
@@ -3246,7 +3247,21 @@ fn dispatch_toolbar_action(
         }
         return send_card_notes(app);
     }
-
+    if action.action == "note-tag-create" {
+        // text = new tag name (from the clipboard panel's ⊕ chip). INSERT OR
+        // IGNORE keeps duplicate names harmless; the snapshot re-push lands
+        // the new tab in the panel's chip row.
+        let name = action.text.trim();
+        if !name.is_empty() {
+            let escaped = name.replace('\'', "''");
+            let _ = sqlite_query_json(
+                app,
+                &format!("INSERT OR IGNORE INTO tags(name) VALUES('{escaped}');"),
+            );
+            let _ = app.emit("lexi://notes-changed", ());
+        }
+        return send_card_notes(app);
+    }
     if action.action == "card-key" {
         return Ok(());
     }
@@ -3291,7 +3306,7 @@ fn dispatch_toolbar_action(
     }
 }
 /// Notes tab: latest 50 notes, pushed to the card for browsing/copying.
-fn send_card_notes(app: &tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn send_card_notes(app: &tauri::AppHandle) -> Result<(), String> {
     let rows = sqlite_query_json(
         app,
         "SELECT n.id, IFNULL(n.name, '') AS name, n.content, \

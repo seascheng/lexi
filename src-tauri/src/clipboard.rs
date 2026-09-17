@@ -92,7 +92,7 @@ pub fn set_clipboard_shortcut(shortcut: String) -> Result<(), String> {
 
 /// FlagsChanged hook from the tap. Only consulted for DoubleModifier presets
 /// ("Alt+Alt" / "Cmd+Cmd"); the Alt+V combo default matches on KeyDown.
-pub(crate) fn handle_flags_changed(_app: &AppHandle, event: &CGEvent) {
+pub(crate) fn handle_flags_changed(app: &AppHandle, event: &CGEvent) {
     let ShortcutMode::DoubleModifier { key_code } = current_clipboard_shortcut() else {
         return;
     };
@@ -104,7 +104,8 @@ pub(crate) fn handle_flags_changed(_app: &AppHandle, event: &CGEvent) {
     }
     if detect_double_press(&LAST_CLIPBOARD_PRESS) {
         log_native("double-modifier clipboard shortcut detected");
-        std::thread::spawn(show_clipboard);
+        let app = app.clone();
+        std::thread::spawn(move || show_clipboard(&app));
     }
 }
 
@@ -119,8 +120,11 @@ fn is_clipboard_hotkey_with(mode: &ShortcutMode, event: &CGEvent) -> bool {
 
 /// POST /clipboard-show — the helper's ClipboardPanelController treats this
 /// as a toggle (visible → hide), so repeat presses close the panel.
+/// Refreshes the notes snapshot first: the panel's tag tabs read the same
+/// NOTES_SNAPSHOT feed the ActionPanel's notes list uses.
 /// Runs on a worker thread (TCP write).
-pub(crate) fn show_clipboard() {
+pub(crate) fn show_clipboard(app: &tauri::AppHandle) {
+    let _ = crate::native_toolbar::send_card_notes(app);
     let Some(port) = toolbar_port() else {
         log_native("clipboard show skipped (helper port unknown)");
         return;
@@ -130,7 +134,6 @@ pub(crate) fn show_clipboard() {
     }
 }
 
-/// Lease mutex for the injection pasteboard window: suspend capture before
 /// text_injection borrows the pasteboard, resume after it restores. The
 /// helper skips any change up to the suspended count, so the injected text
 /// never lands in history as a genuine user copy.

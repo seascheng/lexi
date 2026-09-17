@@ -900,6 +900,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         controller.onHidden = { [weak self] in
             self?.postAction(action: "clipboard-hidden", text: "-")
         }
+        controller.onAction = { [weak self] action, text in
+            self?.postAction(action: action, text: text)
+        }
         return controller
     }()
     private var notesContainer: NSView!
@@ -2765,6 +2768,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
            let payload = try? JSONDecoder().decode(CardNotesPayload.self, from: bodyData) {
             DispatchQueue.main.async {
                 self.handleCardNotes(payload)
+                // The clipboard panel's tag tabs read the same snapshot.
+                self.clipboardController.updateNotes(
+                    notes: payload.notes.map {
+                        ClipboardNote(
+                            id: $0.id ?? 0, name: $0.name, content: $0.content,
+                            tags: $0.tags ?? [])
+                    },
+                    tags: payload.allTags ?? [])
             }
             return
         }

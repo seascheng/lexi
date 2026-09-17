@@ -1,47 +1,47 @@
 import AppKit
 
-/// Clipboard panel — Alt+V surface for browsing captured clipboard history
-/// and pasting an entry back into the app that was frontmost when the panel
-/// opened.
+/// Clipboard panel — Alt+V surface with two content layers behind one chip
+/// row (hapigo's design): the first chip is the **Clipboard** history; every
+/// note tag becomes a chip showing that category's notes; the trailing ⊕
+/// chip creates a new category. Enter pastes into the app that was frontmost
+/// when the panel opened — for clips AND for notes (a note is a permanent
+/// clipboard entry; its content is what gets pasted).
 ///
 /// Top-level isolated from the toolbar/result-card/notes/launcher flows: it
-/// owns its panel, data (ClipboardStore/ClipboardMonitor) and actions.
+/// owns its panel, data (ClipboardStore/ClipboardMonitor + a notes snapshot
+/// pushed over the same /card-notes feed the ActionPanel uses) and actions.
 /// Shared bottom layers only: `KeyablePanel`, `makePanelBackground`,
-/// `CardTheme`, `FlippedView`, `LauncherRowView` (SelectionToolbarHelper.swift
-/// / LauncherPanel.swift) and the TCP dispatch in
-/// `SelectionToolbarApp.handleRequestData`.
+/// `CardTheme`, `FlippedView`, `LauncherRowView`, `lucideImage`, `tagColor`,
+/// `PanelDesign` (SelectionToolbarHelper.swift / LauncherPanel.swift) and the
+/// TCP dispatch in `SelectionToolbarApp.handleRequestData`.
 ///
-/// Layout follows hapigo's clipboard: search field, colored-dot filter chips,
-/// variable-height preview rows with source-app icons, and a footer status
-/// strip — drawn entirely in the helper's existing goty visual language
-/// (CardTheme fills, selectedFill capsule, hairlines).
+/// Layout follows hapigo's clipboard: chip tab row, search field, variable
+/// preview rows with source-app icons, and a footer status strip — drawn in
+/// the helper's goty visual language via the shared `PanelDesign` tokens.
 final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     /// Fired whenever the panel hides itself (Esc / focus loss / toggle).
     var onHidden: (() -> Void)?
 
-    private static let panelWidth: CGFloat = 520
+    /// Action channel back to lexi (the app delegate wires this to its TCP
+    /// postAction): currently the ⊕ create-category request.
+    var onAction: ((String, String) -> Void)?
+
+    private static let panelWidth: CGFloat = PanelDesign.panelWidth
     static let singleLineHeight: CGFloat = 32
-    static let twoLineHeight: CGFloat = 50
+    private static let twoLineHeight: CGFloat = 50
     private static let headerHeight: CGFloat = 28
     private static let maxListHeight: CGFloat = 11 * ClipboardPanelController.twoLineHeight
-    private static let chromeHeight: CGFloat = 146 // search 12+26+8 + chips 24+8 + footer 24 + hairline/pads
-    private static let side: CGFloat = 12
+    private static let chromeHeight: CGFloat = 146 // search 12+26+8 + chips 24+8 + footer 24 + pads
+    private static let side: CGFloat = PanelDesign.sideInset
 
-    /// Colored filter chips (hapigo's category row). Fixed five in v1;
-    /// semantics are tinycast's exclusive ClipboardFilter.
-    private static let chips: [(title: String, color: NSColor, filter: ClipboardFilter)] = [
-        ("全部", NSColor.systemGray, .all),
-        ("置顶", NSColor.systemPink, .pinned),
-        ("文本", NSColor.systemBlue, .text),
-        ("链接", NSColor.systemGreen, .link),
-        ("文件", NSColor.systemOrange, .file),
-    ]
+    /// The note tag that absorbs untagged notes — seeded by migration 008.
+    private static let defaultTag = "Tmp"
 
     private let panel: KeyablePanel
     private let root: FlippedView
     private let glassContent: NSView
     private let searchField = NSSearchField()
-    private var chipViews: [ChipPillView] = []
+    private var chipViews: [(kind: ChipKind, view: ChipPillView)] = []
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
     private let emptyLabel = NSTextField(labelWithString: "")
@@ -51,14 +51,22 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 
     /// Set once at helper startup; the monitor keeps filling it.
     private var store: ClipboardStore?
-    private var filter: ClipboardFilter = .all
     private var rows: [Row] = []
-    /// Flat selectable items in display order — footer counts and paste
-    /// target resolution read from here.
+    /// Flat selectable clips in display order (clipboard tab only).
     private var visibleItems: [ClipboardItem] = []
     /// Small live cache of decoded thumbnails so scrolling doesn't re-read
     /// PNGs. Image rows only.
     private var thumbnailCache: [UUID: NSImage] = [:]
+
+    /// Notes snapshot (fed by the /card-notes push) + the tags table names.
+    private var notes: [ClipboardNote] = []
+    private var allTags: [String] = []
+
+    /// Which chip is active. `.clipboard` shows the history; `.tag(name)`
+    /// shows that category's notes.
+    private var tab: Tab = .clipboard
+    /// ⊕ flow: the search field temporarily collects the new category name.
+    private var creatingTag = false
 
     /// The app that was frontmost when the panel opened — the paste target.
     private var previousApp: NSRunningApplication?
@@ -67,9 +75,21 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     /// next selection change or reload.
     private var footerNoticeUntil: Date?
 
+    enum Tab: Equatable {
+        case clipboard
+        case tag(String)
+    }
+
+    enum ChipKind: Equatable {
+        case clipboard
+        case tag(String)
+        case add
+    }
+
     enum Row {
         case header(String)
         case clip(ClipboardItem)
+        case note(ClipboardNote)
     }
 
     private var selectedRow: Int {
@@ -87,6 +107,12 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         return item
     }
 
+    private var selectedNote: ClipboardNote? {
+        let row = tableView.selectedRow
+        guard row >= 0, row < rows.count, case .note(let note) = rows[row] else { return nil }
+        return note
+    }
+
     override init() {
         panel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 300),
@@ -102,7 +128,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let (background, content, _) = makePanelBackground(
             frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 300),
-            cornerRadius: 14
+            cornerRadius: PanelDesign.panelCornerRadius
         )
         panel.contentView = background
         glassContent = content
@@ -128,6 +154,19 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         self.store = store
     }
 
+    /// Notes snapshot from the /card-notes feed — same data the ActionPanel's
+    /// notes list renders. Rebuilds the chip tab row and reloads.
+    func updateNotes(notes: [ClipboardNote], tags: [String]) {
+        self.notes = notes
+        var tags = tags
+        if !tags.contains(Self.defaultTag) {
+            tags.append(Self.defaultTag) // untagged notes always have a home
+        }
+        allTags = tags
+        rebuildChips()
+        reload()
+    }
+
     // MARK: show / hide
 
     func show() {
@@ -138,7 +177,8 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         }
         previousApp = NSWorkspace.shared.frontmostApplication
         searchField.stringValue = ""
-        filter = .all
+        endTagCreation()
+        tab = .clipboard
         syncChips()
         reload()
         placePanel()
@@ -161,14 +201,14 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             ? NSAppearance(named: .vibrantDark)
             : NSAppearance(named: .vibrantLight)
         styleChrome()
-        for chip in chipViews { chip.applyTheme(cardTheme) }
+        for chip in chipViews { chip.view.applyTheme(cardTheme) }
         tableView.reloadData()
     }
 
     // MARK: chrome
 
     private func buildChrome() {
-        searchField.frame = NSRect(x: Self.side, y: 12, width: Self.panelWidth - Self.side * 2, height: 26)
+        searchField.frame = NSRect(x: Self.side, y: 12, width: Self.panelWidth - Self.side * 2, height: PanelDesign.searchHeight)
         searchField.placeholderString = "输入关键词搜索"
         searchField.focusRingType = .none
         searchField.font = .systemFont(ofSize: 13)
@@ -177,17 +217,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         searchField.delegate = self
         root.addSubview(searchField)
 
-        for chip in Self.chips {
-            let view = ChipPillView(frame: NSRect(x: 0, y: 46, width: 64, height: PanelDesign.pillHeight))
-            view.configure(title: chip.title, color: chip.color) { [weak self] in
-                guard let self, self.filter != chip.filter else { return }
-                self.filter = chip.filter
-                self.syncChips()
-                self.reload()
-            }
-            chipViews.append(view)
-            root.addSubview(view)
-        }
+        rebuildChips()
 
         tableView.headerView = nil
         tableView.backgroundColor = .clear
@@ -210,7 +240,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         tableView.target = self
         tableView.action = #selector(rowDoubleClicked)
 
-
         footerLeft.font = .systemFont(ofSize: 11)
         footerRight.font = .systemFont(ofSize: 11)
         footerRight.alignment = .right
@@ -224,9 +253,59 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         root.addSubview(emptyLabel)
     }
 
+    /// Chip tab row: [Clipboard] + one chip per tag + [＋]. Rebuilt whenever
+    /// the notes snapshot arrives (tags may have changed).
+    private func rebuildChips() {
+        chipViews.forEach { $0.view.removeFromSuperview() }
+        chipViews.removeAll()
+
+        func add(_ kind: ChipKind, _ view: ChipPillView) {
+            chipViews.append((kind, view))
+            root.addSubview(view)
+        }
+        let clipboard = ChipPillView(frame: NSRect(x: 0, y: 46, width: 64, height: PanelDesign.pillHeight))
+        clipboard.configure(title: "Clipboard", color: .systemGray) { [weak self] in
+            self?.selectTab(.clipboard)
+        }
+        add(.clipboard, clipboard)
+
+        for tag in allTags {
+            let view = ChipPillView(frame: NSRect(x: 0, y: 46, width: 64, height: PanelDesign.pillHeight))
+            let color = tagColor(for: tag, dark: cardTheme.isDark)
+            view.configure(title: tag, color: color) { [weak self] in
+                self?.selectTab(.tag(tag))
+            }
+            add(.tag(tag), view)
+        }
+
+        let addChip = ChipPillView(frame: NSRect(x: 0, y: 46, width: 32, height: PanelDesign.pillHeight))
+        addChip.configureAdd { [weak self] in
+            self?.beginTagCreation()
+        }
+        add(.add, addChip)
+
+        syncChips()
+    }
+
+    private func selectTab(_ tab: Tab) {
+        guard self.tab != tab else { return }
+        self.tab = tab
+        endTagCreation()
+        searchField.stringValue = ""
+        syncChips()
+        reload()
+    }
+
     private func syncChips() {
-        for (index, chip) in chipViews.enumerated() {
-            chip.setSelected(Self.chips[index].filter == filter)
+        for (kind, view) in chipViews {
+            view.setSelected(kind == activeChipKind)
+        }
+    }
+
+    private var activeChipKind: ChipKind {
+        switch tab {
+        case .clipboard: return .clipboard
+        case .tag(let name): return .tag(name)
         }
     }
 
@@ -243,8 +322,13 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 
     private func layoutChrome(height: CGFloat) {
         var x = Self.side
-        for chip in chipViews {
-            let width = max(chip.fittingSize.width + 26, 56)
+        for (kind, chip) in chipViews {
+            let width: CGFloat = kind == .add ? 32 : max(chip.fittingSize.width + 26, 56)
+            guard x + width <= Self.panelWidth - Self.side else {
+                chip.isHidden = true // overflow tags stay reachable by search
+                continue
+            }
+            chip.isHidden = false
             chip.frame = NSRect(x: x, y: 46, width: width, height: PanelDesign.pillHeight)
             x = chip.frame.maxX + 6
         }
@@ -273,14 +357,24 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             case 1: return Self.singleLineHeight
             default: return Self.twoLineHeight
             }
+        case .note(let note):
+            // Named notes are two-deck (name over content preview); unnamed
+            // notes collapse to their content as a one/two-line text row.
+            if note.name.isEmpty {
+                guard let text = ClipboardNotePreview.text(note) else {
+                    return Self.singleLineHeight
+                }
+                return ClipboardPanelController.previewLineCount(for: text) == 1
+                    ? Self.singleLineHeight : Self.twoLineHeight
+            }
+            return Self.twoLineHeight
         }
     }
 
     /// Measured wrapped-line count for a 452pt column: lay the text out in a
-    /// throwaway wrapping label and count line heights. The char-width
-    /// heuristic (latin 6.5pt / CJK 13pt) misjudged percent-encoded URLs and
-    /// dense CJK, which is how rows came out one-line-tall with two-line
-    /// content. User rule: at most TWO preview lines.
+    /// throwaway wrapping label and count line heights (char-width heuristics
+    /// misjudged percent-encoded URLs and dense CJK). User rule: at most TWO
+    /// preview lines.
     static func previewLineCount(for text: String) -> Int {
         let measuring = NSTextField(wrappingLabelWithString: text)
         measuring.font = .systemFont(ofSize: 13)
@@ -304,15 +398,31 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     // MARK: data
 
     func reload() {
+        switch tab {
+        case .clipboard:
+            reloadClipboard()
+        case .tag(let tag):
+            reloadNotes(tag: tag)
+        }
+        tableView.reloadData()
+        updateFooter()
+        updateEmptyState()
+        if let firstSelectable = rows.indices.first(where: {
+            if case .header = rows[$0] { return false }
+            return true
+        }) {
+            tableView.selectRowIndexes(IndexSet(integer: firstSelectable), byExtendingSelection: false)
+        }
+        placePanel()
+    }
+
+    private func reloadClipboard() {
         guard let store else {
             rows = []
             visibleItems = []
-            updateFooter()
-            emptyLabel.isHidden = false
-            placePanel()
             return
         }
-        let found = store.search(searchField.stringValue, filter: filter)
+        let found = store.search(searchField.stringValue, filter: .all)
         // The store returns pinned rows leading (pin order) — split them into
         // their section header block; recency rows follow unwrapped.
         let pinned = found.prefix { $0.pinnedAt != nil }
@@ -324,22 +434,35 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         }
         rows += rest.map { Row.clip($0) }
         visibleItems = Array(found)
-
         thumbnailCache = thumbnailCache.filter { id, _ in found.contains { $0.id == id } }
-        tableView.reloadData()
+    }
 
-        emptyLabel.isHidden = !rows.isEmpty
-        emptyLabel.stringValue = rows.isEmpty && filter != .all
-            ? "该分类暂无匹配内容"
-            : "暂无粘贴板历史 — 复制任意内容开始"
-        if let firstSelectable = rows.indices.first(where: {
-            if case .clip = rows[$0] { return true }
-            return false
-        }) {
-            tableView.selectRowIndexes(IndexSet(integer: firstSelectable), byExtendingSelection: false)
+    private func reloadNotes(tag: String) {
+        let query = searchField.stringValue.trimmingCharacters(in: .whitespaces).lowercased()
+        let matching = notes.filter { note in
+            let inTag = note.tags.contains(tag)
+                || (note.tags.isEmpty && tag == Self.defaultTag)
+            guard inTag else { return false }
+            guard !query.isEmpty else { return true }
+            let haystack = "\(note.name)\n\(note.content)".lowercased()
+            return haystack.contains(query)
         }
-        updateFooter()
-        placePanel()
+        visibleItems = []
+        rows = matching.map { Row.note($0) }
+    }
+
+    private func updateEmptyState() {
+        emptyLabel.isHidden = !rows.isEmpty
+        switch tab {
+        case .clipboard:
+            emptyLabel.stringValue = searchField.stringValue.isEmpty
+                ? "暂无粘贴板历史 — 复制任意内容开始"
+                : "没有匹配的粘贴板内容"
+        case .tag:
+            emptyLabel.stringValue = searchField.stringValue.isEmpty
+                ? "该分类暂无笔记"
+                : "没有匹配的笔记"
+        }
     }
 
     private func updateFooter() {
@@ -347,9 +470,16 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             return // a notice is showing; it clears on the next interaction
         }
         footerNoticeUntil = nil
+        let selectable = rows.filter { row in
+            if case .header = row { return false }
+            return true
+        }
         let row = tableView.selectedRow
-        let ordinal = row >= 0 ? row + 1 : 0
-        footerRight.stringValue = "⌘P 置顶 · ⌫ 删除 · ↩ 粘贴"
+        let ordinal = row >= 0 ? row : 0
+        footerLeft.stringValue = "已选 \(ordinal) 项，总共 \(selectable.count) 项"
+        footerRight.stringValue = tab == .clipboard
+            ? "⌘P 置顶 · ⌫ 删除 · ↩ 粘贴"
+            : "↩ 粘贴"
     }
 
     private func showFooterNotice(_ text: String) {
@@ -359,9 +489,10 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 
     // MARK: actions
 
-    /// ⌘P lands here via KeyablePanel.keyEquivalentHandler.
+    /// ⌘P lands here via KeyablePanel.keyEquivalentHandler (clipboard tab
+    /// only — notes are managed in the ActionPanel / main window).
     func togglePinSelected() {
-        guard let store, let item = selectedItem else { return }
+        guard tab == .clipboard, let store, let item = selectedItem else { return }
         let wasPinned = item.pinnedAt != nil
         store.setPinned(item, pinned: !wasPinned)
         reload()
@@ -375,12 +506,21 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     }
 
     private func deleteSelected() {
-        guard let store, let item = selectedItem else { return }
+        guard tab == .clipboard, let store, let item = selectedItem else { return }
         store.delete(item)
         reload()
     }
 
     private func pasteSelected() {
+        switch tab {
+        case .clipboard:
+            pasteClipboardSelection()
+        case .tag:
+            pasteNoteSelection()
+        }
+    }
+
+    private func pasteClipboardSelection() {
         guard let store, let item = selectedItem else { return }
         if ClipboardPaster.paste(item, store: store, previousApp: previousApp) {
             hide(notify: true)
@@ -391,16 +531,54 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         }
     }
 
+    private func pasteNoteSelection() {
+        guard let note = selectedNote else { return }
+        if ClipboardPaster.pasteString(note.content, previousApp: previousApp) {
+            hide(notify: true)
+        }
+    }
+
     @objc private func rowDoubleClicked() {
         pasteSelected()
+    }
+
+    // MARK: tag creation (⊕ chip)
+
+    private func beginTagCreation() {
+        creatingTag = true
+        searchField.placeholderString = "输入新分类名，回车创建（Esc 取消）"
+        searchField.stringValue = ""
+        panel.makeFirstResponder(searchField)
+    }
+
+    private func endTagCreation() {
+        creatingTag = false
+        searchField.placeholderString = "输入关键词搜索"
+    }
+
+    private func commitTagCreation() {
+        let name = searchField.stringValue.trimmingCharacters(in: .whitespaces)
+        endTagCreation()
+        searchField.stringValue = ""
+        guard !name.isEmpty else {
+            reload()
+            return
+        }
+        // Rust inserts into tags (INSERT OR IGNORE) and re-pushes the notes
+        // snapshot; the new chip appears with that feed. Switch optimistically
+        // so the panel is already on the fresh, empty category.
+        tab = .tag(name)
+        syncChips()
+        onAction?("note-tag-create", name)
+        reload()
     }
 
     // MARK: keyboard
 
     private func moveVertical(_ delta: Int) {
         let selectable = rows.indices.filter {
-            if case .clip = rows[$0] { return true }
-            return false
+            if case .header = rows[$0] { return false }
+            return true
         }
         guard !selectable.isEmpty else { return }
         let current = tableView.selectedRow
@@ -414,12 +592,19 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         updateFooter()
     }
 
-    private func cycleFilter(_ delta: Int) {
-        let all = Self.chips.map(\.filter)
-        guard let index = all.firstIndex(of: filter) else { return }
-        filter = all[(index + delta + all.count) % all.count]
-        syncChips()
-        reload()
+    /// Tab cycles the chip tabs (skipping the ⊕ chip, which is not a tab).
+    private func cycleTabs(_ delta: Int) {
+        let kinds = chipViews.map(\.kind).filter { $0 != .add }
+        guard let index = kinds.firstIndex(of: activeChipKind) else { return }
+        let next = kinds[(index + delta + kinds.count) % kinds.count]
+        switch next {
+        case .clipboard:
+            selectTab(.clipboard)
+        case .tag(let name):
+            selectTab(.tag(name))
+        case .add:
+            break
+        }
     }
 
     // NSSearchFieldDelegate — arrows/Enter/Tab/Esc/⌫ while the search field
@@ -433,18 +618,32 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             moveVertical(1)
             return true
         case NSSelectorFromString("insertNewline:"):
-            pasteSelected()
+            if creatingTag {
+                commitTagCreation()
+            } else {
+                pasteSelected()
+            }
             return true
         case NSSelectorFromString("insertTab:"):
-            cycleFilter(1)
-            return true
+            if !creatingTag {
+                cycleTabs(1)
+                return true
+            }
+            return false
         case NSSelectorFromString("deleteBackward:"):
-            if searchField.stringValue.isEmpty {
+            if creatingTag { return false }
+            if tab == .clipboard, searchField.stringValue.isEmpty {
                 deleteSelected()
                 return true
             }
-            return false // editing the query — let the field handle it
+            return false
         case NSSelectorFromString("cancelOperation:"):
+            if creatingTag {
+                endTagCreation()
+                searchField.stringValue = ""
+                reload()
+                return true
+            }
             if !searchField.stringValue.isEmpty {
                 searchField.stringValue = ""
                 reload()
@@ -457,9 +656,9 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         }
     }
 
-    // NSSearchFieldDelegate — live filter.
+    // NSSearchFieldDelegate — live filter (suppressed during ⊕ input mode).
     func controlTextDidChange(_ obj: Notification) {
-        guard obj.object as? NSSearchField === searchField else { return }
+        guard obj.object as? NSSearchField === searchField, !creatingTag else { return }
         reload()
     }
 
@@ -496,8 +695,18 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
                 thumbnail: thumbnail(for: item),
                 sourceIcon: ClipboardMonitor.shared.cachedIcon(forBundleID: item.sourceBundleID))
             return cell
+        case .note(let note):
+            let cell = reuse(ClipCell.self, row: row)
+            cell.configureNote(
+                note: note, theme: cardTheme, height: rowHeight(for: rows[row]),
+                sourceIcon: Self.noteGlyph)
+            return cell
         }
     }
+
+    /// Shared note glyph for note rows (lucide notebook-pen).
+    static let noteGlyph: NSImage? = lucideImage(
+        for: "notebook-pen", title: "note", color: .systemGray)
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         let view = tableView.makeView(
@@ -506,9 +715,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         ) as? LauncherRowView ?? LauncherRowView()
         view.identifier = NSUserInterfaceItemIdentifier("LauncherRowView")
         view.fillColor = cardTheme.selectedFill
-        // Capsule 6..514 on the 520pt row — visible floating margin from the
-        // panel edge, and it pads the row content (icon at 12, text ends at
-        // 508) by 6pt on each side.
         view.insetDx = PanelDesign.rowCapsuleInsetX
         view.insetDy = PanelDesign.rowCapsuleInsetY
         return view
@@ -516,6 +722,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 
     private func thumbnail(for item: ClipboardItem) -> NSImage? {
         guard item.kind == .image else { return nil }
+        if let cached = thumbnailCache[item.id] { return cached }
         guard let store, let url = store.imageURL(for: item) else {
             return nil
         }
@@ -538,6 +745,26 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     }
 }
 
+/// A note as seen by the clipboard panel: the ActionPanel owns editing; this
+/// surface reads name/content/tags and pastes content.
+struct ClipboardNote {
+    let id: Int64
+    let name: String
+    let content: String
+    let tags: [String]
+}
+
+enum ClipboardNotePreview {
+    /// Whitespace-collapsed preview for rows and matching; empty when there
+    /// is nothing readable.
+    static func text(_ note: ClipboardNote) -> String? {
+        guard !note.content.isEmpty else { return nil }
+        let collapsed = note.content.replacingOccurrences(
+            of: "\\s+", with: " ", options: .regularExpression)
+        return collapsed.isEmpty ? nil : collapsed
+    }
+}
+
 /// Paste-back (tinycast Paster contract): write the item's flavors plus the
 /// internal marker so the poller skips our own write, activate the app that
 /// was frontmost before the panel, then synthesize the full ⌘V sequence from
@@ -553,6 +780,23 @@ enum ClipboardPaster {
         _ item: ClipboardItem, store: ClipboardStore, previousApp: NSRunningApplication?
     ) -> Bool {
         guard write(item, store: store) else { return false }
+        previousApp?.activate()
+        DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay) {
+            postCommandV()
+        }
+        return true
+    }
+
+    /// String counterpart — note rows paste their content the same way. The
+    /// internal marker keeps the paste out of history (notes are their own
+    /// persistent store; duplicating them as clips would be noise).
+    @discardableResult
+    static func pasteString(_ text: String, previousApp: NSRunningApplication?) -> Bool {
+        guard !text.isEmpty else { return false }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.declareTypes([.string, ClipboardMonitor.internalType], owner: nil)
+        pb.setString(text, forType: .string)
         previousApp?.activate()
         DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay) {
             postCommandV()
@@ -612,7 +856,8 @@ enum ClipboardPaster {
 }
 
 /// Filter chip: colored dot + label, selectedFill capsule when active —
-/// the launcher tab-pill grammar with hapigo's dots.
+/// the launcher tab-pill grammar with hapigo's dots. The ⊕ variant hides the
+/// dot and shows a plus glyph instead of a title.
 final class ChipPillView: NSView {
     private let dot = NSView()
     private let label = NSTextField(labelWithString: "")
@@ -644,7 +889,27 @@ final class ChipPillView: NSView {
             label.frame = NSRect(x: 24, y: 4, width: 80, height: 16)
             addSubview(label)
         }
+        dot.isHidden = false
         label.stringValue = title
+        label.frame = NSRect(x: 24, y: 4, width: 80, height: 16)
+        applyTheme(theme)
+    }
+
+    /// The ⊕ create-category chip: plus glyph instead of dot+title.
+    func configureAdd(onActivate: @escaping () -> Void) {
+        self.onActivate = onActivate
+        if !didLayout {
+            didLayout = true
+            wantsLayer = true
+            layer?.cornerRadius = PanelDesign.pillCornerRadius
+
+            label.font = .systemFont(ofSize: 13, weight: .medium)
+            label.alignment = .center
+            addSubview(label)
+        }
+        dot.isHidden = true
+        label.stringValue = "＋"
+        label.frame = NSRect(x: 0, y: 3, width: 32, height: 18)
         applyTheme(theme)
     }
 
@@ -696,7 +961,7 @@ final class ChipPillView: NSView {
     }
 }
 
-/// Section header row (「固定」).
+/// Section header row (「置顶」).
 final class ClipboardHeaderCell: NSView {
     private let label = NSTextField(labelWithString: "")
     private var didLayout = false
@@ -722,12 +987,13 @@ final class ClipboardHeaderCell: NSView {
 ///
 /// Rows show exactly one of: single-line text (name label, centered),
 /// wrapping text (up to 2 lines, fills the row), file (name over dim path),
-/// image (40pt thumbnail; quiet placeholder while it decodes).
+/// image (40pt thumbnail; quiet placeholder while it decodes), note (same
+/// two-deck as file rows; unnamed notes collapse to a text row).
 final class ClipCell: NSView {
     private let iconView = NSImageView()
     private let thumbnailView = NSImageView()
-    private let nameLabel = NSTextField(labelWithString: "")  // single-line text / file name
-    private let pathLabel = NSTextField(labelWithString: "")  // file path (dim)
+    private let nameLabel = NSTextField(labelWithString: "")  // single-line text / file or note name
+    private let pathLabel = NSTextField(labelWithString: "")  // file path / note content (dim)
     private let previewLabel = NSTextField(wrappingLabelWithString: "")
     private var installed = false
     private var nameCenterY: NSLayoutConstraint!
@@ -791,6 +1057,59 @@ final class ClipCell: NSView {
             previewLabel.stringValue = "图片"
             previewLabel.alignment = .center
             previewLabel.isHidden = thumbnail != nil
+        }
+        iconView.image = sourceIcon
+    }
+
+    /// Note rows reuse the same skeleton: named notes render name over dim
+    /// content (file-row shape); unnamed notes collapse to a text row.
+    func configureNote(
+        note: ClipboardNote, theme: CardTheme, height: CGFloat, sourceIcon: NSImage?
+    ) {
+        installConstraints()
+
+        nameLabel.isHidden = true
+        pathLabel.isHidden = true
+        previewLabel.isHidden = true
+        thumbnailView.isHidden = true
+
+        let text = ClipboardNotePreview.text(note)
+        if note.name.isEmpty {
+            // Unnamed note: the content IS the row — one line centered, or a
+            // two-line wrap in the taller row.
+            nameTop.isActive = false
+            let wraps = text != nil
+                && height > ClipboardPanelController.singleLineHeight + 1
+                && ClipboardPanelController.previewLineCount(for: text!) > 1
+            nameCenterY.isActive = !wraps
+            if wraps {
+                previewLabel.font = .systemFont(ofSize: 13)
+                previewLabel.textColor = theme.foreground
+                previewLabel.stringValue = text ?? ""
+                previewLabel.isHidden = false
+            } else {
+                nameLabel.font = .systemFont(ofSize: 13)
+                nameLabel.textColor = theme.foreground
+                nameLabel.stringValue = text ?? ""
+                nameLabel.lineBreakMode = .byTruncatingTail
+                nameLabel.cell?.usesSingleLineMode = true
+                nameLabel.isHidden = false
+            }
+        } else {
+            nameCenterY.isActive = false
+            nameTop.isActive = true
+            nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
+            nameLabel.textColor = theme.foreground
+            nameLabel.stringValue = note.name
+            nameLabel.lineBreakMode = .byTruncatingTail
+            nameLabel.cell?.usesSingleLineMode = true
+            nameLabel.isHidden = false
+            pathLabel.font = .systemFont(ofSize: 11)
+            pathLabel.textColor = theme.tertiaryText
+            pathLabel.stringValue = text ?? ""
+            pathLabel.lineBreakMode = .byTruncatingTail
+            pathLabel.cell?.usesSingleLineMode = true
+            pathLabel.isHidden = false
         }
         iconView.image = sourceIcon
     }
