@@ -1098,7 +1098,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 self?.panels.present(.launcher)
                 self?.launcherController.show()
             },
-            onClipboard: { [weak self] in self?.showClipboardPanel() }
+            onClipboard: { [weak self] in self?.showClipboardPanel() },
+            onPopup: { [weak self] in self?.showPopupCard() }
         )
         shortcutMonitor?.onCopyCommand = { [weak self] in
             self?.selectionPipeline?.noteCopyCommand()
@@ -1201,6 +1202,16 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         // /show). Gating in both places makes the second call self-reject.
         panels.present(.toolbar)
         showPanel(ShowPayload(text: text, x: Int(point.x), y: Int(point.y)))
+    }
+
+    /// The popup shortcut's action: open the idle card (Actions tab, no
+    /// run yet) with the current selection pre-filled if available.
+    /// Replaces Rust's trigger_popup_with_selection.
+    func showPopupCard() {
+        // Try to read the current selection; empty = idle card with no input.
+        let selection = SelectionPipeline.readSelectedText()?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        showResultCard(ResultShowPayload(inputText: selection))
     }
 
     private func terminateOlderHelperInstances() {

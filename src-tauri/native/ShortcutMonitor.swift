@@ -121,9 +121,12 @@ final class ShortcutMonitor {
     private var clipboardMode: LexiShortcutMode?
     private let onLauncher: () -> Void
     private let onClipboard: () -> Void
+    private let onPopup: () -> Void
     /// Plain Cmd+C (no other modifiers) — the browser fallback trigger.
     /// Wired by the app to SelectionPipeline.noteCopyCommand().
     var onCopyCommand: (() -> Void)?
+    private var popupMode: LexiShortcutMode?
+    private var popupDetector = DoublePressDetector()
 
     /// True for a plain Cmd+C KeyDown (port of is_copy_command).
     private static func isCopyCommand(keyCode: UInt16, flags: CGEventFlags) -> Bool {
@@ -134,9 +137,11 @@ final class ShortcutMonitor {
             && !flags.contains(.maskAlternate)
     }
 
-    init(onLauncher: @escaping () -> Void, onClipboard: @escaping () -> Void) {
+    init(onLauncher: @escaping () -> Void, onClipboard: @escaping () -> Void,
+         onPopup: @escaping () -> Void = {}) {
         self.onLauncher = onLauncher
         self.onClipboard = onClipboard
+        self.onPopup = onPopup
         reload()
         installTap()
     }
@@ -144,6 +149,7 @@ final class ShortcutMonitor {
     func reload() {
         launcherMode = LexiShortcutMode.parse(LexiStore.setting("launcherShortcut") ?? "Shift+Shift")
         clipboardMode = LexiShortcutMode.parse(LexiStore.setting("clipboardShortcut") ?? "Alt+V")
+        popupMode = LexiShortcutMode.parse(LexiStore.setting("popupShortcut") ?? "Ctrl+Ctrl")
     }
 
     private func installTap() {
@@ -195,6 +201,11 @@ final class ShortcutMonitor {
                LexiShortcutMode.modifierFlag(forKeyCode: code).map({ flags.contains($0) }) == true,
                clipboardDetector.detect() {
                 DispatchQueue.main.async { [weak self] in self?.onClipboard() }
+            }
+            if case .doubleModifier(let code) = popupMode,
+               LexiShortcutMode.modifierFlag(forKeyCode: code).map({ flags.contains($0) }) == true,
+               popupDetector.detect() {
+                DispatchQueue.main.async { [weak self] in self?.onPopup() }
             }
 
         case .keyDown:
