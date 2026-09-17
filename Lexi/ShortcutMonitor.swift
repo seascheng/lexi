@@ -9,7 +9,7 @@ import CoreGraphics
 //   clipboard shortcut → clipboard panel (in-process)
 // The popup shortcut stays in Rust until the AX selection reader migrates.
 // The clipboard arm DROPS matching events: Alt+V would otherwise type "√"
-// into the focused app (the one swallowing rule the Rust tap had).
+// into the focused app (the one deliberate swallowing rule).
 // ---------------------------------------------------------------------------
 
 enum LexiShortcutMode: Equatable {
@@ -171,7 +171,7 @@ final class ShortcutMonitor {
             callback: callback,
             userInfo: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
         ) else {
-            FileLog.write("SHORTCUT tap create failed — shortcuts stay on the Rust tap")
+            FileLog.write("SHORTCUT tap create failed — shortcuts disabled this launch")
             return
         }
         tap = machPort

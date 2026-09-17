@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import Network
 
-private let logURL = URL(fileURLWithPath: "/tmp/lexi-selection-helper.log")
+let logURL = URL(fileURLWithPath: "/tmp/lexi-selection-helper.log")
 
 /// goty-style color system: every lift is derived from the theme's own
 /// background/foreground pair (no second palette, no accent-blue capsules).
@@ -36,13 +36,13 @@ struct CardTheme {
         )
     }
 
-    private func luminance(_ c: NSColor) -> CGFloat {
+    func luminance(_ c: NSColor) -> CGFloat {
         let x = c.usingColorSpace(.deviceRGB) ?? c
         func f(_ v: CGFloat) -> CGFloat { v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
         return 0.2126 * f(x.redComponent) + 0.7152 * f(x.greenComponent) + 0.0722 * f(x.blueComponent)
     }
 
-    private func contrast(_ a: NSColor, _ b: NSColor) -> CGFloat {
+    func contrast(_ a: NSColor, _ b: NSColor) -> CGFloat {
         let la = luminance(a), lb = luminance(b)
         return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
     }
@@ -239,17 +239,14 @@ enum FileLog {
     }
 }
 
-private let toolbarHandleWidth: CGFloat = 16
-private let toolbarSegmentWidth: CGFloat = 30
-private let toolbarHeight: CGFloat = 28
-private let toolbarIconSize: CGFloat = 14
-private let toolbarVerticalGap: CGFloat = 6
-private let notesPanelWidth: CGFloat = 380
-private let resultCardWidth: CGFloat = 420
-private let notesRowHeight: CGFloat = 32
-private let notesMaxVisibleRows = 8
+let toolbarHandleWidth: CGFloat = 16
+let toolbarSegmentWidth: CGFloat = 30
+let toolbarHeight: CGFloat = 28
+let toolbarIconSize: CGFloat = 14
+let toolbarVerticalGap: CGFloat = 6
+let resultCardWidth: CGFloat = 420
 
-private struct ToolbarAction: Decodable {
+struct ToolbarAction: Decodable {
     let id: String
     let title: String
     let icon: String
@@ -577,7 +574,7 @@ func lucideMarkup(for icon: String) -> String {
     }
 }
 
-private enum ToolbarTheme: String {
+enum ToolbarTheme: String {
     case dark
     case light
 
@@ -618,7 +615,7 @@ private enum ToolbarTheme: String {
     }
 }
 
-private final class ToolbarButton: NSButton {
+final class ToolbarButton: NSButton {
     var theme: ToolbarTheme = .dark {
         didSet {
             contentTintColor = theme.iconColor
@@ -626,13 +623,13 @@ private final class ToolbarButton: NSButton {
             needsDisplay = true
         }
     }
-    private var trackingAreaRef: NSTrackingArea?
-    private var isPressed = false {
+    var trackingAreaRef: NSTrackingArea?
+    var isPressed = false {
         didSet {
             updateBackground()
         }
     }
-    private var isHovering = false {
+    var isHovering = false {
         didSet {
             updateBackground()
         }
@@ -648,7 +645,7 @@ private final class ToolbarButton: NSButton {
         setup()
     }
 
-    private func setup() {
+    func setup() {
         wantsLayer = true
         // Small-radius highlight: the inset capsule gets a quiet 6pt corner.
         layer?.cornerRadius = 6
@@ -658,7 +655,7 @@ private final class ToolbarButton: NSButton {
         focusRingType = .none
     }
 
-    private func updateBackground() {
+    func updateBackground() {
         let color: NSColor
         if isPressed {
             color = theme.pressedColor
@@ -712,7 +709,7 @@ private final class ToolbarButton: NSButton {
     }
 }
 
-private final class ToolbarDragHandle: NSView {
+final class ToolbarDragHandle: NSView {
     var theme: ToolbarTheme = .dark {
         didSet {
             needsDisplay = true
@@ -789,7 +786,7 @@ final class KeyablePanel: NSPanel {
 /// Borderless icon button with hover/press feedback (system-feel chrome):
 /// subtle fill on hover, stronger on press, corner radius to match chips.
 final class HoverIconButton: NSButton {
-    private var hoverArea: NSTrackingArea?
+    var hoverArea: NSTrackingArea?
     var baseAlpha: CGFloat = 0.10
     var pressAlpha: CGFloat = 0.16
 
@@ -832,7 +829,7 @@ final class HoverIconButton: NSButton {
 /// forwarded to another scroll view (the markdown content) — the strips are
 /// one line high, so the default vertical rubber-band made the buttons
 /// "scroll up and down" in place.
-private final class HorizontalOnlyClip: NSScrollView {
+final class HorizontalOnlyClip: NSScrollView {
     weak var verticalForward: NSScrollView?
     /// Notes list: vertical deltas must reach THIS scroll view's table
     /// (native scrolling) instead of being dropped like the one-line strips.
@@ -863,15 +860,15 @@ private final class HorizontalOnlyClip: NSScrollView {
 /// Resize surfaces for the borderless card: bottom-right corner, right edge,
 /// bottom edge. Dragging anchors the opposite edge (standard window resize
 /// semantics) and each zone shows the matching system cursor.
-private final class CardResizeZone: NSView {
+final class CardResizeZone: NSView {
     enum Edge { case corner, right, bottom }
     let edge: Edge
     /// (width, height) deltas — nil means "this zone doesn't change it".
     var onResize: ((_ width: CGFloat?, _ height: CGFloat?) -> Void)?
     var onReset: (() -> Void)?
-    private var startMouse = NSPoint.zero
-    private var startSize = NSSize(width: 420, height: 240)
-    private var isDark = false
+    var startMouse = NSPoint.zero
+    var startSize = NSSize(width: 420, height: 240)
+    var isDark = false
     private static let diagonalCursor: NSCursor = {
         if let image = NSImage(systemSymbolName: "arrow.up.left.and.arrow.down.right",
                                accessibilityDescription: "Resize") {
@@ -909,7 +906,7 @@ private final class CardResizeZone: NSView {
         }
     }
 
-    private var cursor: NSCursor {
+    var cursor: NSCursor {
         switch edge {
         case .corner: return Self.diagonalCursor
         case .right: return .resizeLeftRight
@@ -949,23 +946,23 @@ private final class CardResizeZone: NSView {
 }
 
 final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    private var panel: NSPanel!
-    private var container: NSView!
-    private var dragHandle: ToolbarDragHandle!
-    private var buttons: [ToolbarButton] = []
-    private var actions = defaultToolbarActions()
-    private var theme: ToolbarTheme = .dark
-    private var cardTheme: CardTheme { theme == .dark ? CardTheme.dark : CardTheme.light }
-    private var selectedText = ""
-    private var localKeyMonitor: Any?
-    private var globalKeyMonitor: Any?
-    private var localMouseMonitor: Any?
-    private var globalMouseMonitor: Any?
-    private var localMouseMoveMonitor: Any?
-    private var globalMouseMoveMonitor: Any?
-    private var globalScrollMonitor: Any?
-    private var notesPanel: NSPanel!
-    private lazy var launcherController: LauncherPanelController = {
+    var panel: NSPanel!
+    var container: NSView!
+    var dragHandle: ToolbarDragHandle!
+    var buttons: [ToolbarButton] = []
+    var actions = defaultToolbarActions()
+    var theme: ToolbarTheme = .dark
+    var cardTheme: CardTheme { theme == .dark ? CardTheme.dark : CardTheme.light }
+    var selectedText = ""
+    var localKeyMonitor: Any?
+    var globalKeyMonitor: Any?
+    var localMouseMonitor: Any?
+    var globalMouseMonitor: Any?
+    var localMouseMoveMonitor: Any?
+    var globalMouseMoveMonitor: Any?
+    var globalScrollMonitor: Any?
+    var notesPanel: NSPanel!
+    lazy var launcherController: LauncherPanelController = {
         let controller = LauncherPanelController()
         controller.onHidden = { [weak self] in
             self?.panels.dismissed(.launcher)
@@ -977,7 +974,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         return controller
     }()
 
-    private lazy var clipboardController: ClipboardPanelController = {
+    lazy var clipboardController: ClipboardPanelController = {
         let controller = ClipboardPanelController()
         controller.onHidden = { [weak self] in
             self?.panels.dismissed(.clipboard)
@@ -987,83 +984,81 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
         return controller
     }()
-    private var notesContainer: NSView!
-    private var notesContent: NSView!
-    private var notesScrollView: NSScrollView!
-    private var notesRows: [(view: NSView, label: NSTextField, index: Int)] = []
-    private var notesCount = 0
-    private var notesSelectedIndex = 0
-    private var resultPanel: NSPanel!
-    private var resultContainer: NSView!
-    private var resultTabsView: NSView!
-    private var resultTabsClip: HorizontalOnlyClip!
-    private var resultTrashButton: NSButton!
-    private var resultCloseButton: NSButton!
-    private var resultScrollView: NSScrollView!
-    private var resultTextView: NSTextView!
-    private var resultLoadingIndicator: NSView!
-    private var resultLoadingLabel: NSTextField!
-    private var translateIdleView: NSView!
-    private var resultIdleLabel: NSTextField!
-    private var resultIdleHint: NSTextField!
-    private var resultIdleIcon: NSImageView!
-    private var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-    private var resultActionBar: NSView!
-    private var resultEntryBar: NSView!
-    private var resultCopyButton: NSButton!
-    private var resultSaveButton: NSButton!
-    private var inputContainer: NSView!
-    private var inputTextView: CardInputTextView!
-    private var runsSeparator: NSView!
-    private var inputButtonsRow: NSView!
-    private var inputButtonsClip: HorizontalOnlyClip!
-    private var cardRuns: [CardRun] = []
-    private var cardActions: [CardActionsPayload.Item] = []
-    private var activeRunId: String?
-    private var activePanel = "translate"
-    private var panelDefs: [(id: String, name: String, icon: String)] = []
-    private var cardPanelTabsView: NSView!
-    private var panelTabsControl: NSSegmentedControl!
-    private var resultRunsBar: NSView!
-    private var cardNotesClip: HorizontalOnlyClip!
+    var panelTabPills: [NSButton] = []
+    var cardAllTags: [String] = []
+    var tagDropdown: TagDropdownView?
+    var tagDropdownMonitor: Any?
+    var resultPanel: NSPanel!
+    var resultContainer: NSView!
+    var resultTabsView: NSView!
+    var resultTabsClip: HorizontalOnlyClip!
+    var resultTrashButton: NSButton!
+    var resultCloseButton: NSButton!
+    var resultScrollView: NSScrollView!
+    var resultTextView: NSTextView!
+    var resultLoadingIndicator: NSView!
+    var resultLoadingLabel: NSTextField!
+    var translateIdleView: NSView!
+    var resultIdleLabel: NSTextField!
+    var resultIdleHint: NSTextField!
+    var resultIdleIcon: NSImageView!
+    var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    var resultActionBar: NSView!
+    var resultEntryBar: NSView!
+    var resultCopyButton: NSButton!
+    var resultSaveButton: NSButton!
+    var inputContainer: NSView!
+    var inputTextView: CardInputTextView!
+    var runsSeparator: NSView!
+    var inputButtonsRow: NSView!
+    var inputButtonsClip: HorizontalOnlyClip!
+    var cardRuns: [CardRun] = []
+    var cardActions: [CardActionsPayload.Item] = []
+    var activeRunId: String?
+    var activePanel = "translate"
+    var panelDefs: [(id: String, name: String, icon: String)] = []
+    var cardPanelTabsView: NSView!
+    var panelTabsControl: NSSegmentedControl!
+    var resultRunsBar: NSView!
+    var cardNotesClip: HorizontalOnlyClip!
 
-    private var notesTableView: NotesTable!
-    private var noteSearchContainer: NSView!
-    private var noteSearchField: CardInputTextField!
-    private var noteTagBar: NSView!
-    private var noteTagButtons: [NSButton] = []
-    private var noteSearchText = ""
-    private var noteActiveTag = "all"
-    private var displayedNotes: [CardNotesPayload.Note] = []
-    private var cardNotesItems: [CardNotesPayload.Note] = []
-    private var reviewCardView: NSView!
-    private var reviewWordLabel: NSTextField!
-    private var reviewAnswerLabel: NSTextField!
-    private var cardPinned = false
+    var notesTableView: NotesTable!
+    var noteSearchContainer: NSView!
+    var noteSearchField: CardInputTextField!
+    var noteTagBar: NSView!
+    var noteTagButtons: [NSButton] = []
+    var noteSearchText = ""
+    var noteActiveTag = "all"
+    var displayedNotes: [CardNotesPayload.Note] = []
+    var cardNotesItems: [CardNotesPayload.Note] = []
+    var reviewCardView: NSView!
+    var reviewWordLabel: NSTextField!
+    var reviewAnswerLabel: NSTextField!
+    var cardPinned = false
     /// The app that was frontmost when the card/toolbar opened — the target
     /// for note-insert's paste-at-caret and handoff-style flows.
-    private var sourceApp: NSRunningApplication?
-    private var reviewRevealButton: NSButton!
-    private var reviewGradeButtons: [NSButton] = []
-    private var reviewEmptyLabel: NSTextField!
-    private var reviewCurrentWordId: Int64 = 0
-    private var runChipViews: [RunChipView] = []
-    private var runTabsContentWidth: CGFloat = 376
+    var sourceApp: NSRunningApplication?
+    var reviewRevealButton: NSButton!
+    var reviewGradeButtons: [NSButton] = []
+    var reviewEmptyLabel: NSTextField!
+    var reviewCurrentWordId: Int64 = 0
+    var runChipViews: [RunChipView] = []
+    var runTabsContentWidth: CGFloat = 376
     // Card opens at the user's preferred size (drag-resizable; double-click
     // a resize zone still returns to the auto-size default).
-    private var cardUserWidth: CGFloat? = 428
-    private var cardUserHeight: CGFloat? = 400
-    private var resizeCorner: CardResizeZone!
-    private var resizeRight: CardResizeZone!
-    private var resizeBottom: CardResizeZone!
-    private var entryButtons: [NSButton] = []
-    private var listener: NWListener?
-    private let listenerQueue = DispatchQueue(label: "lexi.toolbar.display")
+    var cardUserWidth: CGFloat? = 428
+    var cardUserHeight: CGFloat? = 400
+    var resizeCorner: CardResizeZone!
+    var resizeRight: CardResizeZone!
+    var resizeBottom: CardResizeZone!
+    var entryButtons: [NSButton] = []
+    var listener: NWListener?
+    let listenerQueue = DispatchQueue(label: "lexi.toolbar.display")
     /// Native settings window (full-Swift migration, phase 1). Created on
     /// first show; the app controller itself is nonisolated, so every touch
     /// hops through `MainActor.assumeIsolated` on the main queue.
-    private var settingsWindowController: LexiSettingsWindowController?
-    private let toolbarPort: UInt16
+    var settingsWindowController: LexiSettingsWindowController?
+    let toolbarPort: UInt16
 
     override init() {
         toolbarPort = UInt16(SelectionToolbarApp.argumentValue("--toolbar-port") ?? "") ?? 43877
@@ -1077,7 +1072,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         installEditMenu()
         terminateOlderHelperInstances()
         buildPanel()
-        buildNotesPanel()
         buildResultCard()
         installMouseMonitors()
         installStatusItem()
@@ -1115,15 +1109,15 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     /// Audit trail for which surface the user last interacted with.
     /// Panels are independent — no hide callbacks, no cross-panel policy.
-    private lazy var panels: PanelCoordinator = PanelCoordinator()
+    lazy var panels: PanelCoordinator = PanelCoordinator()
 
     /// Global keyboard shortcuts (launcher + clipboard), in-process.
-    private var shortcutMonitor: ShortcutMonitor?
-    private var selectionPipeline: SelectionPipeline?
-    private var lastToolbarShow: (text: String, at: Date)?
+    var shortcutMonitor: ShortcutMonitor?
+    var selectionPipeline: SelectionPipeline?
+    var lastToolbarShow: (text: String, at: Date)?
 
-    /// Dual-track gate: identical selection text within 600ms shows once
-    /// (helper tap + Rust tap both fire during the migration overlap).
+    /// Dedup gate: identical selection text within 600ms shows once
+    /// (selection drag and Cmd+C fallback can both fire for one gesture).
     func selectionShowGate(_ rawText: String) -> Bool {
         let key = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         let now = Date()
@@ -1192,7 +1186,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         showResultCard(ResultShowPayload(inputText: selection))
     }
 
-    private func terminateOlderHelperInstances() {
+    func terminateOlderHelperInstances() {
         let currentPid = ProcessInfo.processInfo.processIdentifier
         let currentBundleId = Bundle.main.bundleIdentifier
 
@@ -1207,12 +1201,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
     }
 
-    /// The card's tab row + input action buttons read one config snapshot.
-    /// Rust only pushed it on ITS card opens — every locally-opened card
-    /// since Phase 2 ran on stale data, and a helper restart left both
-    /// empty (the missing tabs/buttons). The helper owns the snapshot now:
-    /// read the shared DB (panel_config_items parity) at launch and on
-    /// every settings change.
+    /// The card's tab row + input action buttons read one config snapshot,
+    /// refreshed at launch and on every settings change.
     func refreshCardActions() {
         struct Entry {
             var order: Int
@@ -1257,67 +1247,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         ))
     }
 
-    private func buildPanel() {
-        panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: toolbarWidth(for: actions.count), height: toolbarHeight),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.isOpaque = false
-        panel.alphaValue = 1
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.level = .screenSaver
-        panel.hidesOnDeactivate = false
-        panel.acceptsMouseMovedEvents = true
-        panel.isMovableByWindowBackground = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-
-        let (background, content, _) = makePanelBackground(
-            frame: panel.contentView?.bounds ?? .zero,
-            surface: .bar
-        )
-        panel.contentView = background
-        container = content
-        dragHandle = ToolbarDragHandle(frame: NSRect(x: 0, y: 0, width: toolbarHandleWidth, height: toolbarHeight))
-        dragHandle.autoresizingMask = [.height]
-        dragHandle.theme = theme
-        dragHandle.onMouseDown = { [weak self] event in
-            self?.panel.performDrag(with: event)
-        }
-        container.addSubview(dragHandle)
-        applyActions(actions)
-    }
-
-    /// Cutover probe: can THIS process host the global event tap? TCC grants
-    /// accessibility per bundle — the answer decides whether the keyboard +
-    /// selection pipeline can migrate from Rust now or must wait for the
-    /// permission re-grant at app cutover. Log-only; nothing is installed.
-    private func probeEventTapAccess() {
-        let mask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
-        let tap = CGEvent.tapCreate(
-            tap: CGEventTapLocation(rawValue: 1) ?? .cghidEventTap, // kCGSessionEventTap
-            place: .headInsertEventTap,
-            options: .listenOnly,
-            eventsOfInterest: CGEventMask(mask),
-            callback: { _, _, _, _ in nil },
-            userInfo: nil
-        )
-        if let tap {
-            log("EVENTTAP probe: ok — helper may host the global tap")
-            CFMachPortInvalidate(tap)
-        } else {
-            log("EVENTTAP probe: DENIED — helper lacks accessibility trust")
-        }
-    }
-
-    // MARK: - Status item
-
-    private var statusItem: NSStatusItem?
+    var statusItem: NSStatusItem?
 
     /// Menu-bar presence: the native successor to the tauri tray.
-    private func installStatusItem() {
+    func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Lexi")
         let menu = NSMenu()
@@ -1333,18 +1266,18 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         statusItem = item
     }
 
-    @objc private func statusSettingsClicked() {
+    @objc func statusSettingsClicked() {
         showSettingsWindow()
     }
 
-    @objc private func statusLauncherClicked() {
+    @objc func statusLauncherClicked() {
         launcherController.show()
     }
 
-    @objc private func statusQuitClicked() {
+    @objc func statusQuitClicked() {
         NSApp.terminate(nil)
     }
-    private func installMouseMonitors() {
+    func installMouseMonitors() {
         let downMask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
 
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: downMask) { [weak self] event in
@@ -1396,19 +1329,19 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
     }
 
-    private func escapeResultCardIfNeeded() {
+    func escapeResultCardIfNeeded() {
         guard resultPanel?.isVisible == true, !cardPinned else { return }
         resultPanel.orderOut(nil)
         clearAllRuns(quietly: true)
     }
 
-    private func dismissalDistance(for location: NSPoint) -> CGFloat {
+    func dismissalDistance(for location: NSPoint) -> CGFloat {
         let screenWidth = (NSScreen.screens.first { $0.frame.contains(location) } ?? NSScreen.main)?
             .frame.width ?? 1440
         return max(180, min(screenWidth * 0.12, 280))
     }
 
-    private func hideIfCursorFarAway() {
+    func hideIfCursorFarAway() {
         guard panel.isVisible else { return }
         let location = NSEvent.mouseLocation
         let dx = location.x - panel.frame.midX
@@ -1420,211 +1353,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
     }
 
-    private func applyActions(_ nextActions: [ToolbarAction]) {
-        let normalized = nextActions.filter { !$0.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        actions = normalized
-        buttons.forEach { $0.removeFromSuperview() }
-        buttons.removeAll()
-
-        if actions.isEmpty {
-            hidePanel(force: true)
-            return
-        }
-
-        let width = toolbarWidth(for: actions.count)
-        container.frame = NSRect(x: 0, y: 0, width: width, height: toolbarHeight)
-        panel.setContentSize(NSSize(width: width, height: toolbarHeight))
-        dragHandle.frame = NSRect(x: 0, y: 0, width: toolbarHandleWidth, height: toolbarHeight)
-
-        for (index, action) in actions.enumerated() {
-            addToolbarButton(action: action, index: index)
-        }
-    }
-
-    private func addToolbarButton(action: ToolbarAction, index: Int) {
-        let button = ToolbarButton(
-            frame: NSRect(
-                x: toolbarHandleWidth + CGFloat(index) * toolbarSegmentWidth,
-                // Inset capsule: 3pt of bar breathing room above and below the
-                // highlight, so hover/press never touches the bar's edges.
-                y: 3,
-                width: toolbarSegmentWidth,
-                height: toolbarHeight - 6
-            )
-        )
-        button.autoresizingMask = []
-        button.identifier = NSUserInterfaceItemIdentifier(action.id)
-        button.toolTip = action.title
-        button.image = lucideImage(for: action.icon, title: action.title)
-        button.imageScaling = .scaleProportionallyDown
-        button.theme = theme
-        button.imagePosition = .imageOnly
-        button.target = self
-        button.action = #selector(runToolbarAction(_:))
-        buttons.append(button)
-        container.addSubview(button)
-    }
-
-
-    // MARK: - Native Notes panel (Hapigo-style: this panel is a stateless
-    // renderer; lexi's event tap owns the list, the selection, and the keys)
-
-    private func buildNotesPanel() {
-        notesPanel = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: notesPanelWidth, height: 200),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        notesPanel.isOpaque = false
-        notesPanel.backgroundColor = .clear
-        notesPanel.hasShadow = true
-        notesPanel.level = .popUpMenu
-        notesPanel.hidesOnDeactivate = false
-        notesPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-
-        let (notesBackground, notesBackgroundContent, _) = makePanelBackground(
-            frame: NSRect(x: 0, y: 0, width: notesPanelWidth, height: 200),
-            surface: .list
-        )
-        notesPanel.contentView = notesBackground
-        notesContainer = notesBackgroundContent
-
-        notesScrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: notesPanelWidth, height: 200))
-        notesScrollView.drawsBackground = false
-        notesScrollView.hasVerticalScroller = false
-        notesScrollView.hasHorizontalScroller = false
-        notesContainer.addSubview(notesScrollView)
-
-        // Manual layout (toolbar-style): NSStackView's Auto Layout fights
-        // hand-set frames and stacks every row at the same spot.
-        notesContent = NSView(frame: NSRect(x: 0, y: 0, width: notesPanelWidth, height: 200))
-        notesScrollView.documentView = notesContent
-    }
-
-    private func showNotesPanel(_ payload: NotesShowPayload) {
-        notesRows.forEach { $0.view.removeFromSuperview() }
-        notesRows.removeAll()
-        notesContent.subviews.forEach { $0.removeFromSuperview() }
-        notesCount = payload.notes.count
-
-        let count = payload.notes.count
-        // documentView is bottom-left origin: row 0 sits at the TOP.
-        let contentHeight = CGFloat(count) * notesRowHeight
-        notesContent.frame = NSRect(x: 0, y: 0, width: notesPanelWidth, height: contentHeight)
-
-        for (index, note) in payload.notes.enumerated() {
-            let row = makeNotesRow(index: index, note: note)
-            let y = contentHeight - CGFloat(index + 1) * notesRowHeight
-            row.view.frame = NSRect(x: 0, y: y, width: notesPanelWidth, height: notesRowHeight)
-            notesContent.addSubview(row.view)
-            notesRows.append((view: row.view, label: row.label, index: index))
-        }
-
-        let visible = CGFloat(min(count, notesMaxVisibleRows))
-        let listHeight = visible * notesRowHeight
-        let footerHeight: CGFloat = 30
-        let height = listHeight + footerHeight
-        notesScrollView.frame = NSRect(x: 0, y: footerHeight, width: notesPanelWidth, height: listHeight)
-        notesContainer.frame = NSRect(x: 0, y: 0, width: notesPanelWidth, height: height)
-
-        // Footer: jump to the card's manual input (AiForm). Rebuilt on every
-        // show because notesContent is cleared above.
-        let footer = NSView(frame: NSRect(x: 0, y: 0, width: notesPanelWidth, height: footerHeight))
-        footer.wantsLayer = true
-        let inputButton = NSButton(title: "Type to translate…", target: self, action: #selector(notesInputTapped))
-        inputButton.bezelStyle = .regularSquare
-        inputButton.isBordered = false
-        inputButton.font = .systemFont(ofSize: 12)
-        inputButton.contentTintColor = cardTheme.secondaryText
-        inputButton.image = lucideImage(for: "pen", title: "Type to translate")
-        inputButton.imageScaling = .scaleProportionallyDown
-        inputButton.imagePosition = .imageLeading
-        inputButton.frame = NSRect(x: 10, y: 5, width: notesPanelWidth - 20, height: 20)
-        footer.addSubview(inputButton)
-        let separator = NSView(frame: NSRect(x: 0, y: footerHeight - 0.5, width: notesPanelWidth, height: 0.5))
-        separator.wantsLayer = true
-        separator.layer?.backgroundColor = NSColor.separatorColor.cgColor
-        footer.addSubview(separator)
-        notesContainer.addSubview(footer)
-
-        let origin = clampedNotesOrigin(width: notesPanelWidth, height: height)
-        notesPanel.setFrame(
-            NSRect(x: origin.x, y: origin.y, width: notesPanelWidth, height: height),
-            display: true
-        )
-        applyNotesTheme()
-        selectNoteRow(payload.selected, scroll: true)
-        notesPanel.makeKeyAndOrderFront(nil)
-        notesPanel.makeFirstResponder(notesTableView)
-        log("notes panel shown rows=\(payload.notes.count)")
-    }
-
-    @objc private func notesInputTapped() {
-        hideNotesPanel(notifyLexi: true)
-    }
-
-    private func clampedNotesOrigin(width: CGFloat, height: CGFloat) -> NSPoint {
-        let point = NSEvent.mouseLocation
-        var origin = NSPoint(x: point.x - width / 2, y: point.y + 12)
-        if let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main {
-            let frame = screen.visibleFrame
-            origin.x = min(max(origin.x, frame.minX + 8), frame.maxX - width - 8)
-            origin.y = min(max(origin.y, frame.minY + 8), frame.maxY - height - 8)
-        }
-        return origin
-    }
-
-    private func makeNotesRow(index: Int, note: NotesShowPayload.Note) -> (view: NSView, label: NSTextField) {
-        let row = NSView(frame: NSRect(x: 0, y: 0, width: notesPanelWidth, height: notesRowHeight))
-        row.wantsLayer = true
-        let text = note.name.isEmpty ? note.content : "\(note.name): \(note.content)"
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 12)
-        label.lineBreakMode = .byTruncatingTail
-        label.maximumNumberOfLines = 1
-        label.cell?.wraps = false
-        label.frame = NSRect(x: 10, y: (notesRowHeight - 16) / 2, width: notesPanelWidth - 20, height: 16)
-        row.addSubview(label)
-        let click = NSClickGestureRecognizer(target: self, action: #selector(noteRowClicked(_:)))
-        row.addGestureRecognizer(click)
-        row.identifier = NSUserInterfaceItemIdentifier("note-\(index)")
-        return (row, label)
-    }
-
-    /// Row click = select + insert: posted back to lexi, which owns Enter.
-    @objc private func noteRowClicked(_ sender: NSClickGestureRecognizer) {
-        guard let id = sender.view?.identifier?.rawValue,
-              let index = Int(id.dropFirst("note-".count)) else { return }
-        selectNoteRow(index, scroll: true)
-    }
-
-    private func selectNoteRow(_ index: Int, scroll: Bool) {
-        notesSelectedIndex = index
-        for row in notesRows {
-            let selected = row.index == index
-            row.view.layer?.backgroundColor = selected
-                ? cardTheme.selectedFill.cgColor
-                : NSColor.clear.cgColor
-            row.label.textColor = selected
-                ? cardTheme.foreground
-                : (theme == .dark ? NSColor.white.withAlphaComponent(0.9) : NSColor.black.withAlphaComponent(0.85))
-        }
-        if scroll {
-            // Non-flipped document view: scroll origin measures from the bottom,
-            // so line up the viewport with the selected row's slot from the top.
-            let originY = max(0, contentHeight() - CGFloat(index + 1) * notesRowHeight)
-            notesScrollView.contentView.scroll(NSPoint(x: 0, y: originY))
-        }
-    }
-
-    private func contentHeight() -> CGFloat {
-        CGFloat(notesCount) * notesRowHeight
-    }
-
-    /// All card chrome tints in ONE place — build AND theme switches run it,
-    /// so dark/light flips can never leave stale system colors behind.
-    private func restateCardChromeTints() {
+    func restateCardChromeTints() {
         resultCloseButton?.contentTintColor = cardPinned ? cardTheme.foreground : cardTheme.secondaryText
         resultTrashButton?.contentTintColor = cardTheme.secondaryText
         resultCopyButton?.contentTintColor = cardTheme.secondaryText
@@ -1636,13 +1365,12 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         entryButtons.forEach { $0.contentTintColor = cardTheme.secondaryText }
     }
 
-    private func applyNotesTheme() {
+    func applyCardTheme() {
         restateCardChromeTints()
         let controlStroke = PanelStyle.controlBorder(dark: theme == .dark)
         let appearance = theme == .dark
             ? NSAppearance(named: .vibrantDark)
             : NSAppearance(named: .vibrantLight)
-        notesPanel.appearance = appearance
 
         resultPanel?.appearance = appearance
         if !isInputFocused {
@@ -1655,9 +1383,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
     }
 
-    private var isInputFocused = false
+    var isInputFocused = false
 
-    private func setInputFocused(_ focused: Bool) {
+    func setInputFocused(_ focused: Bool) {
         isInputFocused = focused
         styleCardInputs(focused: focused ? .actions : .none)
     }
@@ -1665,9 +1393,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     /// Both card inputs (Actions bar + Notes search) share ONE surface
     /// definition: same fill, hairline, radius, placeholder tint. Focus
     /// (per field) deepens the border.
-    private enum CardInputFocus { case none, actions, search }
+    enum CardInputFocus { case none, actions, search }
 
-    private func styleCardInputs(focused: CardInputFocus = .none) {
+    func styleCardInputs(focused: CardInputFocus = .none) {
         let surface = cardTheme.inputFill.cgColor
         let hairline = cardTheme.hairline.cgColor
         let focusTint = cardTheme.foreground.withAlphaComponent(0.45).cgColor
@@ -1685,1504 +1413,12 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             attributes: [.foregroundColor: cardTheme.tertiaryText, .font: NSFont.systemFont(ofSize: 13)]
         )
     }
-    // MARK: - Native result card (WebView parity): AiForm input bar,
-    // multi-run tabs, loading/streaming/ready/error states, EntryTypeTags,
-    // Copy/Save — rendered in AppKit, streamed from Rust. The card is never
-    // key unless clicked into (typing intent), and drags by its background.
 
-    private func buildResultCard() {
-        resultPanel = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: resultCardWidth, height: 240),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        resultPanel.isOpaque = false
-        resultPanel.backgroundColor = .clear
-        resultPanel.hasShadow = true
-        resultPanel.level = .popUpMenu
-        resultPanel.hidesOnDeactivate = false
-        resultPanel.isMovableByWindowBackground = true
-        resultPanel.acceptsMouseMovedEvents = true
-        resultPanel.delegate = self
-        resultPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-
-        let (resultBackground, resultContent, isGlass) = makePanelBackground(
-            frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 240),
-            surface: .card
-        )
-        resultContainer = resultContent
-        if isGlass {
-            // Glass draws its own rounded shape — no clip wrapper needed.
-            resultPanel.contentView = resultBackground
-        } else {
-            // Legacy: the vibrancy material draws past manual corner radii —
-            // wrap and mask so only the rounded card shows (grey-rounded +
-            // white-squared double edge fix).
-            let clip = NSView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 240))
-            clip.wantsLayer = true
-            clip.layer?.cornerRadius = 12
-            clip.layer?.masksToBounds = true
-            resultPanel.contentView = clip
-            clip.addSubview(resultBackground)
-        }
-
-        // Panel tab strip (top): panel switcher (Actions/Notes/Review, the
-        // Panel Config list) + close. WebView FloatingFrame parity.
-        resultTabsView = NSView(frame: NSRect(x: 0, y: 210, width: resultCardWidth, height: 32))
-        resultContainer.addSubview(resultTabsView)
-
-        cardPanelTabsView = NSView(frame: NSRect(x: 12, y: 4, width: resultCardWidth - 24 - 28, height: 28))
-        resultTabsView.addSubview(cardPanelTabsView)
-
-        panelTabsControl = NSSegmentedControl()
-        panelTabsControl.isHidden = true // replaced by the goty tab pills
-        cardPanelTabsView.addSubview(panelTabsControl)
-        buildPanelTabPills()
-
-        // Pin toggle (WebView FloatingFrame parity): unpinned = dismisses on
-        // outside click / Esc; pinned = stays. Replaces the close button —
-        // closing happens by unpinning, then clicking away.
-        resultCloseButton = NSButton(title: "", target: self, action: #selector(pinToggled))
-        resultCloseButton.bezelStyle = .regularSquare
-        resultCloseButton.isBordered = false
-        resultCloseButton.image = lucideImage(for: "pin-off", title: "Pin")
-        resultCloseButton.imageScaling = .scaleProportionallyDown
-        resultCloseButton.contentTintColor = cardTheme.secondaryText
-        resultCloseButton.toolTip = "Pin"
-        resultCloseButton.frame = NSRect(x: resultCardWidth - 30, y: 7, width: 20, height: 20)
-        resultTabsView.addSubview(resultCloseButton)
-        resultRunsBar = NSView(frame: NSRect(x: 0, y: 180, width: resultCardWidth, height: 28))
-        resultContainer.addSubview(resultRunsBar)
-
-        resultTabsClip = HorizontalOnlyClip(frame: NSRect(x: 8, y: 0, width: resultCardWidth - 84, height: 28))
-        resultTabsClip.drawsBackground = false
-        resultTabsClip.hasVerticalScroller = false
-        resultTabsClip.hasHorizontalScroller = false
-        resultTabsClip.autohidesScrollers = true
-        let runsDoc = NSView(frame: NSRect(x: 0, y: 0, width: resultCardWidth - 84, height: 28))
-        resultTabsClip.documentView = runsDoc
-        resultTabsClip.verticalForward = resultScrollView
-        resultRunsBar.addSubview(resultTabsClip)
-
-        runsSeparator = NSView(frame: .zero)
-        runsSeparator.isHidden = true
-        resultContainer.addSubview(runsSeparator)
-
-        resultTrashButton = NSButton(title: "", target: self, action: #selector(clearRunsClicked))
-        resultTrashButton.bezelStyle = .regularSquare
-        resultTrashButton.isBordered = false
-        resultTrashButton.image = lucideImage(for: "x", title: "Close all results")
-        resultTrashButton.imageScaling = .scaleProportionallyDown
-        resultTrashButton.toolTip = "Close all results"
-        resultTrashButton.contentTintColor = cardTheme.secondaryText
-        resultTrashButton.frame = NSRect(x: resultCardWidth - 34, y: 7, width: 20, height: 20)
-        resultContainer.addSubview(resultTrashButton) // top level: can never be overdrawn
-
-        // Content: markdown text + loading spinner + idle hint.
-        resultScrollView = NSScrollView(frame: NSRect(x: 0, y: 70, width: resultCardWidth, height: 130))
-        resultScrollView.drawsBackground = false
-        resultScrollView.hasVerticalScroller = true
-        resultScrollView.autohidesScrollers = true
-        resultScrollView.scrollerStyle = .overlay
-        resultContainer.addSubview(resultScrollView)
-
-        resultTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 130))
-        resultTextView.isEditable = false
-        resultTextView.drawsBackground = false
-        resultTextView.textContainerInset = NSSize(width: 14, height: 10)
-        resultTextView.isVerticallyResizable = true
-        resultTextView.autoresizingMask = [.width]
-        resultTextView.textContainer?.lineFragmentPadding = 0
-        resultScrollView.documentView = resultTextView
-
-        // Layer spinner: NSProgressIndicator freezes on windows that are not
-        // key; a CABasicAnimation rotation is driven by the render server and
-        // always spins.
-        resultLoadingIndicator = NSProgressIndicator(frame: NSRect(x: 14, y: 100, width: 16, height: 16))
-        (resultLoadingIndicator as! NSProgressIndicator).controlSize = .small
-        (resultLoadingIndicator as! NSProgressIndicator).style = .spinning
-        resultContainer.addSubview(resultLoadingIndicator)
-
-        resultLoadingLabel = NSTextField(labelWithString: "Running...")
-        resultLoadingLabel.font = .systemFont(ofSize: 13)
-        resultLoadingLabel.textColor = cardTheme.tertiaryText
-        resultLoadingLabel.frame = NSRect(x: 36, y: 100, width: 200, height: 18)
-        resultContainer.addSubview(resultLoadingLabel)
-
-        // Translate tab's idle placeholder — a content-area view exactly like
-        // cardNotesClip (notes) and reviewCardView (review): switching tabs
-        // hides it wholesale, no per-control isHidden bookkeeping.
-        translateIdleView = NSView(frame: NSRect(x: 0, y: 70, width: resultCardWidth, height: 130))
-        translateIdleView.isHidden = true
-        resultContainer.addSubview(translateIdleView)
-
-        resultIdleIcon = NSImageView(frame: NSRect(x: resultCardWidth / 2 - 8, y: 32, width: 16, height: 16))
-        resultIdleIcon.image = lucideImage(for: "sparkles", title: "Idle")
-        resultIdleIcon.contentTintColor = cardTheme.foreground
-        resultIdleIcon.imageScaling = .scaleProportionallyDown
-        translateIdleView.addSubview(resultIdleIcon)
-
-        resultIdleLabel = NSTextField(labelWithString: "Enter text, then choose an action.")
-        resultIdleLabel.font = .systemFont(ofSize: 13)
-        resultIdleLabel.textColor = cardTheme.secondaryText
-        resultIdleLabel.alignment = .center
-        resultIdleLabel.frame = NSRect(x: 10, y: 26, width: resultCardWidth - 20, height: 18)
-        translateIdleView.addSubview(resultIdleLabel)
-
-        resultIdleHint = NSTextField(labelWithString: "⏎ Run default")
-        resultIdleHint.font = .systemFont(ofSize: 11)
-        resultIdleHint.textColor = cardTheme.tertiaryText
-        resultIdleHint.alignment = .center
-
-        resultIdleHint.frame = NSRect(x: 10, y: 6, width: resultCardWidth - 20, height: 14)
-        translateIdleView.addSubview(resultIdleHint)
-
-        // Action bar: EntryTypeTags + Copy + Save (ready runs).
-        resultActionBar = NSView(frame: NSRect(x: 10, y: 36, width: resultCardWidth - 20, height: 32))
-        resultContainer.addSubview(resultActionBar)
-
-        resultEntryBar = NSView(frame: NSRect(x: 0, y: 0, width: 170, height: 28))
-        resultEntryBar.wantsLayer = true
-        resultEntryBar.layer?.cornerRadius = 6
-        resultEntryBar.layer?.borderWidth = 0.5
-        resultActionBar.addSubview(resultEntryBar)
-        for (index, title) in ["Word", "Phrase", "Pattern"].enumerated() {
-            let button = NSButton(title: title, target: self, action: #selector(entryTypeClicked(_:)))
-            button.bezelStyle = .regularSquare
-            button.isBordered = false
-            button.font = .systemFont(ofSize: 10, weight: .medium)
-            button.tag = index
-            button.frame = NSRect(x: CGFloat(index) * 56 + 2, y: 2, width: 52, height: 22)
-            resultEntryBar.addSubview(button)
-            entryButtons.append(button)
-        }
-
-        resultCopyButton = NSButton(title: "", target: self, action: #selector(copyResultClicked))
-        resultCopyButton.bezelStyle = .regularSquare
-        resultCopyButton.isBordered = false
-        resultCopyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy result")
-        resultCopyButton.imageScaling = .scaleProportionallyDown
-        resultCopyButton.contentTintColor = cardTheme.secondaryText
-        resultCopyButton.toolTip = "Copy result"
-        resultCopyButton.frame = NSRect(x: resultCardWidth - 190, y: 2, width: 26, height: 26)
-        resultActionBar.addSubview(resultCopyButton)
-
-        resultSaveButton = NSButton(title: "Save", target: self, action: #selector(saveResultClicked))
-        resultSaveButton.bezelStyle = .regularSquare
-        resultSaveButton.isBordered = false
-        resultSaveButton.font = .systemFont(ofSize: 12, weight: .medium)
-        resultSaveButton.wantsLayer = true
-        resultSaveButton.layer?.cornerRadius = 6
-        resultSaveButton.contentTintColor = cardTheme.background
-        resultSaveButton.frame = NSRect(x: resultCardWidth - 158, y: 4, width: 148, height: 24)
-        resultActionBar.addSubview(resultSaveButton)
-
-        // Input bar (WebView AiForm parity): single-line keeps the action
-        // buttons on the text row; multi-line moves them to a row below and
-        // gives the text the full width.
-        inputContainer = NSView(frame: NSRect(x: 10, y: 10, width: resultCardWidth - 20, height: 36))
-        inputContainer.wantsLayer = true
-        inputContainer.layer?.cornerRadius = 8
-        inputContainer.layer?.borderWidth = 1
-        resultContainer.addSubview(inputContainer)
-
-        inputTextView = CardInputTextView(frame: NSRect(x: 6, y: 4, width: resultCardWidth - 32 - 90, height: 26))
-        inputTextView.font = .systemFont(ofSize: 13)
-        inputTextView.drawsBackground = false
-        inputTextView.isRichText = false
-        inputTextView.isAutomaticQuoteSubstitutionEnabled = false
-        inputTextView.isAutomaticDashSubstitutionEnabled = false
-        inputTextView.delegate = self
-        inputTextView.onBecameFocus = { [weak self] in
-            self?.setInputFocused(true)
-        }
-        inputTextView.onLostFocus = { [weak self] in
-            self?.setInputFocused(false)
-        }
-        inputTextView.textContainer?.lineFragmentPadding = 0
-        inputTextView.placeholder = NSAttributedString(
-            string: "Enter text",
-            attributes: [.foregroundColor: cardTheme.tertiaryText, .font: NSFont.systemFont(ofSize: 13)]
-        )
-        inputButtonsRow = NSView(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
-        inputButtonsClip = HorizontalOnlyClip(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
-        inputButtonsClip.drawsBackground = false
-        inputButtonsClip.hasVerticalScroller = false
-        inputButtonsClip.hasHorizontalScroller = false
-        inputButtonsClip.autohidesScrollers = true
-        inputButtonsClip.contentView.automaticallyAdjustsContentInsets = false
-        inputButtonsClip.documentView = inputButtonsRow
-        inputButtonsClip.verticalForward = resultScrollView
-        inputContainer.addSubview(inputButtonsClip)
-
-        // Notes tab: browsable note rows (click = copy).
-        cardNotesClip = HorizontalOnlyClip(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
-        cardNotesClip.drawsBackground = false
-        cardNotesClip.allowsVertical = true
-        cardNotesClip.hasVerticalScroller = true
-        cardNotesClip.autohidesScrollers = true
-        cardNotesClip.scrollerStyle = .overlay
-        notesTableView = NotesTable(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
-        notesTableView.onDoubleClickRow = { [weak self] row in
-            guard let self, row >= 0, row < self.displayedNotes.count else { return }
-            if let cell = self.notesTableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NoteRowCell {
-                cell.beginRenaming()
-            }
-        }
-        notesTableView.onEnterKey = { [weak self] in
-            guard let self, self.notesTableView.selectedRow >= 0 else { return }
-            // Injects by note id: the visible list is filtered, so display
-            // indexes must never cross into the Rust snapshot.
-            let row = self.notesTableView.selectedRow
-            guard row >= 0, row < self.displayedNotes.count,
-                  let id = self.displayedNotes[row].id else { return }
-            ClipboardPaster.pasteString(self.displayedNotes[row].content, previousApp: self.sourceApp)
-        }
-        notesTableView.rowHeight = 40
-        notesTableView.intercellSpacing = .zero
-        notesTableView.style = .fullWidth
-        notesTableView.selectionHighlightStyle = .none
-        notesTableView.backgroundColor = .clear
-        notesTableView.usesAutomaticRowHeights = false
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("note"))
-        column.resizingMask = .autoresizingMask
-        notesTableView.addTableColumn(column)
-        notesTableView.dataSource = self
-        notesTableView.delegate = self
-        notesTableView.target = self
-        notesTableView.doubleAction = nil
-        notesTableView.action = #selector(notesTableClicked(_:))
-        notesTableView.sizeLastColumnToFit()
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(notesClipScrolled),
-            name: NSView.boundsDidChangeNotification, object: cardNotesClip.contentView
-        )
-        cardNotesClip.documentView = notesTableView
-        resultContainer.addSubview(cardNotesClip)
-
-        // Notes toolbar: live title search + tag filter chips. The search
-        // surface IS the Actions input component: container + CardInputTextView
-        // + overlay placeholder — identical construction, one language.
-        noteSearchContainer = NSView(frame: .zero)
-        noteSearchContainer.wantsLayer = true
-        noteSearchContainer.layer?.cornerRadius = 8
-        noteSearchContainer.layer?.borderWidth = 1
-        resultContainer.addSubview(noteSearchContainer)
-
-        noteSearchField = CardInputTextField(frame: .zero)
-        let searchCell = VerticallyCenteredTextFieldCell()
-        searchCell.stringValue = "" // bare NSTextFieldCell ships titled "Field"
-        searchCell.isEditable = true
-        searchCell.placeholderString = "Search notes"
-        noteSearchField.cell = searchCell
-        noteSearchField.font = .systemFont(ofSize: 13)
-        noteSearchField.textColor = cardTheme.foreground
-        noteSearchField.backgroundColor = .clear
-        noteSearchField.drawsBackground = false
-        noteSearchField.isBordered = false
-        noteSearchField.focusRingType = .none
-        noteSearchField.delegate = self
-        noteSearchField.onBecameFocus = { [weak self] in
-            self?.styleCardInputs(focused: .search)
-        }
-        noteSearchField.onLostFocus = { [weak self] in
-            self?.styleCardInputs(focused: .none)
-        }
-        noteSearchContainer.addSubview(noteSearchField)
-
-        noteTagBar = NSView(frame: .zero)
-        resultContainer.addSubview(noteTagBar)
-
-        // Review tab: word card + reveal + SM-2 grade buttons.
-        reviewCardView = NSView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 200))
-        resultContainer.addSubview(reviewCardView)
-
-        reviewWordLabel = NSTextField(labelWithString: "")
-        reviewWordLabel.font = .systemFont(ofSize: 22, weight: .semibold)
-        reviewWordLabel.alignment = .center
-        reviewWordLabel.frame = NSRect(x: 10, y: 120, width: resultCardWidth - 20, height: 28)
-        reviewCardView.addSubview(reviewWordLabel)
-
-        reviewAnswerLabel = NSTextField(labelWithString: "")
-        reviewAnswerLabel.font = .systemFont(ofSize: 14)
-        reviewAnswerLabel.textColor = cardTheme.secondaryText
-        reviewAnswerLabel.alignment = .center
-        reviewAnswerLabel.lineBreakMode = .byTruncatingTail
-        reviewAnswerLabel.frame = NSRect(x: 20, y: 88, width: resultCardWidth - 40, height: 18)
-        reviewCardView.addSubview(reviewAnswerLabel)
-
-        reviewRevealButton = NSButton(title: "Reveal", target: self, action: #selector(revealReviewClicked))
-        reviewRevealButton.bezelStyle = .rounded
-        reviewRevealButton.controlSize = .regular
-        reviewRevealButton.frame = NSRect(x: resultCardWidth / 2 - 40, y: 48, width: 80, height: 24)
-        reviewCardView.addSubview(reviewRevealButton)
-
-        for (index, title) in ["Again", "Hard", "Good", "Easy"].enumerated() {
-            let grade = NSButton(title: title, target: self, action: #selector(gradeClicked(_:)))
-            grade.bezelStyle = .rounded
-            grade.controlSize = .small
-            grade.tag = index
-            grade.isEnabled = false
-            grade.alphaValue = 0.4
-            grade.frame = NSRect(x: 20 + CGFloat(index) * 98, y: 12, width: 88, height: 26)
-            reviewCardView.addSubview(grade)
-            reviewGradeButtons.append(grade)
-        }
-
-        let makeZone: (CardResizeZone.Edge, NSRect) -> CardResizeZone = { [weak self] edge, frame in
-            let zone = CardResizeZone(edge: edge, frame: frame)
-            zone.onResize = { [weak self] width, height in
-                guard let self else { return }
-                if let width { self.cardUserWidth = (min(max(width, 360), 760)).rounded() }
-                if let height { self.cardUserHeight = (min(max(height, 240), 900)).rounded() }
-                self.layoutResultCard()
-            }
-            zone.onReset = { [weak self] in
-                self?.cardUserWidth = nil
-                self?.cardUserHeight = nil
-                self?.layoutResultCard()
-            }
-            return zone
-        }
-        resizeCorner = makeZone(.corner, NSRect(x: resultCardWidth - 16, y: 0, width: 16, height: 16))
-        resizeRight = makeZone(.right, NSRect(x: resultCardWidth - 4, y: 16, width: 4, height: 180))
-        resizeBottom = makeZone(.bottom, NSRect(x: 0, y: 0, width: resultCardWidth - 16, height: 4))
-        resultContainer.addSubview(resizeCorner)
-        resultContainer.addSubview(resizeRight)
-        resultContainer.addSubview(resizeBottom)
-
-        reviewEmptyLabel = NSTextField(labelWithString: "No words due for review.")
-        reviewEmptyLabel.font = .systemFont(ofSize: 13)
-        reviewEmptyLabel.textColor = cardTheme.tertiaryText
-        reviewEmptyLabel.alignment = .center
-        reviewEmptyLabel.frame = NSRect(x: 10, y: 90, width: resultCardWidth - 20, height: 18)
-        reviewCardView.addSubview(reviewEmptyLabel)
-    }
-
-    private var activeRun: CardRun? {
-        cardRuns.first { $0.id == activeRunId } ?? cardRuns.last
-    }
-
-    func showResultCard(_ payload: ResultShowPayload) {
-        sourceApp = NSWorkspace.shared.frontmostApplication
-        FileLog.write("CARD open=api runId=\(payload.runId ?? "-") feature=\(payload.featureId ?? "-") input=\(payload.inputText?.prefix(24) ?? "-")")
-        panels.present(.card)
-        // buttons, the input bar): the card presents and the AI stream
-        // starts locally from the shared DB.
-        var payload = payload
-        var feature: LexiAIFeature?
-        if let featureId = payload.featureId, !featureId.isEmpty {
-            feature = LexiStore.aiFeature(id: featureId)
-            if payload.title?.isEmpty != false, let row = feature {
-                payload.title = row.name
-                payload.icon = row.icon
-            }
-        }
-        if let runId = payload.runId, !runId.isEmpty {
-            let run = CardRun(
-                id: runId,
-                featureId: payload.featureId ?? "",
-                title: payload.title?.isEmpty == false ? payload.title! : "AI",
-                icon: payload.icon?.isEmpty == false ? payload.icon! : "wand"
-            )
-            cardRuns.append(run)
-            activeRunId = runId
-        } else {
-            // Idle invocation: fresh session, no runs.
-            cardRuns.removeAll()
-            activeRunId = nil
-        }
-        // New runs always surface on the Actions panel.
-        activePanel = "translate"
-        if let input = payload.inputText, !input.isEmpty {
-            inputTextView.string = input
-            rebuildInputButtons()
-        }
-        log("card shown runs=\(cardRuns.count)")
-        layoutResultCard()
-        rebuildRunTabs()
-        rebuildInputButtons()
-        renderActiveRun()
-        layoutResultCard()
-        if !resultPanel.isVisible {
-            placeResultCard()
-            if !reduceMotion, let layer = resultPanel.contentView?.layer {
-                resultPanel.alphaValue = 0
-                let rise = CABasicAnimation(keyPath: "transform.translation.y")
-                rise.fromValue = 6
-                rise.toValue = 0
-                rise.duration = 0.22
-                rise.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                layer.add(rise, forKey: "materialize")
-                resultPanel.makeKeyAndOrderFront(nil)
-                NSAnimationContext.runAnimationGroup({ context in
-                    context.duration = 0.22
-                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                    resultPanel.animator().alphaValue = 1
-                })
-            } else {
-                resultPanel.alphaValue = 0
-                resultPanel.makeKeyAndOrderFront(nil)
-                NSAnimationContext.runAnimationGroup({ context in
-                    context.duration = 0.15
-                    resultPanel.animator().alphaValue = 1
-                })
-            }
-        }
-        applyNotesTheme()
-        // WebView parity: the selected text lands in the input bar,
-        // editable for a follow-up run.
-        // The run starts here for every trigger path — Rust only asks for
-        // the card; the helper owns the stream.
-        if let runId = payload.runId, !runId.isEmpty, let feature {
-            Task { [weak self] in
-                await self?.streamRun(runId: runId, feature: feature, text: payload.inputText ?? "")
-            }
-        }
-    }
-
-    private func handleCardActions(_ payload: CardActionsPayload) {
-        cardActions = payload.actions
-        panelDefs = (payload.panels ?? []).map { ($0.id, $0.name, $0.icon) }
-        if !panelDefs.isEmpty, panelTabPills != nil {
-            buildPanelTabPills()
-        }
-        if panelDefs.isEmpty {
-            panelDefs = [("translate", "Actions", "file-text"), ("review", "Review", "book-open")]
-        }
-        rebuildInputButtons()
-        layoutResultCard()
-    }
-
-    @objc private func panelTabClicked(_ sender: NSButton) {
-        guard let id = sender.identifier?.rawValue else { return }
-        showPanelTab(id)
-    }
-
-    private func applyNoteFilters() {
-        let query = noteSearchText.trimmingCharacters(in: .whitespaces).lowercased()
-        displayedNotes = cardNotesItems.filter { note in
-            let title = (note.name.isEmpty ? note.content : note.name).lowercased()
-            let matchesQuery = query.isEmpty || title.contains(query)
-            let matchesTag = noteActiveTag == "all" || (note.tags ?? []).contains(noteActiveTag)
-            return matchesQuery && matchesTag
-        }
-        notesTableView.reloadData()
-        if !displayedNotes.isEmpty {
-            notesTableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-        }
-        layoutResultCard()
-    }
-
-    private func rebuildNoteTagBar() {
-        noteTagButtons.forEach { $0.removeFromSuperview() }
-        noteTagButtons.removeAll()
-        var tags = Set<String>()
-        for note in cardNotesItems {
-            (note.tags ?? []).forEach { tags.insert($0) }
-        }
-        for name in ["all"] + tags.sorted() {
-            let button = NSButton(title: name.capitalized, target: self, action: #selector(noteTagClicked(_:)))
-            button.isBordered = false
-            button.font = .systemFont(ofSize: 11, weight: .medium)
-            button.bezelStyle = .texturedRounded
-            button.toolTip = name == "all" ? "All notes" : "Filter: \(name)"
-            button.identifier = NSUserInterfaceItemIdentifier(name)
-            noteTagBar.addSubview(button)
-            noteTagButtons.append(button)
-        }
-        styleNoteTagButtons()
-        layoutResultCard()
-    }
-
-    private func layoutNoteTagButtons() {
-        var x: CGFloat = 0
-        for button in noteTagButtons {
-            button.sizeToFit()
-            let w = max(button.frame.width + 18, 40)
-            button.frame = NSRect(x: x, y: 2, width: w, height: 20)
-            x += w + 6
-        }
-    }
-
-    private func styleNoteTagButtons() {
-        for button in noteTagButtons {
-            let active = button.identifier?.rawValue == noteActiveTag
-            button.contentTintColor = active ? cardTheme.foreground : cardTheme.secondaryText
-            button.layer?.backgroundColor = active
-                ? cardTheme.selectedFill.cgColor
-                : NSColor.clear.cgColor
-            button.wantsLayer = true
-            button.layer?.cornerRadius = 9
-        }
-    }
-
-    @objc private func noteTagClicked(_ sender: NSButton) {
-        noteActiveTag = sender.identifier?.rawValue ?? "all"
-        styleNoteTagButtons()
-        applyNoteFilters()
-    }
-
-    private var panelTabPills: [NSButton] = []
-
-    /// goty tab language: icon+label pills, active on the same-hue selected
-    /// wash with full-radius caps, quiet otherwise.
-    private func buildPanelTabPills() {
-        panelTabPills.forEach { $0.removeFromSuperview() }
-        panelTabPills.removeAll()
-        for def in panelDefs {
-            let button = NSButton(title: "", target: self, action: #selector(panelTabClicked(_:)))
-            button.isBordered = false
-            button.toolTip = def.name
-            button.identifier = NSUserInterfaceItemIdentifier(def.id)
-            button.wantsLayer = true
-            button.layer?.cornerRadius = 6
-            button.attributedTitle = tabPillTitle(def)
-            cardPanelTabsView.addSubview(button)
-            panelTabPills.append(button)
-        }
-        layoutPanelTabPills()
-        stylePanelTabPills()
-    }
-
-    /// Icon + label as one attributed title: exact padding (8pt leading,
-    /// 4pt gap) — NSButton's imageLeading spacing is untamable.
-    private func tabPillTitle(_ def: (id: String, name: String, icon: String), active: Bool = false) -> NSAttributedString {
-        let title = NSMutableAttributedString(string: " ")
-        if let icon = lucideImage(for: def.icon, title: def.name,
-                                  color: active ? cardTheme.foreground : cardTheme.secondaryText) {
-            icon.size = NSSize(width: 12, height: 12)
-            let attachment = NSTextAttachment()
-            attachment.image = icon
-            // Center the glyph on the label's optical middle (cap height),
-            // not on the baseline where attachments sit by default.
-            let font = NSFont.systemFont(ofSize: 12, weight: .medium)
-            attachment.bounds = NSRect(
-                x: 0, y: (font.capHeight - 12) / 2,
-                width: 12, height: 12
-            )
-            title.append(NSAttributedString(attachment: attachment))
-        }
-        title.append(NSAttributedString(string: "  \(def.name)", attributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: active ? cardTheme.foreground : cardTheme.secondaryText,
-        ]))
-        return title
-    }
-
-    private func layoutPanelTabPills() {
-        panelTabPills.forEach { $0.sizeToFit() }
-        // ONE width for every pill — the tab strip reads as a set, not as
-        // three differently-sized leftovers.
-        let w = max(panelTabPills.map { $0.frame.width + 20 }.max() ?? 60, 60)
-        let total = CGFloat(panelTabPills.count) * w + CGFloat(max(panelTabPills.count - 1, 0)) * 6
-        var x = max((cardPanelTabsView.bounds.width - total) / 2, 0)
-        for pill in panelTabPills {
-            pill.frame = NSRect(x: x, y: 2, width: w, height: 26)
-            x += w + 6
-        }
-    }
-
-    private func stylePanelTabPills() {
-        for pill in panelTabPills {
-            let def = panelDefs.first { $0.id == pill.identifier?.rawValue }
-            let active = pill.identifier?.rawValue == activePanel
-            // INVERTED active pill: foreground surface, background-colored
-            // glyphs — contrast the quiet wash could never deliver.
-            pill.attributedTitle = def.map { tabPillTitle($0, active: active) } ?? pill.attributedTitle
-            // Template attachments tint through the button; the attributed
-            // text carries its own color — both must agree.
-            pill.contentTintColor = active ? cardTheme.foreground : cardTheme.secondaryText
-            pill.layer?.backgroundColor = active
-                ? cardTheme.selectedFill.cgColor
-                : NSColor.clear.cgColor
-        }
-    }
-
-    private func cyclePanelTab() {
-        let ids = panelDefs.map { $0.id }
-        guard !ids.isEmpty, let current = ids.firstIndex(of: activePanel) else { return }
-        showPanelTab(ids[(current + 1) % ids.count])
-    }
-
-    private func showPanelTab(_ id: String, notify: Bool = true) {
-        activePanel = id
-        if panelTabPills != nil {
-            stylePanelTabPills()
-        }
-        rebuildRunTabs()
-        renderActiveRun()
-        layoutResultCard()
-        // Translate page = the input is the point: hand it first responder
-        // (webview parity — the AiForm autofocused). Without this, a table
-        // that was first responder on the Notes tab leaves the window with
-        // no text target and every keystroke beeps.
-        DispatchQueue.main.async {
-            switch id {
-            case "translate":
-                self.inputTextView.window?.makeFirstResponder(self.inputTextView)
-            case "notes":
-                self.notesTableView.window?.makeFirstResponder(self.notesTableView)
-            default:
-                break
-            }
-        }
-        guard notify else { return }
-        if id == "notes" {
-            reloadCardNotes()
-        } else if id == "review" {
-            loadReviewWord()
-        }
-    }
-
-    /// Card review tab: fetch the next due word locally (Rust no longer
-    /// round-trips the queue or the SM-2 grade).
-    private func loadReviewWord() {
-        if let next = LexiStore.nextReviewWord() {
-            handleCardReview(CardReviewPayload(word: .init(
-                id: next.id, word: next.word, translation: next.translation,
-                pos: next.pos, entryType: next.entryType
-            )))
-        } else {
-            handleCardReview(CardReviewPayload(word: nil))
-        }
-    }
-
-    private var cardAllTags: [String] = []
-
-    private func handleCardNotes(_ payload: CardNotesPayload) {
-        cardAllTags = payload.allTags ?? []
-        cardNotesItems = payload.notes
-        notesTableView.reloadData()
-        notesTableView.sizeLastColumnToFit()
-        if !cardNotesItems.isEmpty {
-            notesTableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-            notesTableView.scrollRowToVisible(0)
-        }
-        rebuildNoteTagBar()
-        applyNoteFilters()
-        FileLog.write("NOTES loaded count=\(cardNotesItems.count) allTags=\(cardAllTags.count) selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden)")
-        layoutResultCard()
-        FileLog.write("NOTES post-layout selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden) panel=\(activePanel)")
-    }
-
-    /// Mouse click on a row: select it (selectionDidChange copies the
-    /// content) and arm the card for Enter. Injection happens on Enter only.
-    @objc private func notesTableClicked(_ sender: NSTableView) {
-        setInputFocused(false)
-    }
-
-    @objc private func noteInsertClicked(_ sender: NSButton) {
-        guard let content = sender.identifier?.rawValue, !content.isEmpty else { return }
-        ClipboardPaster.pasteString(content, previousApp: sourceApp)
-        resultPanel.orderOut(nil)
-    }
-    // picker is an in-card dropdown layer instead: same material, opens at
-    // the pill, click-outside/Esc closes, picking posts note-tag.
-
-    private var tagDropdown: TagDropdownView?
-    private var tagDropdownMonitor: Any?
-
-    private func showTagMenu(noteId: Int64, tag: String?, anchor: NSView) {
-        guard noteId != 0,
-              let host = resultPanel.contentView else { return }
-        closeTagDropdown()
-
-        let allTags = cardAllTags.isEmpty
-            ? Array(Set(cardNotesItems.flatMap { $0.tags ?? [] })).sorted()
-            : cardAllTags
-        let dropdown = TagDropdownView(
-            tags: allTags,
-            current: tag,
-            theme: cardTheme,
-            onPick: { [weak self] name in
-                self?.closeTagDropdown()
-                self?.handleAction(action: "note-tag", text: "\(noteId)|\(name ?? "")")
-            }
-        )
-        let pillRect = anchor.convert(anchor.bounds, to: host)
-        var origin = NSPoint(x: min(pillRect.minX, host.bounds.width - dropdown.frame.width - 8), y: pillRect.minY - dropdown.frame.height - 4)
-        if origin.y < 8 {
-            origin.y = pillRect.maxY + 4
-        }
-        dropdown.frame.origin = origin
-        host.addSubview(dropdown)
-        tagDropdown = dropdown
-
-        tagDropdownMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] event in
-            guard let self else { return event }
-            if event.type == .keyDown, event.keyCode == 53 {
-                self.closeTagDropdown()
-                return nil
-            }
-            if event.type != .keyDown {
-                let location = event.locationInWindow
-                let inDropdown = self.tagDropdown.map {
-                    $0.convert($0.bounds, to: nil).contains(location)
-                } ?? false
-                if !inDropdown {
-                    self.closeTagDropdown()
-                }
-            }
-            return event
-        }
-    }
-
-    private func closeTagDropdown() {
-        tagDropdown?.removeFromSuperview()
-        tagDropdown = nil
-        if let tagDropdownMonitor {
-            NSEvent.removeMonitor(tagDropdownMonitor)
-            self.tagDropdownMonitor = nil
-        }
-    }
-
-    private func noteDeleteClickedId(_ id: Int64) {
-        handleAction(action: "note-delete", text: String(id))
-    }
-
-    private func noteRenamed(id: Int64, name: String) {
-        let payload: [String: Any] = ["id": id, "name": name]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let body = String(data: data, encoding: .utf8) else { return }
-        handleAction(action: "note-rename", text: body)
-    }
-
-    @objc private func noteDeleteClicked(_ sender: NSButton) {
-        guard let id = sender.identifier?.rawValue else { return }
-        handleAction(action: "note-delete", text: id)
-    }
-
-    private func handleCardReview(_ payload: CardReviewPayload) {
-        guard let word = payload.word else {
-            reviewEmptyLabel.isHidden = false
-            reviewWordLabel.stringValue = ""
-            reviewAnswerLabel.stringValue = ""
-            reviewRevealButton.isHidden = true
-            reviewGradeButtons.forEach { $0.isEnabled = false; $0.alphaValue = 0.4 }
-            reviewCurrentWordId = 0
-            layoutResultCard()
-            return
-        }
-        reviewEmptyLabel.isHidden = true
-        reviewRevealButton.isHidden = false
-        reviewCurrentWordId = word.id
-        reviewWordLabel.stringValue = word.word
-        reviewAnswerLabel.stringValue = ""
-        reviewRevealButton.isEnabled = true
-        reviewRevealButton.title = "Reveal"
-        reviewGradeButtons.forEach { $0.isEnabled = false; $0.alphaValue = 0.4 }
-        reviewAnswerLabel.toolTip = word.translation
-        layoutResultCard()
-    }
-
-    @objc private func revealReviewClicked() {
-        guard reviewCurrentWordId != 0 else { return }
-        reviewAnswerLabel.stringValue = reviewAnswerLabel.toolTip ?? ""
-        reviewRevealButton.isEnabled = false
-        reviewGradeButtons.forEach { $0.isEnabled = true; $0.alphaValue = 1 }
-    }
-
-    @objc private func gradeClicked(_ sender: NSButton) {
-        let ratings = ["again", "hard", "good", "easy"]
-        guard reviewCurrentWordId != 0 else { return }
-        reviewGradeButtons.forEach { $0.isEnabled = false; $0.alphaValue = 0.4 }
-        LexiStore.applyReviewGrade(id: reviewCurrentWordId, rating: ratings[sender.tag])
-        loadReviewWord()
-    }
-
-    func handleResultEvent(_ payload: ResultEventPayload) {
-        let runId = payload.runId?.isEmpty == false ? payload.runId! : activeRunId
-        guard let run = cardRuns.first(where: { $0.id == runId }) ?? activeRun else { return }
-
-        if let error = payload.error {
-            run.status = "error"
-            run.text = error
-        } else if payload.done {
-            run.text = payload.chunk ?? run.text
-            run.status = "ready"
-            if let json = payload.translationJson {
-                run.translationJson = json
-                run.entryType = inferredEntryType(for: jsonStringField(json, "word") ?? run.title)
-            }
-            if payload.saved == true {
-                run.saved = true
-            }
-        } else if let chunk = payload.chunk {
-            run.text += chunk
-            run.status = "streaming"
-        }
-
-        // Unconditional: the event mutated a run; re-render active state.
-        renderActiveRun()
-        layoutResultCard()
-    }
-
-    /// Accessory apps ship without a menu bar, which silently kills the
-    /// standard text key equivalents (Cmd+C/V/X/A) in every text view. A
-    /// minimal Edit submenu restores the system behavior — no per-key
-    /// monitors, no custom handling.
-    private func installEditMenu() {
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Cut",
-                         action: #selector(NSText.cut(_:)),
-                         keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy",
-                         action: #selector(NSText.copy(_:)),
-                         keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste",
-                         action: #selector(NSText.paste(_:)),
-                         keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All",
-                         action: #selector(NSText.selectAll(_:)),
-                         keyEquivalent: "a")
-        let mainMenu = NSMenu()
-        let editItem = NSMenuItem()
-        editItem.submenu = editMenu
-        mainMenu.addItem(editItem)
-        NSApp.mainMenu = mainMenu
-    }
-
-    private func spinnerStart() {
-        resultLoadingIndicator.isHidden = false
-        (resultLoadingIndicator as? NSProgressIndicator)?.startAnimation(nil)
-    }
-
-    private func spinnerStop() {
-        (resultLoadingIndicator as? NSProgressIndicator)?.stopAnimation(nil)
-    }
-
-    /// Re-render the active run's content area (loading / streaming / error /
-    /// ready) and the action bar state.
-    private func renderActiveRun() {
-        let run = activeRun
-        let status = run?.status
-
-        resultLoadingIndicator.isHidden = status != "loading"
-        if status == "loading" {
-            spinnerStart()
-        } else {
-            spinnerStop()
-        }
-        resultLoadingLabel.isHidden = status != "loading"
-        translateIdleView.isHidden = activePanel != "translate" || run != nil
-        resultScrollView.isHidden = !(status == "streaming" || status == "ready" || status == "error")
-        resultActionBar.isHidden = status != "ready"
-
-        if status == "streaming" || status == "ready" {
-            let dark = theme == .dark
-            resultTextView.textStorage?.setAttributedString(LightMarkdown.attributed(run?.text ?? "", dark: dark))
-            // The text view is the scroll view's documentView: its frame must
-            // track the content or everything past the initial height stays
-            // clipped (window grows, text doesn't — exactly the reported bug).
-            //
-            // WIDTH is owned by the scroll view's autoresizing alone — setting
-            // it manually here fought the autoresize (392 vs 420 every event,
-            // text container flapping ±28pt = the streaming jitter where each
-            // line's last glyphs wrapped and unwrapped). The inset already
-            // narrows the text column; measurement below matches it.
-            let needed = markdownRenderedHeight(run?.text ?? "", atWidth: resultScrollView.frame.width - 28)
-            resultTextView.frame = NSRect(
-                x: 0,
-                y: 0,
-                width: resultScrollView.frame.width,
-                height: max(needed + resultTextView.textContainerInset.height * 2, resultScrollView.frame.height)
-            )
-            if status == "streaming" {
-                resultTextView.scrollToEndOfDocument(nil)
-            }
-        } else if status == "error" {
-            let error = NSMutableAttributedString()
-            error.append(NSAttributedString(string: "⚠︎ Action failed\n", attributes: [
-                .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
-                .foregroundColor: NSColor.systemRed,
-            ]))
-            error.append(NSAttributedString(string: run?.text ?? "", attributes: [
-                .font: NSFont.systemFont(ofSize: 13),
-                .foregroundColor: NSColor.labelColor,
-            ]))
-            resultTextView.textStorage?.setAttributedString(error)
-        }
-
-        if status == "ready" {
-            updateEntryTypeTags()
-            updateSaveButton()
-        }
-        rebuildRunTabs()
-// (diag removed)
-    }
-
-    @objc private func pinToggled() {
-        cardPinned.toggle()
-        resultCloseButton.image = lucideImage(for: cardPinned ? "pin" : "pin-off", title: cardPinned ? "Unpin" : "Pin")
-        resultCloseButton.toolTip = cardPinned ? "Unpin" : "Pin"
-        resultCloseButton.contentTintColor = cardPinned ? cardTheme.foreground : cardTheme.secondaryText
-        log("card pinned=\(cardPinned)")
-    }
-
-    private func clearAllRuns(quietly: Bool) {
-        cardRuns.removeAll()
-        activeRunId = nil
-        cardPinned = false
-        rebuildRunTabs()
-    }
-
-    @objc private func clearRunsClicked() {
-        // Close all run tabs but keep the panel: it returns to the idle
-        // input state ("Enter text, then choose an action.").
-        cardRuns.removeAll()
-        activeRunId = nil
-        rebuildRunTabs()
-        renderActiveRun()
-        layoutResultCard()
-    }
-
-    /// Single unified layout pass: measures content, positions every strip,
-    /// sizes the panel (top-anchored so growth pushes down, not up).
-    private func layoutResultCard() {
-        let width = cardUserWidth ?? resultCardWidth
-        let side: CGFloat = 10
-        let contentWidth = width - side * 2
-
-        // --- Input bar (AiForm parity) ---
-        // Measure the text at ROW-layout width (full width minus the button
-        // group) — the same value regardless of current layout, so switching
-        // between single- and multi-line never oscillates.
-        let buttonGroupWidth: CGFloat = cardActions.isEmpty
-            ? 0
-            : CGFloat(cardActions.count) * 30 + CGFloat(cardActions.count - 1) * 2 + 4
-        let availForButtons = contentWidth - 50 - 10
-        let clipW = min(buttonGroupWidth, availForButtons)
-        let rowLayoutWidth = contentWidth - 8 - clipW
-        // Two-stage measure (WebView parity): judge multi-line at the ROW
-        // width, but size the text view at the FULL width it will actually
-        // render at — otherwise the two widths disagree and text is clipped
-        // or a tall empty frame is left behind.
-        let rowMeasured = inputTextHeight(atWidth: rowLayoutWidth - 12)
-        let isMultiline = rowMeasured > 18 // one 13pt line ≈ 17.5pt: anything more is a textarea
-        let fullMeasured = inputTextHeight(atWidth: contentWidth - 24)
-        let textHeight = isMultiline ? min(fullMeasured, 152) : max(min(rowMeasured, 34), 24)
-        let inputBarHeight = isMultiline ? textHeight + 12 + 6 + 28 + 8 : textHeight + 8
-
-        if isMultiline {
-            inputTextView.textContainerInset = NSSize(width: 6, height: 6)
-            inputTextView.frame = NSRect(x: 6, y: 6 + 28, width: contentWidth - 12, height: textHeight + 12)
-            inputButtonsRow.frame = NSRect(x: 0, y: 0, width: buttonGroupWidth, height: 28)
-            inputButtonsClip.frame = NSRect(x: 6, y: 5, width: min(buttonGroupWidth, contentWidth - 12), height: 26)
-            inputButtonsClip.contentView.scroll(to: NSPoint(x: max(0, buttonGroupWidth - inputButtonsClip.frame.width), y: 0))
-            inputButtonsClip.reflectScrolledClipView(inputButtonsClip.contentView)
-        } else {
-            // Fixed single-line row, vertically centered (WebView parity).
-            inputTextView.textContainerInset = NSSize(width: 6, height: (max(textHeight, 24) - 17) / 2)
-            inputTextView.frame = NSRect(x: 6, y: (inputBarHeight - max(textHeight, 24)) / 2, width: rowLayoutWidth, height: max(textHeight, 24))
-            let buttonsHeight: CGFloat = 28
-            inputButtonsRow.frame = NSRect(x: 0, y: 0, width: buttonGroupWidth, height: 28)
-            inputButtonsClip.frame = NSRect(
-                x: 6 + rowLayoutWidth + 4,
-                y: (inputBarHeight - buttonsHeight) / 2,
-                width: clipW,
-                height: buttonsHeight
-            )
-            inputButtonsClip.contentView.scroll(to: NSPoint(x: max(0, buttonGroupWidth - clipW), y: 0))
-            inputButtonsClip.reflectScrolledClipView(inputButtonsClip.contentView)
-        }
-
-        // --- Strip sizes (screen order top→bottom: tabs / input / runs /
-        // content / actionBar). Notes & Review replace everything below tabs.
-        let isTranslate = activePanel == "translate"
-        let tabsH: CGFloat = 36
-        let runsH: CGFloat = (isTranslate && !cardRuns.isEmpty) ? 28 : 0
-        let inputH = isTranslate ? inputBarHeight : 0
-        let status = activeRun?.status
-        var contentH: CGFloat = 76 // idle
-        if activePanel == "notes" {
-            let listH = min(CGFloat(max(displayedNotes.count, 1)) * 40 + 12, 420)
-            contentH = 28 + 8 + 24 + 6 + listH // search + gap + chips + gap + list
-        } else if activePanel == "review" {
-            contentH = 200
-        } else if status == "loading" {
-            contentH = 48
-        } else if status == "streaming" || status == "ready" || status == "error" {
-            contentH = min(max(markdownRenderedHeight(activeRun?.text ?? "", atWidth: width - 28) + 24, 64), 440)
-        }
-
-        let actionH: CGFloat = (isTranslate && status == "ready") ? 34 : 0
-
-        // Total-height cap = min(640, on-screen room below the top anchor).
-        // Overflow is absorbed by the content strip (internal scrolling), so
-        // the window NEVER has to be re-anchored upward mid-stream — the
-        // previous clamp-to-screen behavior made the card "jump upward" as
-        // every streamed chunk grew the window past the screen bottom.
-        var maxTotal: CGFloat = 640
-        if resultPanel.isVisible,
-           let screen = NSScreen.screens.first(where: { $0.frame.contains(resultPanel.frame.origin) }) ?? NSScreen.main {
-            maxTotal = min(maxTotal, max(240, resultPanel.frame.maxY - screen.visibleFrame.minY - 8))
-        }
-        let overflow = max(0, tabsH + 6 + inputH + 4 + runsH + contentH + actionH + side - maxTotal)
-        var contentFinal = max(60, contentH - overflow)
-        // --- Frames, AppKit y-up, derived strictly bottom-up so adjacent
-        // strips can never overlap or drift: action → content → runs →
-        // input → tabs. contentFinal absorbs clamping (min 60).
-        let actionY: CGFloat = 10
-        let contentY = actionY + actionH
-        var runsY = contentY + contentFinal
-        var inputY = runsY + runsH + 4
-        var tabsY = inputY + inputH + 6
-        var clampedTotal = tabsY + tabsH
-        // User-resized height wins: the content strip absorbs the requested
-        // total (overflow scrolls internally), auto sizing stays untouched.
-        if let userH = cardUserHeight {
-            let cappedH = min(userH, maxTotal)
-            let fixed = clampedTotal - contentFinal
-            let userH = cappedH
-            contentFinal = max(60, userH - fixed)
-            runsY = contentY + contentFinal
-            inputY = runsY + runsH + 4
-            tabsY = inputY + inputH + 6
-            clampedTotal = tabsY + tabsH
-        }
-
-        resultTabsView.frame = NSRect(x: 0, y: tabsY, width: width, height: tabsH)
-        cardPanelTabsView.frame = NSRect(x: 8, y: 2, width: width - 48, height: 28)
-
-        inputContainer.isHidden = !isTranslate
-        if isTranslate {
-            inputContainer.frame = NSRect(x: side, y: inputY, width: contentWidth, height: inputBarHeight)
-        }
-
-        resultRunsBar.isHidden = runsH == 0
-        let stripW = width - 48
-        resultRunsBar.frame = NSRect(x: 12, y: runsY, width: width - 24, height: runsH)
-        resultTabsClip.frame = NSRect(x: 0, y: 0, width: stripW, height: 28)
-        resultTabsClip.documentView?.frame = NSRect(x: 0, y: 0, width: max(runTabsContentWidth, stripW), height: 28)
-
-        resultScrollView.isHidden = !isTranslate || !(status == "streaming" || status == "ready" || status == "error")
-        resultScrollView.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
-        resultLoadingIndicator.isHidden = !isTranslate || status != "loading"
-        resultLoadingLabel.isHidden = !isTranslate || status != "loading"
-        resultLoadingIndicator.frame.origin = NSPoint(x: 14, y: contentY + contentFinal - 16 - 12)
-        resultLoadingLabel.frame.origin = NSPoint(x: 36, y: contentY + contentFinal - 14 - 13)
-        translateIdleView.isHidden = !isTranslate || activeRun != nil
-        translateIdleView.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
-        resultIdleLabel.frame = NSRect(x: 10, y: contentFinal / 2 - 6, width: width - 20, height: 18)
-        resultIdleHint.frame = NSRect(x: 10, y: contentFinal / 2 - 26, width: width - 20, height: 14)
-        resultIdleIcon.frame = NSRect(x: width / 2 - 8, y: contentFinal / 2 + 18, width: 16, height: 16)
-
-        let notesUIVisible = activePanel == "notes"
-        let searchH: CGFloat = 30
-        let chipsH: CGFloat = 24
-        noteSearchContainer.isHidden = !notesUIVisible
-        noteTagBar.isHidden = !notesUIVisible
-        cardNotesClip.isHidden = !notesUIVisible
-        if notesUIVisible {
-            let listTop = contentY + contentFinal
-            noteSearchContainer.frame = NSRect(x: 12, y: listTop - searchH, width: width - 24, height: searchH)
-            noteSearchField.frame = NSRect(x: 8, y: 3, width: width - 24 - 16, height: searchH - 6)
-            noteTagBar.frame = NSRect(x: 12, y: listTop - searchH - 6 - chipsH, width: width - 24, height: chipsH)
-            layoutNoteTagButtons()
-            cardNotesClip.frame = NSRect(
-                x: 0,
-                y: contentY,
-                width: width,
-                height: max(contentFinal - searchH - 8 - chipsH - 6, 64)
-            )
-        }
-
-        reviewCardView.isHidden = activePanel != "review"
-        reviewCardView.frame = NSRect(x: 0, y: contentY, width: width, height: contentFinal)
-        relayoutReview(width: width, height: contentFinal)
-
-        resultActionBar.isHidden = actionH == 0
-        resultActionBar.frame = NSRect(x: side, y: actionY, width: contentWidth, height: actionH)
-
-        // Top-anchored resize driven by MODEL values (cardX/cardTopY), never
-        // by the animating window frame: reading frame.maxY mid-animation made
-        // each stream chunk re-anchor to an intermediate position and the
-        // card's top edge jittered up and down while text streamed in.
-        if resultPanel.isVisible {
-            // Anchor directly on the LIVE frame: setFrame is atomic (no
-            // animation), so the frame always reflects the user's last drag.
-            // The cached cardX/cardTopY model was built for the removed
-            // animation and caused snap-back after user drags.
-            let live = resultPanel.frame
-            var target = NSRect(x: live.minX, y: live.maxY - clampedTotal, width: width, height: clampedTotal)
-            if let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: live.minX, y: live.maxY)) }) ?? NSScreen.main {
-                let visible = screen.visibleFrame
-                target.origin.y = max(target.origin.y, visible.minY + 8)
-                target.origin.x = min(max(target.minX, visible.minX + 8), visible.maxX - target.width - 8)
-            }
-            animatePanelFrame(to: target)
-        } else {
-            animatePanelFrame(to: NSRect(x: 0, y: 0, width: width, height: clampedTotal))
-        }
-        resultContainer.frame = NSRect(x: 0, y: 0, width: width, height: clampedTotal)
-        resizeCorner.frame = NSRect(x: width - 16, y: 0, width: 16, height: 16)
-        resizeRight.frame = NSRect(x: width - 4, y: 16, width: 4, height: clampedTotal - 32)
-        resizeBottom.frame = NSRect(x: 0, y: 0, width: width - 16, height: 4)
-        resizeCorner.setDark(theme == .dark)
-        // Right-anchored chrome must ride the window edge (build-time frames
-        // pin to the default 420 width and go stale after a user resize).
-        let segW = panelTabsControl.fittingSize.width
-        panelTabsControl.frame = NSRect(
-            x: max(0, (cardPanelTabsView.bounds.width - segW) / 2),
-            y: 1,
-            width: segW,
-            height: 26
-        )
-        resultCloseButton.frame.origin.x = width - 32
-        resultTrashButton.frame = NSRect(x: width - 30, y: runsY + 3, width: 22, height: 22)
-        resultTrashButton.isHidden = runsH == 0
-        runsSeparator.isHidden = runsH == 0
-        runsSeparator.frame = .zero
-        resultTrashButton.frame = NSRect(x: width - 30, y: runsY + 3, width: 22, height: 22)
-        resultTrashButton.isHidden = runsH == 0
-        resultRunsBar.isHidden = runsH == 0
-        updateEntryTypeTags()
-    }
-
-    private func markdownRenderedHeight(_ markdown: String, atWidth width: CGFloat) -> CGFloat {
-        // Measured with a real NSLayoutManager: NSAttributedString.boundingRect
-        // drifts on CJK line heights/paragraph spacing, which cut text off at
-        // the bottom of the card.
-        let storage = NSTextStorage(attributedString: LightMarkdown.attributed(markdown, dark: theme == .dark))
-        let manager = NSLayoutManager()
-        storage.addLayoutManager(manager)
-        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
-        container.lineFragmentPadding = 0
-        manager.addTextContainer(container)
-        _ = manager.glyphRange(for: container)
-        return ceil(manager.usedRect(for: container).height)
-    }
-
-    private func inputTextHeight(atWidth width: CGFloat) -> CGFloat {
-        // NSLayoutManager measurement — boundingRect drifts on CJK and on
-        // the exact wrap count this height decision depends on.
-        let storage = NSTextStorage(
-            attributedString: NSAttributedString(
-                string: inputTextView.string.isEmpty ? " " : inputTextView.string,
-                attributes: [.font: NSFont.systemFont(ofSize: 13)]
-            )
-        )
-        let manager = NSLayoutManager()
-        storage.addLayoutManager(manager)
-        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
-        container.lineFragmentPadding = 0
-        manager.addTextContainer(container)
-        _ = manager.glyphRange(for: container)
-        return ceil(manager.usedRect(for: container).height)
-    }
-
-    /// Review card: word block vertically centered in the content area,
-    /// everything tracks the live width/height.
-    private func relayoutReview(width: CGFloat, height: CGFloat) {
-        let mid = height / 2
-        reviewWordLabel.font = .systemFont(ofSize: min(28, max(20, height / 7)), weight: .semibold)
-        reviewWordLabel.frame = NSRect(x: 10, y: mid + 16, width: width - 20, height: 34)
-        reviewAnswerLabel.frame = NSRect(x: 20, y: mid - 8, width: width - 40, height: 18)
-        reviewRevealButton.frame = NSRect(x: width / 2 - 40, y: mid - 44, width: 80, height: 24)
-        for (index, grade) in reviewGradeButtons.enumerated() {
-            grade.frame = NSRect(x: 20 + CGFloat(index) * 98, y: 16, width: 88, height: 26)
-        }
-        reviewEmptyLabel.frame = NSRect(x: 10, y: mid - 9, width: width - 20, height: 18)
-    }
-
-    /// Height changes apply in ONE atomic setFrame: subview geometry is set
-    /// to the new layout in the same pass, so animating the window frame left
-    /// a torn intermediate (new subview positions inside the old window) and
-    /// tab switches / state changes visibly jittered. The top-anchored target
-    /// means an atomic frame change never moves the top edge.
-    private func animatePanelFrame(to target: NSRect) {
-        resultPanel.setFrame(target, display: true)
-    }
-
-    private func placeResultCard() {
-        let cardSize = resultPanel.frame.size
-        let origin: NSPoint
-        if panel.isVisible {
-            // Card unfolds from the toolbar: left-aligned with it, 8pt below
-            // its bottom edge, growing DOWNWARD. Flips above only when the
-            // screen has no room below the toolbar.
-            let tb = panel.frame
-            var p = NSPoint(x: tb.minX, y: tb.minY - cardSize.height - 8)
-            if let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: tb.midX, y: tb.midY)) }) ?? NSScreen.main {
-                let visible = screen.visibleFrame
-                if p.y < visible.minY + 8 {
-                    p.y = tb.maxY + 8
-                }
-                p.x = min(max(p.x, visible.minX + 8), visible.maxX - cardSize.width - 8)
-            }
-            origin = p
-        } else {
-            // Toolbar gone: the card TOP sits just below the cursor and the
-            // card grows downward — the old bottom-anchor put a 400pt card
-            // far above the cursor.
-            let point = NSEvent.mouseLocation
-            var p = NSPoint(x: point.x + 16, y: point.y - 8 - cardSize.height)
-            if let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main {
-                let frame = screen.visibleFrame
-                p.x = min(max(p.x, frame.minX + 8), frame.maxX - cardSize.width - 8)
-                if p.y < frame.minY + 8 {
-                    p.y = min(point.y + 24, frame.maxY - cardSize.height - 8)
-                }
-            }
-            origin = p
-        }
-        resultPanel.setFrameOrigin(origin)
-    }
-
-    // MARK: - HTTP request routing (helper's display server)
-
-    private func handleRequestData(_ data: Data) {
-        let request = String(data: data, encoding: .utf8) ?? ""
-
-
-
-        if request.hasPrefix("POST /notes-hide ") {
-            DispatchQueue.main.async {
-                self.hideNotesPanel(notifyLexi: false)
-            }
-            return
-        }
-
-        if request.hasPrefix("POST /launcher-show ") {
-            DispatchQueue.main.async {
-                self.launcherController.show()
-            }
-            return
-        }
-
-        if request.hasPrefix("POST /launcher-hide ") {
-            DispatchQueue.main.async {
-                self.launcherController.hide(notify: false)
-            }
-            return
-        }
-
-        if request.hasPrefix("POST /clipboard-show ") {
-            DispatchQueue.main.async {
-                self.clipboardController.show()
-            }
-            return
-        }
-
-        if request.hasPrefix("POST /debug-paste-test ") {
-            DispatchQueue.main.async {
-                FileLog.write("PASTE test: route-driven pasteSelected")
-                self.clipboardController.debugPasteSelected()
-            }
-            return
-        }
-
-        if request.hasPrefix("POST /clipboard-hide ") {
-            DispatchQueue.main.async {
-                self.clipboardController.hide(notify: false)
-            }
-            return
-        }
-
-        if request.hasPrefix("POST /clipboard-suspend "),
-           let body = request.components(separatedBy: "\r\n\r\n").last,
-           let bodyData = body.data(using: .utf8),
-           let payload = try? JSONDecoder().decode(ClipboardLeasePayload.self, from: bodyData) {
-            ClipboardMonitor.shared.suspend(changeCount: payload.changeCount)
-            return
-        }
-
-        if request.hasPrefix("POST /clipboard-resume "),
-           let body = request.components(separatedBy: "\r\n\r\n").last,
-           let bodyData = body.data(using: .utf8),
-           let payload = try? JSONDecoder().decode(ClipboardLeasePayload.self, from: bodyData) {
-            ClipboardMonitor.shared.resume(changeCount: payload.changeCount)
-            return
-        }
-
-        if request.hasPrefix("POST /theme "),
-           let body = request.components(separatedBy: "\r\n\r\n").last,
-           let bodyData = body.data(using: .utf8),
-           let payload = try? JSONDecoder().decode(ThemePayload.self, from: bodyData) {
-            DispatchQueue.main.async {
-                PanelStyle.update(
-                    opacity: payload.panelOpacity.map { CGFloat($0 / 100.0) },
-                    blur: payload.panelBlur.flatMap(PanelStyle.Blur.init(rawValue:))
-                )
-                self.applyTheme(payload.theme)
-            }
-            return
-        }
-        if request.hasPrefix("POST /open-settings ") {
-            DispatchQueue.main.async {
-                self.showSettingsWindow()
-            }
-            return
-        }
-
-        if request.hasPrefix("POST /debug-shot") {
-            // /debug-shot?tab=vocabulary — navigate, settle, snapshot to /tmp.
-            let tabName = request
-                .components(separatedBy: " ")[1]
-                .components(separatedBy: "?tab=").last?
-                .components(separatedBy: " ").first?
-                .components(separatedBy: "&").first ?? "general"
-            let tab = SettingsTab.allCases.first { $0.name == tabName } ?? .general
-            DispatchQueue.main.async {
-                self.showSettingsWindow(tab: tab)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    MainActor.assumeIsolated {
-                        guard let png = self.settingsWindowController?.snapshotPNG() else {
-                            FileLog.write("SHOT fail: no window")
-                            return
-                        }
-                        let path = "/tmp/lexi-settings-\(tab.name).png"
-                        try? png.write(to: URL(fileURLWithPath: path))
-                        FileLog.write("SHOT saved path=\(path) bytes=\(png.count)")
-                    }
-                }
-            }
-            return
-        }
-
-        if request.hasPrefix("GET /debug-state ") || request.hasPrefix("POST /debug-state ") {
-            DispatchQueue.main.async {
-                let runs = self.cardRuns.map { "\($0.id)|\($0.status)|len=\($0.text.count)" }.joined(separator: "; ")
-                let notesVis = NSStringFromRect(self.cardNotesClip.contentView.visibleRect)
-                let notesDoc = NSStringFromRect(self.cardNotesClip.documentView?.frame ?? .zero)
-
-                let state = "notesSel=\(self.notesTableView?.selectedRow ?? -99) notesCount=\(self.cardNotesItems.count) notesVis=\(notesVis) notesDoc=\(notesDoc) runsBar=\(NSStringFromRect(self.resultRunsBar.frame)) tabsClip=\(NSStringFromRect(self.resultTabsClip.frame)) doc=\(NSStringFromRect(self.resultTabsClip.documentView?.frame ?? .zero)) trash=\(NSStringFromRect(self.resultTrashButton.frame)) chips=\(self.runChipViews.count) activeRunId=\(self.activeRunId ?? "-") panel=\(self.activePanel) pinned=\(self.cardPinned) runs=[\(runs)] tvLen=\(self.resultTextView.textStorage?.length ?? 0) scrollHidden=\(self.resultScrollView.isHidden) scroll=\(NSStringFromRect(self.resultScrollView.frame)) tv=\(NSStringFromRect(self.resultTextView.frame)) container=\(NSStringFromRect(self.resultContainer.frame)) panelFrame=\(NSStringFromRect(self.resultPanel.frame)) input=\(NSStringFromRect(self.inputContainer.frame)) tvInset=\(self.inputTextView.textContainerInset) tvFrame=\(self.inputTextView.frame) actions=\(self.cardActions.count)"
-                self.log("STATE \(state)")
-                self.log("DEBUG \(state)")
-            }
-            return
-        }
-
-
-        if request.hasPrefix("POST /result-show "),
-           let body = request.components(separatedBy: "\r\n\r\n").last,
-           let bodyData = body.data(using: .utf8),
-           let payload = try? JSONDecoder().decode(ResultShowPayload.self, from: bodyData) {
-            DispatchQueue.main.async {
-                self.showResultCard(payload)
-            }
-            return
-        }
-
-        if request.hasPrefix("POST /result-event "),
-           let body = request.components(separatedBy: "\r\n\r\n").last,
-           let bodyData = body.data(using: .utf8),
-           let payload = try? JSONDecoder().decode(ResultEventPayload.self, from: bodyData) {
-            DispatchQueue.main.async {
-                self.handleResultEvent(payload)
-            }
-            return
-        }
-
-
-        if request.hasPrefix("POST /card-hide ") {
-            DispatchQueue.main.async {
-                guard !self.cardPinned else { return }
-                self.resultPanel.orderOut(nil)
-            }
-            return
-        }
-
-
-
-        if request.hasPrefix("POST /focus-test ") {
-            DispatchQueue.main.async {
-                self.showPanelTab("notes")
-                self.resultPanel.makeKeyAndOrderFront(nil)
-                let ok = self.resultPanel.makeFirstResponder(self.noteSearchField)
-                FileLog.write("FOCUS-TEST ok=\(ok) isKey=\(self.resultPanel.isKeyWindow) responder=\(String(describing: self.resultPanel.firstResponder).prefix(140))")
-            }
-            return
-        }
-
-
-        if request.hasPrefix("POST /card-notes "),
-           let body = request.components(separatedBy: "\r\n\r\n").last,
-           let bodyData = body.data(using: .utf8),
-           let payload = try? JSONDecoder().decode(CardNotesPayload.self, from: bodyData) {
-            DispatchQueue.main.async {
-                self.handleCardNotes(payload)
-                // The clipboard panel's tag tabs read the same snapshot.
-                self.clipboardController.updateNotes(
-                    notes: payload.notes.map {
-                        ClipboardNote(
-                            id: $0.id ?? 0, name: $0.name, content: $0.content,
-                            tags: $0.tags ?? [])
-                    },
-                    tags: payload.allTags ?? [])
-            }
-            return
-        }
-
-        if request.hasPrefix("POST /card-review "),
-           let body = request.components(separatedBy: "\r\n\r\n").last,
-           let bodyData = body.data(using: .utf8),
-           let payload = try? JSONDecoder().decode(CardReviewPayload.self, from: bodyData) {
-            DispatchQueue.main.async {
-                self.handleCardReview(payload)
-            }
-            return
-        }
-
-
-        if request.hasPrefix("POST /card-actions "),
-           let body = request.components(separatedBy: "\r\n\r\n").last,
-           let bodyData = body.data(using: .utf8),
-           let payload = try? JSONDecoder().decode(CardActionsPayload.self, from: bodyData) {
-            DispatchQueue.main.async {
-                self.handleCardActions(payload)
-            }
-            return
-        }
-
-        guard request.hasPrefix("POST /show "),
-              let body = request.components(separatedBy: "\r\n\r\n").last,
-              let bodyData = body.data(using: .utf8),
-              let payload = try? JSONDecoder().decode(ShowPayload.self, from: bodyData) else {
-            log("invalid request \(request.prefix(80))")
-            return
-        }
-
-        DispatchQueue.main.async {
-            self.showPanel(payload)
-        }
-    }
-
-    private func writeResponse(_ connection: NWConnection) {
-        let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
-        connection.send(content: response.data(using: .utf8), completion: .contentProcessed { _ in
-            connection.cancel()
-        })
-    }
-
-    private func showPanel(_ payload: ShowPayload) {
-        // Dual-track dedup: during selection migration both the helper's
-        // tap and Rust's fire for the same selection — show once.
-        guard selectionShowGate(payload.text) else { return }
-        sourceApp = NSWorkspace.shared.frontmostApplication
-        let text = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let point = currentMouseLocation(fallback: payload)
-        let width = toolbarWidth(for: payload.actions?.count ?? actions.count)
-        let origin = clampedPanelOrigin(near: point, width: width, payload: payload)
-        let frame = NSRect(x: origin.x, y: origin.y, width: width, height: toolbarHeight)
-        if let next = payload.actions {
-            applyActions(next)
-        }
-        log("show panel textLength=\(text.count) mouse=\(Int(point.x)),\(Int(point.y)) payload=\(payload.x),\(payload.y) frame=\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width)),\(Int(frame.height))")
-        selectedText = text
-        panel.setFrame(frame, display: true)
-        panel.orderFrontRegardless()
-    }
-
-    /// Opens (or focuses) the native settings window. Style changes flow
-    /// both ways: applied in-process here, and mirrored into the Rust
-    /// caches so a helper restart preserves them.
     func showSettingsWindow(tab: SettingsTab = .general) {
         panels.present(.settings)
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
+                guard let self else { return }
                 let controller: LexiSettingsWindowController
                 if let existing = self.settingsWindowController {
                     controller = existing
@@ -3209,88 +1445,12 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
     }
 
-    private func applyTheme(_ themeName: String) {
-        theme = ToolbarTheme(rawValue: themeName) ?? .dark
-        let scrim = PanelStyle.scrim(dark: theme == .dark).cgColor
-        container.layer?.backgroundColor = scrim
-        dragHandle.theme = theme
-        buttons.forEach { $0.theme = theme }
-        // The result card follows the same theme: appearance, hairlines, and
-        // every themed subview rebuilt (tinted icons, chips, markdown).
-        if resultPanel != nil {
-            let cardAppearance = theme == .dark
-                ? NSAppearance(named: .vibrantDark)
-                : NSAppearance(named: .vibrantLight)
-            resultPanel.appearance = cardAppearance
-            resultContainer.layer?.backgroundColor = scrim
-            notesContainer.layer?.backgroundColor = scrim
-            // chips: force a rebuild (the diff skips identical id/status/active)
-            runChipViews.forEach { $0.removeFromSuperview() }
-            runChipViews.removeAll()
-            rebuildRunTabs()
-                rebuildInputButtons()
-            applyNotesTheme()
-            renderActiveRun()
-            layoutResultCard()
-        }
-        launcherController.applyTheme(dark: theme == .dark)
-        clipboardController.applyTheme(dark: theme == .dark)
-        log("theme applied \(theme.rawValue)")
-    }
-
-    private func currentMouseLocation(fallback: ShowPayload) -> NSPoint {
-        // Rust sends the live cursor location in the same Cocoa coordinate
-        // space NSScreen uses. Prefer it: NSEvent.mouseLocation freezes on the
-        // display where the panel last lived when the selection happens in
-        // another app on another display.
-        if fallback.x != 0 || fallback.y != 0 {
-            let payload = NSPoint(x: CGFloat(fallback.x), y: CGFloat(fallback.y))
-            if NSScreen.screens.contains(where: { $0.frame.contains(payload) }) {
-                return payload
-            }
-        }
-        return NSEvent.mouseLocation
-    }
-
-    private func clampedPanelOrigin(near point: NSPoint, width: CGFloat, payload: ShowPayload) -> NSPoint {
-        // Direction-aware placement (openclip PopupPositioner): a top-to-bottom
-        // drag (release more than 10pt below the press) leaves the selected
-        // text ABOVE the cursor — place the bar BELOW it so the selection stays
-        // visible. Every other gesture keeps the bar above the cursor.
-        let belowCursor = (payload.downY ?? payload.y) < payload.y - 10
-        var origin = NSPoint(
-            x: point.x,
-            y: belowCursor
-                ? point.y - toolbarHeight - toolbarVerticalGap
-                : point.y + toolbarVerticalGap
-        )
-        if let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main {
-            let frame = screen.visibleFrame
-            origin.x = min(max(origin.x, frame.minX + 6), frame.maxX - width - 6)
-            origin.y = min(max(origin.y, frame.minY + 6), frame.maxY - toolbarHeight - 6)
-        }
-        return origin
-    }
-
-    private func hidePanel(force: Bool = false) {
-        selectedText = ""
-        panel.orderOut(nil)
-    }
-
-    private func hideIfClickOutsidePanel(_ event: NSEvent) {
+    func hideIfClickOutsidePanel(_ event: NSEvent) {
         let screenPoint = NSEvent.mouseLocation
         FileLog.write("DOWN point=\(screenPoint) win=\(event.window.map { "\($0)" } ?? "nil") cardFrame=\(NSStringFromRect(resultPanel.frame)) tvFrame=\(NSStringFromRect(notesTableView.frame)) tvVisible=\(NSStringFromRect(notesTableView.visibleRect))")
 
-        // Native notes panel: hide + tell lexi so its tap flag never goes stale.
-        if notesPanel.isVisible,
-           event.window !== notesPanel,
-           !notesPanel.frame.contains(screenPoint) {
-            hideNotesPanel(notifyLexi: true)
-        }
-
         // Result card: pinned cards stay until unpinned (pin button again).
-        // Unpinned: hide (runs stay in memory) + tell lexi so CARD_UP never
-        // goes stale and swallows later stream events.
+        // Unpinned: hide; the runs stay in memory for the tabs bar.
         if resultPanel.isVisible,
            !cardPinned,
            event.window !== resultPanel,
@@ -3313,12 +1473,11 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         log("hide outside click x=\(Int(screenPoint.x)) y=\(Int(screenPoint.y))")
     }
-    @objc private func runToolbarAction(_ sender: NSButton) {
+    @objc func runToolbarAction(_ sender: NSButton) {
         guard let action = sender.identifier?.rawValue, !selectedText.isEmpty else {
             return
         }
-        // Speech + builtin tools run in-process; handoff still routes
-        // through Rust (activation + injection, disabled by default).
+        // Speech + builtin tools (incl. handoff) run in-process.
         if action == "read" || action == "speak" {
             LexiSpeech.shared.speak(text: selectedText)
         } else if action == "copy" {
@@ -3337,7 +1496,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     /// Local handling for every former Rust round-trip action. Rust is
     /// gone: DB writes, tool execution, and quit all happen here.
-    private func handleAction(action: String, text: String) {
+    func handleAction(action: String, text: String) {
         switch action {
         case "quit-lexi":
             NSApp.terminate(nil)
@@ -3375,7 +1534,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
     }
 
-    private func splitTagPayload(_ text: String) -> (Int64, String)? {
+    func splitTagPayload(_ text: String) -> (Int64, String)? {
         let parts = text.components(separatedBy: "|")
         guard parts.count == 2, let id = Int64(parts[0].trimmingCharacters(in: .whitespaces)) else {
             return nil
@@ -3385,7 +1544,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     /// Save button on the card: persist the run's translation JSON with the
     /// entry type the user picked (Rust save_vocab_action parity).
-    private func saveVocabAction(_ text: String) {
+    func saveVocabAction(_ text: String) {
         guard let data = text.data(using: .utf8),
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let word = payload["word"] as? String,
@@ -3402,11 +1561,11 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     /// Refresh the card's notes tab from the DB after a local write.
-    private func reloadCardNotes() {
+    func reloadCardNotes() {
         handleCardNotes(Self.cardNotesPayload())
     }
 
-    private func log(_ message: String) {
+    func log(_ message: String) {
         let line = "\(Date()) \(message)\n"
         guard let data = line.data(using: .utf8) else {
             return
@@ -3423,7 +1582,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
 
-    private func startDisplayServer() {
+    func startDisplayServer() {
         guard let port = NWEndpoint.Port(rawValue: toolbarPort) else {
             log("invalid toolbar port \(toolbarPort)")
             return
@@ -3446,7 +1605,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         log("toolbar listener start requested")
     }
 
-    private func receive(_ connection: NWConnection, accumulated: Data = Data()) {
+    func receive(_ connection: NWConnection, accumulated: Data = Data()) {
         // Connections from NWListener must be started explicitly.
         connection.start(queue: listenerQueue)
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, error in
@@ -3482,1535 +1641,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
 
-    private func toolbarWidth(for actionCount: Int) -> CGFloat {
+    func toolbarWidth(for actionCount: Int) -> CGFloat {
         toolbarHandleWidth + CGFloat(max(actionCount, 1)) * toolbarSegmentWidth
     }
-
-
-    private func hideNotesPanel(notifyLexi: Bool) {
-        notesPanel.orderOut(nil)
-    }
-
-    private func rebuildRunTabs() {
-        let dark = theme == .dark
-        let doc = resultTabsClip.documentView ?? NSView()
-        if runChipViews.count == cardRuns.count {
-            var unchanged = true
-            for (chip, run) in zip(runChipViews, cardRuns) {
-                let activeNow = run.id == activeRunId
-                if chip.runId != run.id || chip.statusKey != run.status || chip.isActiveChip != activeNow {
-                    unchanged = false
-                    break
-                }
-            }
-            if unchanged { return }
-        }
-        runChipViews.forEach { $0.removeFromSuperview() }
-        runChipViews.removeAll()
-
-        var x: CGFloat = 0
-        for run in cardRuns {
-            let chip = RunChipView(run: run, dark: dark)
-            chip.onSelected = { [weak self] in
-                self?.activeRunId = run.id
-                self?.renderActiveRun()
-                self?.layoutResultCard()
-            }
-            chip.onDismissed = { [weak self] in
-                self?.dismissRun(run.id)
-            }
-            chip.setActive(run.id == activeRunId, dark: dark)
-            doc.addSubview(chip)
-            runChipViews.append(chip)
-            chip.frame = NSRect(x: x, y: 3, width: chip.fitWidth, height: 24)
-            x += chip.fitWidth + 4
-        }
-        // Horizontal scroll: document view grows with the chips; keep the
-        // newest run visible. The strip caps at width-44; layoutResultCard
-        // sizes it to the content when the chips fit.
-        runTabsContentWidth = max(x - 4, 0)
-        let visible = resultTabsClip.frame.width
-        let contentW = max(x - 4, visible)
-        doc.frame = NSRect(x: 0, y: 0, width: contentW, height: 28)
-        resultTabsClip.contentView.scroll(to: NSPoint(x: contentW - visible, y: 0))
-        resultTabsClip.reflectScrolledClipView(resultTabsClip.contentView)
-    }
-
-    private func rebuildInputButtons() {
-        inputButtonsRow.subviews.forEach { $0.removeFromSuperview() }
-        let hasInput = !inputTextView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        for (index, item) in cardActions.enumerated() {
-            let button = HoverIconButton(frame: .zero)
-            button.bezelStyle = .regularSquare
-            button.isBordered = false
-            button.target = self
-            button.action = #selector(inputActionClicked(_:))
-            button.identifier = NSUserInterfaceItemIdentifier(item.id)
-            button.image = lucideImage(for: item.icon, title: item.name)
-            button.imageScaling = .scaleProportionallyDown
-            button.contentTintColor = .secondaryLabelColor
-            button.toolTip = "\(item.name) input text"
-            button.isEnabled = hasInput
-            button.alphaValue = hasInput ? 1 : 0.4
-            button.frame = NSRect(x: CGFloat(index) * 30, y: 0, width: 28, height: 28)
-            inputButtonsRow.addSubview(button)
-        }
-    }
-
-    private func updateEntryTypeTags() {
-        let run = activeRun
-        let hasEntry = run?.translationJson != nil
-        resultEntryBar.isHidden = !hasEntry
-        let types = ["word", "phrase", "pattern"]
-        for (index, button) in entryButtons.enumerated() {
-            let active = run?.entryType == types[index]
-            let saved = run?.saved == true
-            button.isEnabled = !saved && hasEntry
-            button.alphaValue = saved ? 0.4 : 1
-            button.layer?.backgroundColor = active
-                ? cardTheme.selectedFill.cgColor
-                : NSColor.clear.cgColor
-        }
-        if hasEntry {
-            var width: CGFloat = 6
-            for button in entryButtons {
-                width += button.attributedTitle.size().width + 16
-            }
-            resultEntryBar.frame.size.width = max(width, 150)
-            var x: CGFloat = 2
-            for button in entryButtons {
-                button.frame.origin.x = x
-                x += button.attributedTitle.size().width + 16
-            }
-        }
-    }
-
-    private func updateSaveButton() {
-        let run = activeRun
-        let canSave = run?.translationJson != nil
-        resultSaveButton.isHidden = !canSave
-        // Bar-local coordinates (the bar is inset by `side` from the card and
-        // sized contentWidth): anchor to its right edge so Copy/Save ride the
-        // card edge at any user width.
-        let barW = resultActionBar.bounds.width
-        resultSaveButton.frame.origin.x = barW - 148 - 10
-        resultCopyButton.frame.origin.x = canSave ? barW - 148 - 10 - 26 - 8 : barW - 26 - 10
-        if canSave {
-            let saved = run?.saved == true
-            resultSaveButton.isEnabled = !saved
-            resultSaveButton.title = saved ? "Saved" : "Save"
-            resultSaveButton.layer?.backgroundColor = saved
-                ? NSColor.disabledControlTextColor.withAlphaComponent(0.3).cgColor
-                : NSColor.controlAccentColor.cgColor
-            resultSaveButton.alphaValue = saved ? 0.6 : 1
-        }
-    }
-
-    @objc private func entryTypeClicked(_ sender: NSButton) {
-        let types = ["word", "phrase", "pattern"]
-        guard let index = entryButtons.firstIndex(of: sender) else { return }
-        activeRun?.entryType = types[index]
-        updateEntryTypeTags()
-    }
-    @objc private func inputActionClicked(_ sender: NSButton) {
-        let id = sender.identifier?.rawValue ?? ""
-        let isTool = ["copy", "search", "read", "speak", "note", "handoff"].contains(id)
-        submitInput(kind: isTool ? "tool" : "feature", id: id)
-    }
-
-    private func submitInput(kind: String, id: String) {
-        FileLog.write("CARD submit id=\(id) kind=\(kind)")
-        let text = inputTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        // Speech + builtin tools run in-process; handoff stays on Rust
-        // (activation + injection, disabled by default).
-        if id == "read" || id == "speak" {
-            LexiSpeech.shared.speak(text: text)
-            return
-        }
-        if id == "search" {
-            LexiTools.search(text: text)
-            return
-        }
-        if id == "note" {
-            LexiTools.note(text: text)
-            return
-        }
-        if kind == "feature" {
-            // Empty id = the default feature (Rust parity: first enabled
-            // by sort order) — the input bar's Enter submits that way.
-            let featureId = id.isEmpty
-                ? (LexiStore.features().first(where: { $0.enabled })?.id ?? "")
-                : id
-            guard !featureId.isEmpty else { return }
-            runFeatureLocally(featureId: featureId, text: text)
-            inputTextView.string = ""
-            layoutResultCard()
-            rebuildInputButtons()
-            return
-        }
-        switch id {
-        case "copy": LexiTools.copy(text: text)
-        case "search": LexiTools.search(text: text)
-        case "read", "speak": LexiSpeech.shared.speak(text: text)
-        case "note": LexiTools.note(text: text)
-        case "handoff": LexiTools.handoff(text: text)
-        default: break
-        }
-        inputTextView.string = ""
-        layoutResultCard()
-    }
-
-    @objc private func copyResultClicked() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(activeRun?.text ?? "", forType: .string)
-        resultCopyButton.title = "Copied"
-        resultCopyButton.image = nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-            self?.resultCopyButton.title = ""
-            self?.resultCopyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy result")
-        }
-    }
-
-    @objc private func saveResultClicked() {
-        guard let run = activeRun, let json = run.translationJson else { return }
-        var payload: [String: String] = [
-            "word": jsonStringField(json, "word") ?? run.title,
-            "translation": jsonStringField(json, "translation") ?? "",
-            "pos": jsonStringField(json, "pos") ?? "",
-            "definition": jsonStringField(json, "definition") ?? "",
-            "example": jsonStringField(json, "example") ?? "",
-            "entryType": run.entryType,
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let body = String(data: data, encoding: .utf8) else { return }
-        handleAction(action: "save-vocab", text: body)
-        run.saved = true
-        updateEntryTypeTags()
-        updateSaveButton()
-    }
-
-    private func dismissRun(_ id: String) {
-        cardRuns.removeAll { $0.id == id }
-        if activeRunId == id {
-            activeRunId = cardRuns.last?.id
-        }
-        if cardRuns.isEmpty {
-            resultPanel.orderOut(nil)
-            return
-        }
-        rebuildRunTabs()
-        renderActiveRun()
-        layoutResultCard()
-    }
-
-    private func jsonStringField(_ json: String, _ field: String) -> String? {
-        guard let data = json.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        return object[field] as? String
-    }
-    private func inferredEntryType(for word: String) -> String {
-        let text = word.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.hasSuffix(".") || text.hasSuffix("!") || text.hasSuffix("?") { return "pattern" }
-        if text.contains(" ") { return "phrase" }
-        return "word"
-    }
 }
-
-private struct ShowPayload: Decodable {
-    let text: String
-    let x: Int
-    let y: Int
-    let downX: Int?
-    let downY: Int?
-    let pending: Bool?
-    let actions: [ToolbarAction]?
-
-    init(text: String, x: Int, y: Int, downX: Int? = nil, downY: Int? = nil,
-         pending: Bool? = nil, actions: [ToolbarAction]? = nil) {
-        self.text = text
-        self.x = x
-        self.y = y
-        self.downX = downX
-        self.downY = downY
-        self.pending = pending
-        self.actions = actions
-    }
-}
-
-struct ResultShowPayload: Decodable {
-    let runId: String?
-    let featureId: String?
-    var title: String?
-    var icon: String?
-    var autoSave: Bool?
-    let inputText: String?
-
-    init(runId: String? = nil, featureId: String? = nil, title: String? = nil,
-         icon: String? = nil, autoSave: Bool? = nil, inputText: String? = nil) {
-        self.runId = runId
-        self.featureId = featureId
-        self.title = title
-        self.icon = icon
-        self.autoSave = autoSave
-        self.inputText = inputText
-    }
-}
-
-struct ResultEventPayload: Decodable {
-    let runId: String?
-    let chunk: String?
-    let done: Bool
-    let error: String?
-    let translationJson: String?
-    let saved: Bool?
-
-    init(runId: String? = nil, chunk: String? = nil, done: Bool = false,
-         error: String? = nil, translationJson: String? = nil, saved: Bool? = nil) {
-        self.runId = runId
-        self.chunk = chunk
-        self.done = done
-        self.error = error
-        self.translationJson = translationJson
-        self.saved = saved
-    }
-}
-
-struct CardActionsPayload: Decodable {
-    struct Item: Decodable {
-        let id: String
-        let name: String
-        let icon: String
-        let kind: String?
-
-        init(id: String, name: String, icon: String, kind: String? = nil) {
-            self.id = id
-            self.name = name
-            self.icon = icon
-            self.kind = kind
-        }
-    }
-    struct PanelDef: Decodable {
-        let id: String
-        let name: String
-        let icon: String
-
-        init(id: String, name: String, icon: String) {
-            self.id = id
-            self.name = name
-            self.icon = icon
-        }
-    }
-    let actions: [Item]
-    let panels: [PanelDef]?
-
-    init(actions: [Item], panels: [PanelDef]? = nil) {
-        self.actions = actions
-        self.panels = panels
-    }
-}
-
-/// One notes-table row (view-based NSTableView cell). The system provides
-/// selection (accent capsule), row height, scrolling, and width tracking;
-/// this cell only lays out its subviews and retints on selection/hover.
-/// A borderless NSTextField draws its text top-aligned while its label
-/// counterpart centers vertically — and the field EDITOR uses yet another
-/// rect. Route draw/edit/select through one centered rect so the renamed
-/// title sits exactly where the label was, mid-line, in both states.
-private final class VerticallyCenteredTextFieldCell: NSTextFieldCell {
-    override func titleRect(forBounds rect: NSRect) -> NSRect {
-        var r = super.titleRect(forBounds: rect)
-        let lineHeight = (font?.boundingRectForFont.height ?? 16).rounded()
-        r.origin.y = rect.minY + ((rect.height - lineHeight) / 2).rounded()
-        r.size.height = lineHeight
-        return r
-    }
-
-    override func edit(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText,
-                       delegate: Any?, event: NSEvent?) {
-        super.edit(withFrame: titleRect(forBounds: rect), in: controlView,
-                   editor: textObj, delegate: delegate, event: event)
-    }
-
-    override func select(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText,
-                         delegate: Any?, start selStart: Int, length selLength: Int) {
-        super.select(withFrame: titleRect(forBounds: rect), in: controlView,
-                     editor: textObj, delegate: delegate, start: selStart, length: selLength)
-    }
-
-    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
-        super.drawInterior(withFrame: titleRect(forBounds: cellFrame), in: controlView)
-    }
-}
-
-private final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
-    /// Traffic-light dot tinted by the note's tag hue (replaces the old
-    /// per-row file glyph — same icon on every row carried no information).
-    private let tagDot = NSView()
-    private var tagName = ""
-    let titleLabel = NSTextField(labelWithString: "")
-    let contentLabel = NSTextField(labelWithString: "")
-    private var tagLabel: NSTextField?
-    private var tagButton: TagPillButton?
-    private var onTagPicked: ((Int64, NSView) -> Void)?
-
-    private func fireTagClick() {
-        if let noteId { onTagPicked?(noteId, tagButton ?? (self as NSView)) }
-    }
-    private var tagWidth: CGFloat = 40
-    /// Inline rename editor: hidden until a double-click swaps it in.
-    let titleEditor = NSTextField()
-    var deleteButton: NSButton?
-    private var onDelete: ((Int64) -> Void)?
-    private var onRename: ((Int64, String) -> Void)?
-    private var noteId: Int64?
-    private var renameCancelled = false
-    private var titleBeforeRename = ""
-    private var caretToEndOnBegin = false
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        tagDot.wantsLayer = true
-        tagDot.layer?.cornerRadius = 4
-        addSubview(tagDot)
-        addSubview(titleLabel)
-        addSubview(contentLabel)
-
-        let centeredCell = VerticallyCenteredTextFieldCell()
-        centeredCell.stringValue = "" // bare cells ship titled "Field"
-        centeredCell.isEditable = true
-        centeredCell.isBordered = false
-        centeredCell.font = .systemFont(ofSize: 13, weight: .medium)
-        centeredCell.lineBreakMode = .byTruncatingTail
-        centeredCell.usesSingleLineMode = true
-        titleEditor.cell = centeredCell
-        titleEditor.drawsBackground = false
-        // SAME input surface as the Actions bar and search field:
-        // inputFill + hairline + radius 8; focus border comes with the edit.
-        titleEditor.wantsLayer = true
-        titleEditor.layer?.cornerRadius = 8
-        titleEditor.layer?.borderWidth = 1
-        titleEditor.layer?.masksToBounds = true
-        titleEditor.focusRingType = .none
-        titleEditor.isHidden = true
-        titleEditor.delegate = self
-        addSubview(titleEditor)
-    }
-
-    required init?(coder: NSCoder) { fatalError("not supported") }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    /// Labels are the deepest hit-test targets and reject the first mouse by
-    /// default — claim every non-button hit so the table gets the click.
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        if let hit = super.hitTest(point), hit is NSButton || hit === titleEditor {
-            return hit
-        }
-        return self
-    }
-
-    var themeColors: CardTheme = .dark {
-        didSet { applyThemeColors() }
-    }
-    private var inverted = false
-
-    func setInverted(_ value: Bool) {
-        guard value != inverted else { return }
-        inverted = value
-        applyThemeColors()
-    }
-
-    private func applyThemeColors() {
-        titleEditor.textColor = themeColors.foreground
-        titleEditor.layer?.backgroundColor = themeColors.inputFill.cgColor
-        titleEditor.layer?.borderColor = themeColors.hairline.cgColor
-        titleLabel.textColor = inverted ? themeColors.background : themeColors.foreground
-        contentLabel.textColor = inverted ? themeColors.background.withAlphaComponent(0.8) : themeColors.secondaryText
-        deleteButton?.contentTintColor = inverted ? themeColors.background : themeColors.tertiaryText
-        refreshTagColors()
-        if let tagButton {
-            tagButton.contentTintColor = inverted ? themeColors.background : themeColors.secondaryText
-            tagButton.layer?.backgroundColor = inverted
-                ? NSColor.black.withAlphaComponent(0.18).cgColor
-                : NSColor.labelColor.withAlphaComponent(themeColors.isDark ? 0.10 : 0.06).cgColor
-        }
-
-        // Rename editor: always its own surface (inputFill + foreground) —
-        // following the capsule's white-on-accent made white-on-white text
-        // on the light theme.
-        titleEditor.textColor = themeColors.foreground
-        titleEditor.backgroundColor = themeColors.inputFill
-        titleEditor.layer?.borderColor = themeColors.hairline.cgColor
-        titleEditor.layer?.borderWidth = 1
-    }
-
-    override var backgroundStyle: NSView.BackgroundStyle {
-        didSet { applyThemeColors() }
-    }
-
-    func configure(note: CardNotesPayload.Note, dark: Bool,
-                   onDelete: ((Int64) -> Void)?,
-                   onRename: ((Int64, String) -> Void)? = nil,
-                   onTagPicked: ((Int64, NSView) -> Void)? = nil) {
-
-        noteId = note.id
-        self.onRename = onRename
-        tagName = (note.tags ?? []).first ?? ""
-        let titleText = note.name.isEmpty ? String(note.content.prefix(40)) : note.name
-        titleLabel.stringValue = titleText
-        if titleEditor.isHidden {
-            titleEditor.stringValue = titleText
-        }
-        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.maximumNumberOfLines = 1
-        titleLabel.cell?.truncatesLastVisibleLine = true
-        titleLabel.cell?.wraps = false
-        titleLabel.toolTip = note.content
-
-        contentLabel.stringValue = note.content
-        contentLabel.font = .systemFont(ofSize: 12)
-        contentLabel.maximumNumberOfLines = 1
-        contentLabel.cell?.truncatesLastVisibleLine = true
-        contentLabel.cell?.wraps = false
-
-        // Trailing tag pill (one tag per note in this data model). It is a
-        // BUTTON: click opens the tag picker (system NSMenu) for this note.
-        tagLabel?.removeFromSuperview()
-        tagLabel = nil
-        tagButton?.removeFromSuperview()
-        tagButton = nil
-        if let tag = (note.tags ?? []).first {
-            let button = TagPillButton()
-            button.title = tag
-            button.isBordered = false
-            button.font = .systemFont(ofSize: 10, weight: .medium)
-            button.alignment = .center
-            button.lineBreakMode = .byTruncatingTail
-            button.toolTip = "Change tag"
-            tagWidth = max((tag as NSString).size(withAttributes: [.font: button.font!]).width + 14, 34)
-            button.wantsLayer = true
-            button.layer?.cornerRadius = 8
-            button.onTagClicked = { [weak self] in
-                self?.fireTagClick()
-            }
-            addSubview(button)
-            tagButton = button
-        }
-
-        if let deleteButton {
-            deleteButton.removeFromSuperview()
-        }
-        if let id = note.id, let onDelete {
-            let button = NSButton(image: lucideImage(for: "x", title: "Delete note") ?? NSImage(),
-                                  target: self,
-                                  action: #selector(deleteTapped))
-            button.isBordered = false
-            button.imageScaling = .scaleProportionallyDown
-            button.toolTip = "Delete note"
-            button.identifier = NSUserInterfaceItemIdentifier(String(id))
-            self.onDelete = onDelete
-            deleteButton = button
-            addSubview(button)
-        }
-        needsLayout = true
-        refreshTagColors()
-    }
-
-    /// One hue per tag: the leading dot AND the pill text/fill share it, so
-    /// tags are tellable apart pre-attentively (traffic-light language).
-    private func refreshTagColors() {
-        let dark = themeColors.isDark
-        if tagName.isEmpty {
-            tagDot.isHidden = true
-        } else {
-            tagDot.isHidden = false
-            tagDot.layer?.backgroundColor = tagColor(for: tagName, dark: dark).cgColor
-        }
-        if let tagButton, !tagName.isEmpty {
-            let color = tagColor(for: tagName, dark: dark)
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.alignment = .center
-            tagButton.attributedTitle = NSAttributedString(
-                string: tagName,
-                attributes: [
-                    .font: NSFont.systemFont(ofSize: 10, weight: .medium),
-                    .foregroundColor: color,
-                    .paragraphStyle: paragraph,
-                ]
-            )
-            tagButton.layer?.backgroundColor = color.withAlphaComponent(dark ? 0.16 : 0.12).cgColor
-        }
-    }
-
-    @objc private func deleteTapped(_ sender: NSButton) {
-        if let raw = sender.identifier?.rawValue, let id = Int64(raw) {
-            onDelete?(id)
-        }
-    }
-
-    /// Double-click → the title becomes an input; Enter or losing focus
-    /// commits, Esc cancels.
-    func beginRenaming() {
-        guard noteId != nil else { return }
-        titleBeforeRename = titleLabel.stringValue
-        renameCancelled = false
-        titleEditor.stringValue = titleBeforeRename
-        titleLabel.isHidden = true
-        titleEditor.isHidden = false
-        caretToEndOnBegin = true
-        titleEditor.layer?.borderColor = themeColors.foreground.withAlphaComponent(0.45).cgColor
-        window?.makeFirstResponder(titleEditor)
-        DispatchQueue.main.async { [weak self] in
-            self?.placeCaretAtEndOnce()
-        }
-    }
-
-    private func placeCaretAtEndOnce() {
-        guard caretToEndOnBegin, let editor = titleEditor.currentEditor() else { return }
-        caretToEndOnBegin = false
-        // Finder semantics: entering rename PRE-SELECTS everything, so
-        // typing replaces and arrow keys/home reveal the caret as needed.
-        editor.selectAll(nil)
-    }
-
-    func controlTextDidBeginEditing(_ obj: Notification) {
-        guard obj.object as? NSTextField === titleEditor else { return }
-        placeCaretAtEndOnce()
-    }
-
-    private func endRenaming() {
-        titleEditor.layer?.borderColor = themeColors.hairline.cgColor
-        titleEditor.isHidden = true
-        titleLabel.isHidden = false
-    }
-
-    func controlTextDidEndEditing(_ obj: Notification) {
-        guard obj.object as? NSTextField === titleEditor else { return }
-        let committed = !renameCancelled
-        endRenaming()
-        guard committed, let id = noteId else { return }
-        let newValue = titleEditor.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !newValue.isEmpty, newValue != titleBeforeRename {
-            onRename?(id, newValue)
-        } else {
-            titleEditor.stringValue = titleBeforeRename
-        }
-    }
-
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard control === titleEditor else { return false }
-        if commandSelector == NSSelectorFromString("cancelOperation:") {
-            renameCancelled = true
-            window?.makeFirstResponder(nil)
-            return true
-        }
-        return false
-    }
-
-    override func layout() {
-        super.layout()
-        let w = bounds.width
-        // Content-first rows (Notes/Mail language): the tag-colored dot
-        // rides the title line at the pill's own 14pt inset, the two-line
-        // text block follows; the trailing column (tag pill + delete)
-        // shares one right margin.
-        tagDot.frame = NSRect(x: 14, y: 24, width: 8, height: 8)
-        deleteButton?.frame = NSRect(x: w - 28, y: bounds.midY - 9, width: 18, height: 18)
-        let hasTag = tagButton != nil
-        if hasTag {
-            tagButton!.frame = NSRect(x: w - 28 - 6 - tagWidth, y: bounds.midY - 8, width: tagWidth, height: 16)
-        }
-        let textX: CGFloat = 30
-        let trailingX: CGFloat = (hasTag ? (w - 28 - 6 - tagWidth) : w - 28) - 6
-        titleLabel.frame = NSRect(x: textX, y: 20, width: max(trailingX - textX, 24), height: 16)
-        contentLabel.frame = NSRect(x: textX, y: 4, width: max(trailingX - textX, 24), height: 15)
-        // Rename editor: same text origin as the title label, grown downward.
-        titleEditor.frame = NSRect(
-            x: titleLabel.frame.minX - 2,
-            y: titleLabel.frame.minY - 4,
-            width: trailingX - titleLabel.frame.minX + 2,
-            height: 23
-        )
-    }
-}
-
-/// Row view: paints ONLY the hover (the system has none), mimicking the
-/// system capsule's inset/radius so the two geometries read as one.
-private final class NotesTable: NSTableView {
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    /// Responder-chain keyboard: the panel is key (OS-normal model), so
-    /// Enter inserts the highlighted note and Tab cycles panel tabs — no
-    /// global event tap involved.
-    var onEnterKey: (() -> Void)?
-    var onDoubleClickRow: ((Int) -> Void)?
-    private var lastClickRow = -1
-    private var lastClickTime = TimeInterval(0)
-
-    override func keyDown(with event: NSEvent) {
-        switch event.keyCode {
-        case 36, 52: // Enter / keypad Enter
-            onEnterKey?()
-        default:
-            super.keyDown(with: event)
-        }
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        // While a row's title editor is live, a click INSIDE that row belongs
-        // to the edit (caret moves, selection clears) — running the table's
-        // tracking would resign the editor and snap back to the label.
-        // The event still belongs to the FIELD EDITOR: forward it, otherwise
-        // double-click-to-select-word and drag-select die inside the editor.
-        if let editor = window?.firstResponder as? NSText,
-           editor.isFieldEditor,
-           let host = editor.delegate as? NSTextField,
-           host === (view(atColumn: 0, row: row(at: convert(event.locationInWindow, from: nil)), makeIfNecessary: false) as? NoteRowCell)?.titleEditor {
-            editor.mouseDown(with: event)
-            return
-        }
-        // The panel is nonactivating: NSTableView's own tracking silently
-        // bails before the app is active. Select the clicked row
-        // PROGRAMMATICALLY — works without key status.
-        let point = convert(event.locationInWindow, from: nil)
-        let clickedRow = self.row(at: point)
-        if clickedRow >= 0 {
-            // Double-click is ours to detect: the system's doubleAction dispatch
-            // ran a longer event chain that beeped. Same row inside the
-            // double-click interval = rename, nothing else.
-            let now = event.timestamp
-            if clickedRow == lastClickRow,
-               now - lastClickTime < NSEvent.doubleClickInterval,
-               let onDoubleClickRow {
-                lastClickRow = -1
-                onDoubleClickRow(clickedRow)
-                return
-            }
-            lastClickRow = clickedRow
-            lastClickTime = now
-            selectRowIndexes(IndexSet(integer: clickedRow), byExtendingSelection: false)
-        }
-        super.mouseDown(with: event)
-    }
-}
-
-/// In-card tag picker: flipped layer list pinned at the pill. One row per
-/// known tag (check on the current), divider, clear row. System menus
-/// misplace themselves on nonactivating panels - this stays in the card.
-private final class TagDropdownView: NSView {
-    private let onPick: (String?) -> Void
-    private let theme: CardTheme
-    private var rows: [NSView] = []
-    private(set) var naturalWidth: CGFloat = 120
-
-    init(tags: [String], current: String?, theme: CardTheme, onPick: @escaping (String?) -> Void) {
-        self.onPick = onPick
-        self.theme = theme
-        super.init(frame: .zero)
-        wantsLayer = true
-        shadow = NSShadow()
-        shadow?.shadowColor = NSColor.black.withAlphaComponent(0.35)
-        shadow?.shadowBlurRadius = 14
-        shadow?.shadowOffset = NSSize(width: 0, height: -3)
-
-        var y: CGFloat = 4
-        func addRow(_ title: String, value: String?, checked: Bool) {
-            let button = RowPickButton(title: title)
-            button.font = .systemFont(ofSize: 12, weight: checked ? .medium : .regular)
-            button.alignment = .left
-            button.lineBreakMode = .byTruncatingTail
-            if checked, let check = lucideImage(for: "check", title: title, color: theme.foreground) {
-                check.size = NSSize(width: 12, height: 12)
-                let attachment = NSTextAttachment()
-                attachment.image = check
-                attachment.bounds = NSRect(x: 0, y: (button.font!.capHeight - 12) / 2, width: 12, height: 12)
-                let title = NSMutableAttributedString(string: title, attributes: [
-                    .font: button.font!,
-                    .foregroundColor: theme.foreground,
-                ])
-                title.append(NSAttributedString(string: "  "))
-                title.append(NSAttributedString(attachment: attachment))
-                button.attributedTitle = title
-            } else {
-                button.attributedTitle = NSAttributedString(string: title, attributes: [
-                    .font: button.font!,
-                    .foregroundColor: value == nil ? theme.secondaryText : theme.foreground,
-                ])
-            }
-            button.wantsLayer = true
-            button.layer?.cornerRadius = 6
-            button.onPickRow = { [weak self] in self?.onPick(value) }
-            rows.append(button)
-            addSubview(button)
-            y += 26
-        }
-        for tag in tags {
-            addRow(tag, value: tag, checked: tag == current)
-        }
-        // Width hugs the longest label (+check mark slot); never the old
-        // blanket 150+.
-        let longest = (["No tag"] + tags).map {
-            ($0 as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width
-        }.max() ?? 60
-        naturalWidth = min(max(longest + 46, 96), 190)
-        if !tags.isEmpty {
-            let divider = NSView()
-            divider.wantsLayer = true
-            divider.layer?.backgroundColor = theme.hairline.cgColor
-            rows.append(divider)
-            addSubview(divider)
-            y += 5
-        }
-        addRow("No tag", value: nil, checked: current == nil)
-        frame.size = NSSize(width: 150, height: y)
-        sizeToFit(width: 150)
-    }
-
-    func sizeToFit(width: CGFloat) {
-        frame.size.width = width
-        var y: CGFloat = 3
-        for view in rows {
-            if view is RowPickButton {
-                view.frame = NSRect(x: 6, y: y, width: width - 12, height: 24)
-                y += 26
-            } else {
-                view.frame = NSRect(x: 8, y: y + 2, width: width - 16, height: 1)
-                y += 5
-            }
-        }
-        needsDisplay = true
-    }
-
-    override var isFlipped: Bool { true }
-
-    override func draw(_ dirtyRect: NSRect) {
-        // OPAQUE card-colored panel + hairline. Layer backgrounds never
-        // composited here; painting does (same as the notes row pills).
-        theme.background.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
-        theme.hairline.setStroke()
-        NSBezierPath(
-            roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
-            xRadius: 8,
-            yRadius: 8
-        ).stroke()
-        FileLog.write("TAGDROP drew bg=\(theme.background) bounds=\(bounds)")
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("programmatic only")
-    }
-}
-
-/// A dropdown row: whole-row click, goty quiet-wash hover.
-private final class RowPickButton: NSButton {
-    var onPickRow: (() -> Void)?
-    private var hoverArea: NSTrackingArea?
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    init(title: String) {
-        super.init(frame: .zero)
-        self.title = title
-        isBordered = false
-        target = self
-        action = #selector(rowPicked)
-        wantsLayer = true
-        layer?.cornerRadius = 6
-    }
-
-    override var title: String {
-        didSet {}
-    }
-
-    /// Text sits 10pt from the row's left edge, not flush against it.
-    override func draw(_ dirtyRect: NSRect) {
-        let inset = bounds.insetBy(dx: 8, dy: 0)
-        attributedTitle.draw(in: NSRect(
-            x: inset.minX + 2,
-            y: (bounds.height - attributedTitle.size().height) / 2,
-            width: inset.width,
-            height: attributedTitle.size().height
-        ))
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverArea { removeTrackingArea(hoverArea) }
-        hoverArea = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        if let hoverArea { addTrackingArea(hoverArea) }
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.clear.cgColor
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.14).cgColor
-        super.mouseDown(with: event)
-        onPickRow?()
-    }
-
-    @objc private func rowPicked() {}
-
-    required init?(coder: NSCoder) {
-        fatalError("programmatic only")
-    }
-}
-
-
-/// Tag pill: a borderless button that fires on ANY click inside its bounds.
-private final class TagPillButton: NSButton {
-    var onTagClicked: (() -> Void)?
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    init() {
-        super.init(frame: .zero)
-        target = self
-        action = #selector(pillClicked)
-    }
-
-    @objc private func pillClicked() {
-        onTagClicked?()
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("programmatic only")
-    }
-}
-
-private final class NoteRowView: NSTableRowView {
-    private var hoverArea: NSTrackingArea?
-    private var hovering = false
-    var pillColor: NSColor = .clear { didSet { needsDisplay = true } }
-    // With selectionHighlightStyle = .none the table does NOT redraw on
-    // selection change — without this the deselected row keeps its stale
-    // pill and two rows read as selected at once.
-    override var isSelected: Bool {
-        didSet { needsDisplay = true }
-    }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverArea { removeTrackingArea(hoverArea) }
-        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        if let hoverArea { addTrackingArea(hoverArea) }
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        // Tracking areas ignore occlusion by sibling layers (the tag
-        // dropdown floats above the list): only hover when THIS row is the
-        // top-most view under the cursor.
-        if let top = window?.contentView?.hitTest(event.locationInWindow),
-           top === self || top.isDescendant(of: self) {
-            hovering = true
-            needsDisplay = true
-        }
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        hovering = false
-        needsDisplay = true
-    }
-
-    func clearHover() {
-        hovering = false
-        needsDisplay = true
-    }
-
-    var hoverColor: NSColor = NSColor.labelColor.withAlphaComponent(0.06) {
-        didSet { needsDisplay = true }
-    }
-
-    // goty tty7 pill: hugging the row's edge by the same inset on both
-    // sides, full-radius caps. Selection is a quiet same-hue wash (text
-    // keeps its color); hover is one step lighter.
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        let pill = bounds.insetBy(dx: 3, dy: 2)
-        let path = NSBezierPath(
-            roundedRect: pill,
-            xRadius: 8,
-            yRadius: 8
-        )
-        if isSelected {
-            // Selection = the wash capsule; glyphs keep their own color.
-            pillColor.setFill()
-            path.fill()
-        } else if hovering {
-            hoverColor.setFill()
-            path.fill()
-        }
-    }
-}
-
-struct CardNotesPayload: Decodable {
-    var allTags: [String]?
-    struct Note: Decodable {
-        let id: Int64?
-        let name: String
-        let tags: [String]?
-        let content: String
-
-        init(id: Int64? = nil, name: String, tags: [String]? = nil, content: String) {
-            self.id = id
-            self.name = name
-            self.tags = tags
-            self.content = content
-        }
-    }
-    let notes: [Note]
-
-    init(notes: [Note], allTags: [String]? = nil) {
-        self.notes = notes
-        self.allTags = allTags
-    }
-}
-
-private struct CardReviewPayload: Decodable {
-    struct ReviewWord: Decodable {
-        let id: Int64
-        let word: String
-        let translation: String?
-        let pos: String?
-        let entryType: String?
-    }
-    let word: ReviewWord?
-}
-
-/// Whole-row click target (notes rows: click = select + inject). Hover gives
-/// unselected rows a whisper of background so the target is discoverable.
-private final class ClickableRow: NSView {
-    var onClicked: (() -> Void)?
-    var onHover: ((Bool) -> Void)?
-    private var hoverArea: NSTrackingArea?
-
-    override var isFlipped: Bool { true }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverArea { removeTrackingArea(hoverArea) }
-        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        if let hoverArea { addTrackingArea(hoverArea) }
-    }
-
-    override func mouseEntered(with event: NSEvent) { onHover?(true) }
-    override func mouseExited(with event: NSEvent) { onHover?(false) }
-
-    override func mouseDown(with event: NSEvent) {
-        onClicked?()
-    }
-}
-
-/// Top-down document view for the notes list (row 0 = the top edge).
-private final class FlippedNotesDoc: NSView {
-    override var isFlipped: Bool { true }
-}
-
-/// NSTextField that reports clicks (notes rows: click = copy).
-private final class ClickableTextField: NSTextField {
-    var onClicked: (() -> Void)?
-    override func mouseDown(with event: NSEvent) {
-        onClicked?()
-    }
-}
-
-/// One AI run shown in the card (WebView WorkspaceRun parity).
-struct CardNotesSelectPayload: Codable {
-    let index: Int
-}
-
-private final class CardRun {
-    let id: String
-    let featureId: String
-    let title: String
-    let icon: String
-    var status: String = "loading" // loading | streaming | ready | error
-    var text: String = ""
-    var translationJson: String?
-    var entryType: String = "word"
-    var saved = false
-    init(id: String, featureId: String, title: String, icon: String) {
-        self.id = id
-        self.featureId = featureId
-        self.title = title
-        self.icon = icon
-    }
-}
-
-/// A run chip in the tabs strip: icon + title + inline dismiss (×),
-/// whole-chip click selects the run.
-private final class RunChipView: NSView {
-    var onSelected: (() -> Void)?
-    var onDismissed: (() -> Void)?
-    let fitWidth: CGFloat
-    private let iconView: NSImageView
-    private let titleLabel: NSTextField
-    private let dismissButton: NSButton
-    private var isActive = false
-    private var isDark = false
-    private var statusDot: NSView!
-    var runId = ""
-    var statusKey = ""
-    var isActiveChip = false
-
-    init(run: CardRun, dark: Bool) {
-        isDark = dark
-        runId = run.id
-        statusKey = run.status
-        let icon = lucideImage(for: run.icon, title: run.title) ?? NSImage()
-        let title = run.title
-        let titleWidth = (title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width + 8
-        fitWidth = 8 + 4 + 5 + 13 + 4 + titleWidth + 8 + 14
-        let frame = NSRect(x: 0, y: 0, width: fitWidth, height: 24)
-
-        statusDot = NSView(frame: NSRect(x: 8, y: 10, width: 4, height: 4))
-        statusDot.wantsLayer = true
-        statusDot.layer?.cornerRadius = 3
-
-        iconView = NSImageView(frame: NSRect(x: 18, y: 5.5, width: 13, height: 13))
-        iconView.image = icon
-        iconView.imageScaling = .scaleProportionallyDown
-
-        titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 12)
-        titleLabel.frame = NSRect(x: 35, y: 4.5, width: titleWidth, height: 15)
-
-        dismissButton = NSButton(title: "", target: nil, action: nil)
-        dismissButton.bezelStyle = .regularSquare
-        dismissButton.isBordered = false
-        dismissButton.title = "✕"
-        dismissButton.font = .systemFont(ofSize: 8)
-        dismissButton.frame = NSRect(x: fitWidth - 20, y: 4, width: 14, height: 14)
-
-        super.init(frame: frame)
-        wantsLayer = true
-        layer?.cornerRadius = 6
-        addSubview(statusDot)
-        addSubview(iconView)
-        addSubview(titleLabel)
-        addSubview(dismissButton)
-        dismissButton.target = self
-        dismissButton.action = #selector(dismissTapped)
-        setActive(false, dark: dark)
-    }
-
-    required init?(coder: NSCoder) { fatalError("not supported") }
-
-    func setActive(_ active: Bool, dark: Bool) {
-        isActive = active
-        isActiveChip = active
-        isDark = dark
-        layer?.backgroundColor = active
-            ? (dark ? NSColor.white.withAlphaComponent(0.14).cgColor : NSColor.black.withAlphaComponent(0.08).cgColor)
-            : NSColor.clear.cgColor
-        let color: NSColor = active ? .labelColor : .secondaryLabelColor
-        titleLabel.textColor = color
-        iconView.contentTintColor = color
-        statusDot.layer?.backgroundColor = Self.dotColor(for: statusKey).cgColor
-    }
-
-    private static func dotColor(for status: String) -> NSColor {
-        switch status {
-        case "error": return .systemRed.withAlphaComponent(0.85)
-        case "ready": return .controlAccentColor.withAlphaComponent(0.65)
-        default: return .secondaryLabelColor.withAlphaComponent(0.55)
-        }
-    }
-
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    override func mouseDown(with event: NSEvent) {
-        onSelected?()
-    }
-
-    @objc private func dismissTapped() {
-        onDismissed?()
-    }
-}
-
-/// NSTextView subclass is not needed for behavior — the delegate handles
-/// Enter/Esc — but a distinct type keeps the firstResponder check readable.
-private final class CardInputTextView: NSTextView {
-    var onBecameFocus: (() -> Void)?
-    var onLostFocus: (() -> Void)?
-    /// Multiline text views have no native placeholder; this one paints the
-    /// hint INSIDE draw() at textContainerOrigin with the same font — the
-    /// hint and real text share one layout pipeline, so they cannot drift.
-    var placeholder: NSAttributedString?
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard string.isEmpty, let placeholder else { return }
-        let origin = textContainerOrigin
-        let lineH = font?.boundingRectForFont.height.rounded() ?? 16
-        placeholder.draw(in: NSRect(
-            x: origin.x,
-            y: origin.y,
-            width: bounds.width - origin.x * 2,
-            height: lineH
-        ))
-    }
-
-    override func becomeFirstResponder() -> Bool {
-        let ok = super.becomeFirstResponder()
-        if ok { onBecameFocus?() }
-        return ok
-    }
-
-    override func resignFirstResponder() -> Bool {
-        onLostFocus?()
-        return super.resignFirstResponder()
-    }
-}
-
-/// Single-line card input: native NSTextField with the placeholder STRING
-/// drawn by the cell itself — caret and placeholder share one layout, so
-/// they cannot drift apart. Vertically centered via the same cell used by
-/// the inline rename editor.
-class CardInputTextField: NSTextField {
-    var onBecameFocus: (() -> Void)?
-    var onLostFocus: (() -> Void)?
-    var onCommit: (() -> Void)?
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override func becomeFirstResponder() -> Bool {
-        let ok = super.becomeFirstResponder()
-        if ok { onBecameFocus?() }
-        return ok
-    }
-
-    override func resignFirstResponder() -> Bool {
-        onLostFocus?()
-        return super.resignFirstResponder()
-    }
-}
-
-/// Lightweight Markdown → NSAttributedString for the result card.
-/// Supports headings, lists, quotes, fenced code, bold/italic/inline code —
-/// enough to mirror the WebView renderer's output shapes. Zero dependencies.
-private enum LightMarkdown {
-    static func attributed(_ markdown: String, dark: Bool) -> NSAttributedString {
-        let body = dark
-            ? NSColor.white.withAlphaComponent(0.9)
-            : NSColor.black.withAlphaComponent(0.85)
-        let muted = dark
-            ? NSColor.white.withAlphaComponent(0.55)
-            : NSColor.black.withAlphaComponent(0.55)
-        let codeBackground = dark
-            ? NSColor.white.withAlphaComponent(0.08)
-            : NSColor.black.withAlphaComponent(0.06)
-        let bodyFont = NSFont.systemFont(ofSize: 13)
-        let monoFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = 4
-        paragraphStyle.paragraphSpacing = 8
-        let listStyle = NSMutableParagraphStyle()
-        listStyle.lineSpacing = 3
-        listStyle.headIndent = 18
-
-        let out = NSMutableAttributedString()
-        var inCode = false
-        var codeLines: [String] = []
-        var paragraphLines: [String] = []
-
-        func flushParagraph() {
-            guard !paragraphLines.isEmpty else { return }
-            let paragraph = NSMutableAttributedString(
-                string: paragraphLines.joined(separator: "\n"),
-                attributes: [.font: bodyFont, .foregroundColor: body, .paragraphStyle: paragraphStyle]
-            )
-            applyInline(paragraph, bodyFont: bodyFont, body: body, mono: monoFont, codeBg: codeBackground)
-            out.append(paragraph)
-            paragraphLines.removeAll()
-        }
-
-        func flushCode() {
-            guard !codeLines.isEmpty else { return }
-            let text = codeLines.joined(separator: "\n")
-            let block = NSMutableAttributedString(
-                string: text + "\n",
-                attributes: [
-                    .font: monoFont,
-                    .foregroundColor: body,
-                    .backgroundColor: codeBackground,
-                    .paragraphStyle: paragraphStyle,
-                ]
-            )
-            out.append(block)
-            codeLines.removeAll()
-        }
-
-        for rawLine in markdown.components(separatedBy: "\n") {
-            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
-
-            if trimmed.hasPrefix("```") {
-                if inCode {
-                    flushCode()
-                } else {
-                    flushParagraph()
-                    inCode = true
-                }
-                continue
-            }
-            if inCode {
-                codeLines.append(rawLine)
-                continue
-            }
-
-            if trimmed.isEmpty {
-                flushParagraph()
-                continue
-            }
-
-            if trimmed.hasPrefix("#") {
-                flushParagraph()
-                let level = trimmed.prefix(while: { $0 == "#" }).count
-                let heading = trimmed.drop(while: { $0 == "#" })
-                    .trimmingCharacters(in: .whitespaces)
-                let size: CGFloat = level <= 1 ? 17 : (level == 2 ? 15 : 14)
-                out.append(NSAttributedString(string: heading + "\n", attributes: [
-                    .font: NSFont.systemFont(ofSize: size, weight: .semibold),
-                    .foregroundColor: body,
-                ]))
-                continue
-            }
-
-            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("• ") {
-                flushParagraph()
-                let item = NSMutableAttributedString(
-                    string: "•  " + trimmed.dropFirst(2) + "\n",
-                    attributes: [.font: bodyFont, .foregroundColor: body, .paragraphStyle: listStyle]
-                )
-                applyInline(item, bodyFont: bodyFont, body: body, mono: monoFont, codeBg: codeBackground)
-                out.append(item)
-                continue
-            }
-
-            if trimmed.hasPrefix("> ") {
-                flushParagraph()
-                out.append(NSAttributedString(
-                    string: "▎" + trimmed.dropFirst(2) + "\n",
-                    attributes: [.font: bodyFont, .foregroundColor: muted, .paragraphStyle: listStyle]
-                ))
-                continue
-            }
-
-            paragraphLines.append(rawLine)
-        }
-
-        if inCode { flushCode() }
-        flushParagraph()
-        return out
-    }
-
-    /// Inline `code`, **bold**, *italic*. Each pass recomputes its NSRange
-    /// against the current string — a stale range from an earlier
-    /// replacement is out of bounds and NSRegularExpression throws
-    /// NSRangeException, which is fatal in Swift (no ObjC catch).
-    private static func applyInline(
-        _ text: NSMutableAttributedString,
-        bodyFont: NSFont,
-        body: NSColor,
-        mono: NSFont,
-        codeBg: NSColor
-    ) {
-        let bold = NSFontManager.shared.convert(bodyFont, toHaveTrait: .boldFontMask)
-        let italic = NSFontManager.shared.convert(bodyFont, toHaveTrait: .italicFontMask)
-
-        replaceInline(text, pattern: "`([^`]+)`", attributes: [
-            .font: mono, .foregroundColor: body, .backgroundColor: codeBg,
-        ])
-        replaceInline(text, pattern: "\\*\\*([^*]+)\\*\\*", attributes: [.font: bold])
-        replaceInline(text, pattern: "\\*([^*]+)\\*", attributes: [.font: italic])
-    }
-
-    /// Replace `pattern` matches with their capture group, applying
-    /// `attributes` over the replacement. Matches are applied back-to-front
-    /// so earlier offsets survive each replacement.
-    private static func replaceInline(
-        _ text: NSMutableAttributedString,
-        pattern: String,
-        attributes: [NSAttributedString.Key: Any]
-    ) {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
-        let current = text.string
-        let full = NSRange(location: 0, length: (current as NSString).length)
-        for match in regex.matches(in: current, range: full).reversed() {
-            guard let inner = Range(match.range(at: 1), in: current) else { continue }
-            let innerText = String(current[inner])
-            text.replaceCharacters(in: match.range, with: innerText)
-            text.addAttributes(
-                attributes,
-                range: NSRange(location: match.range.location, length: (innerText as NSString).length)
-            )
-        }
-    }
-}
-
-
-extension SelectionToolbarApp: NSTextViewDelegate {
-    func controlTextDidChange(_ obj: Notification) {
-        guard obj.object as? NSTextField === noteSearchField else { return }
-        noteSearchText = noteSearchField.stringValue
-        applyNoteFilters()
-    }
-
-    func textDidChange(_ notification: Notification) {
-        guard notification.object as? NSTextView === inputTextView else { return }
-        // AiForm parity: re-measure and re-flow single- vs multi-line on
-        // every edit, and re-enable the action buttons when text exists.
-        layoutResultCard()
-        rebuildInputButtons()
-    }
-
-    func textDidBeginEditing(_ notification: Notification) {
-        guard notification.object as? NSTextView === inputTextView else { return }
-        setInputFocused(true)
-    }
-
-    func textDidEndEditing(_ notification: Notification) {
-        guard notification.object as? NSTextView === inputTextView else { return }
-        setInputFocused(false)
-    }
-
-    func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard textView === inputTextView else { return false }
-        let newline = NSSelectorFromString("insertNewline:")
-        let cancel = NSSelectorFromString("cancelOperation:")
-        if commandSelector == newline {
-            // Enter runs the default feature; Shift+Enter keeps a newline
-            // (WebView AiForm keydown parity).
-            if !NSEvent.modifierFlags.contains(.shift) {
-                submitInput(kind: "feature", id: "")
-                return true
-            }
-            return false
-        }
-        if commandSelector == cancel {
-            escapeResultCardIfNeeded()
-            return true
-        }
-        return false
-    }
-}
-
-
-
-private struct NotesShowPayload: Decodable {
-    struct Note: Decodable {
-        let name: String
-        let content: String
-    }
-    let notes: [Note]
-    let selected: Int
-}
-
-extension SelectionToolbarApp {
-    /// Hovers are the only self-drawn effect; scrolling invalidates them.
-    @objc func notesClipScrolled() {
-        let range = notesTableView.rows(in: notesTableView.visibleRect)
-        for row in range.location..<max(range.location, range.location + range.length) {
-            if let rowView = notesTableView.rowView(atRow: row, makeIfNecessary: false) as? NoteRowView {
-                rowView.clearHover()
-            }
-        }
-    }
-}
-
-extension SelectionToolbarApp: NSTextFieldDelegate {
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard control === noteSearchField else { return false }
-        if commandSelector == NSSelectorFromString("cancelOperation:") {
-            if !noteSearchField.stringValue.isEmpty {
-                noteSearchField.stringValue = ""
-                noteSearchText = ""
-                applyNoteFilters()
-            } else {
-                notesTableView.window?.makeFirstResponder(notesTableView)
-            }
-            return true
-        }
-        return false
-    }
-}
-
-extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
-    func numberOfRows(in tableView: NSTableView) -> Int {
-        displayedNotes.count
-    }
-
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard row >= 0, row < displayedNotes.count else { return nil }
-        let cell = tableView.makeView(
-            withIdentifier: NSUserInterfaceItemIdentifier("NoteRow"),
-            owner: self
-        ) as? NoteRowCell ?? NoteRowCell(frame: .zero)
-        cell.identifier = NSUserInterfaceItemIdentifier("NoteRow")
-        let note = displayedNotes[row]
-        cell.configure(note: note, dark: theme == .dark,
-                       onDelete: { [weak self] id in
-                           self?.noteDeleteClickedId(id)
-                       },
-                       onRename: { [weak self] id, name in
-                           self?.noteRenamed(id: id, name: name)
-                       },
-                       onTagPicked: { [weak self] id, anchor in
-                           self?.showTagMenu(noteId: id, tag: note.tags?.first, anchor: anchor)
-                       })
-        cell.themeColors = cardTheme
-        return cell
-    }
-
-    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        if let reused = tableView.makeView(
-            withIdentifier: NSUserInterfaceItemIdentifier("NoteRowView"),
-            owner: self
-        ) as? NoteRowView {
-            return reused
-        }
-        let view = NoteRowView(frame: .zero)
-        view.identifier = NSUserInterfaceItemIdentifier("NoteRowView")
-        view.hoverColor = cardTheme.hoverFill
-        view.pillColor = cardTheme.selectedFill
-        return view
-    }
-
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        FileLog.write("SEL didChange row=\(notesTableView.selectedRow)")
-        let selected = notesTableView.selectedRow
-        if selected >= 0, selected < displayedNotes.count {
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(displayedNotes[selected].content, forType: .string)
-        }
-    }
-}
-
-private struct ThemePayload: Decodable {
-    let theme: String
-    var panelOpacity: Double?
-    var panelBlur: String?
-}
-

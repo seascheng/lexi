@@ -9,10 +9,12 @@ Lexi/                            # all sources + the app bundle + build script
   build.sh                       # swiftc -O over the sources -> codesigned .app
                                  #   ./build.sh        compile + codesign
                                  #   ./build.sh run    build, relaunch
-  LexiAppInfo.plist              # source of truth for bundle metadata
   LexiSelectionHelper.app/       # the product (bundle id com.lexi.selection-helper)
-  SelectionToolbarHelper.swift   # app lifecycle, status item, selection toolbar panel,
-                                 #   result card (runs, tabs, review), HTTP debug server
+  SelectionToolbarHelper.swift   # app delegate: lifecycle, shared state, action routing
+  ToolbarPanel.swift             # selection toolbar panel (build/place/show/hide/buttons)
+  ResultCard.swift               # result card: runs, tabs, streaming render, notes/review tabs
+  ResultCardViews.swift          # card view types: rows, cells, table, dropdown, chips
+  DebugServer.swift              # toolbar TCP listener + headless debug routes
   SelectionPipeline.swift        # LISTEN-only mouse tap + AX selection read chain
                                  #   (selected text direct -> range slice -> WebArea)
   ShortcutMonitor.swift          # global shortcuts: double-Shift launcher, Alt+V clipboard,

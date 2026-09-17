@@ -16,17 +16,6 @@ import AppKit
 // - the pasteboard carries no source, so capture attributes to the
 //   frontmost app at poll time (0.5s attribution window, accepted).
 //
-// Lease mutex: text_injection's tier 3 borrows the pasteboard for a
-// synthesized ⌘V. Rust posts /clipboard-suspend before borrowing and
-// /clipboard-resume after restoring; a resume whose changeCount still
-// matches re-baselines past the lease write, so injected text never lands
-// in history.
-
-/// Body of POST /clipboard-suspend and /clipboard-resume.
-struct ClipboardLeasePayload: Codable {
-    let changeCount: Int64
-}
-
 final class ClipboardMonitor {
     static let shared = ClipboardMonitor()
 
@@ -59,8 +48,6 @@ final class ClipboardMonitor {
     private var iconsDir: URL?
     private var timer: Timer?
     private var lastChangeCount: Int = 0
-    /// Non-nil while the injection lease holds the pasteboard.
-    private var suspendedFromCount: Int?
 
     private init() {}
 
@@ -88,24 +75,6 @@ final class ClipboardMonitor {
         self.timer = timer
     }
 
-    // MARK: lease mutex (called from the TCP thread via the app delegate)
-
-    func suspend(changeCount: Int64) {
-        suspendedFromCount = Int(changeCount)
-    }
-
-    /// An unchanged changeCount means nothing foreign was written while we
-    /// held the pasteboard: re-baseline past the lease write. A changed one
-    /// means a genuine copy raced the lease — leave the baseline so the next
-    /// poll sees it.
-    func resume(changeCount: Int64) {
-        guard suspendedFromCount != nil else { return }
-        suspendedFromCount = nil
-        if NSPasteboard.general.changeCount == Int(changeCount) {
-            lastChangeCount = Int(changeCount)
-        }
-    }
-
     // MARK: polling
 
     private func poll() {
@@ -113,7 +82,6 @@ final class ClipboardMonitor {
         let pb = NSPasteboard.general
         guard pb.changeCount != lastChangeCount else { return }
         lastChangeCount = pb.changeCount
-        if suspendedFromCount != nil { return }
 
         if pb.types?.contains(Self.internalType) == true { return }
 

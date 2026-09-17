@@ -978,7 +978,7 @@ final class FolderChipView: NSView {
                 button.wantsLayer = true
                 button.layer?.cornerRadius = 5
                 button.layer?.backgroundColor = theme.inputFill.cgColor
-                if var image = lucideImage(for: icon, title: "", color: theme.iconTint) {
+                if let image = lucideImage(for: icon, title: "", color: theme.iconTint) {
                     image.size = NSSize(width: 9, height: 9)
                     button.image = image
                 }

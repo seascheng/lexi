@@ -8,10 +8,15 @@ cd "$(dirname "$0")"
 
 SOURCES=(
   SelectionToolbarHelper.swift
+  ToolbarPanel.swift
+  ResultCard.swift
+  ResultCardViews.swift
+  DebugServer.swift
   LauncherPanel.swift
   PanelDesign.swift
   ClipboardStore.swift
   ClipboardMonitor.swift
+  ClipboardPaster.swift
   ClipboardPanel.swift
   LexiStore.swift
   SettingsWindow.swift

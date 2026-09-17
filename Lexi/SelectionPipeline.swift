@@ -11,8 +11,7 @@ import CoreGraphics
 // native apps; showPanel dedupes identical text within 600ms, so the user
 // sees exactly one toolbar. If this layer fails, Rust still covers it.
 //
-// Layer 2 (later): web-area DFS + menu-copy + Cmd+C fallbacks; then the
-// Rust tap retires.
+// Layer 2 (later): web-area DFS + menu-copy fallbacks as the migration proceeds.
 // ---------------------------------------------------------------------------
 
 final class SelectionPipeline {
