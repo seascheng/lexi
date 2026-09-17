@@ -366,14 +366,14 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             width: max(x, chipsScrollView.contentSize.width),
             height: PanelDesign.pillHeight + 4 // == viewport: no vertical scroll
         )
-        scrollActiveChipVisible()
     }
 
-    /// Scrolls ONLY when the active chip is outside the visible rect — a
-    /// normal scroller never moves for targets you can already see.
-    private func scrollActiveChipVisible() {
-        guard let index = chipViews.firstIndex(where: { $0.kind == activeChipKind }) else { return }
-        let frame = chipViews[index].view.frame
+    /// Scrolls ONLY when the target is outside the visible rect — a normal
+    /// scroller never moves for things you can already see. The target is
+    /// scene-driven: tab switch → the active chip; ＋ click → the input;
+    /// fold-back → nothing (keep the user's position).
+    private func scrollChipVisible(_ view: NSView) {
+        let frame = view.frame
         let visible = chipsScrollView.contentView.documentVisibleRect
         guard frame.minX < visible.minX || frame.maxX > visible.maxX else { return }
         let target = frame.minX < visible.minX
@@ -384,9 +384,14 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         chipsScrollView.reflectScrolledClipView(chipsScrollView.contentView)
     }
 
+    private func scrollActiveChipVisible() {
+        guard let index = chipViews.firstIndex(where: { $0.kind == activeChipKind }) else { return }
+        scrollChipVisible(chipViews[index].view)
+    }
+
     private func layoutChrome(height: CGFloat) {
         layoutChipsRow()
-        chipsScrollView.frame = NSRect(x: Self.side, y: 46, width: Self.panelWidth - Self.side * 2, height: PanelDesign.pillHeight + 4)
+        scrollActiveChipVisible()
         let listY = 46 + PanelDesign.pillHeight + 4 + 6
         scrollView.frame = NSRect(x: 0, y: listY, width: Self.panelWidth, height: height - listY - 24)
         emptyLabel.frame = NSRect(x: Self.side, y: listY, width: Self.panelWidth - Self.side * 2, height: 40)
@@ -577,7 +582,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         addChip.isHidden = true
         tagInputView.isHidden = false
         layoutChipsRow()
-        scrollActiveChipVisible()
+        scrollChipVisible(tagInputView)
         panel.makeFirstResponder(tagInputField)
     }
 
