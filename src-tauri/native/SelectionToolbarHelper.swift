@@ -1091,7 +1091,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         installMouseMonitors()
         installStatusItem()
         refreshCardActions()
-        probeEventTapAccess()
+        LexiStore.migrateActionsTable()
         shortcutMonitor = ShortcutMonitor(
             onLauncher: { [weak self] in
                 self?.panels.present(.launcher)
@@ -1196,7 +1196,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     /// Layer-1 selection trigger from the helper's own tap.
     func showToolbarFromSwift(text: String, at point: NSPoint) {
-        guard selectionShowGate(text) else { return }
+        // NO gate here — showPanel has the only gate (dedup vs Rust's
+        // /show). Gating in both places makes the second call self-reject.
         panels.present(.toolbar)
         showPanel(ShowPayload(text: text, x: Int(point.x), y: Int(point.y)))
     }
