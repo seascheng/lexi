@@ -100,25 +100,56 @@ struct CardTheme {
     }
 }
 
-/// Panel background material for the three floating surfaces (toolbar bar,
-/// notes list, result card). macOS 26+: Liquid Glass — `NSGlassEffectView`
-/// draws its own rounded shape, tint and specular edge, and content must
-/// live in its `contentView` (z-order is only guaranteed there). Older
-/// systems: the legacy frosted `.menu` vibrancy with a hairline stroke.
+/// Unified design language for every native surface — the ONE place visual
+/// constants live (TinyCast's Theme.swift is the model). Surfaces declare a
+/// ROLE and consume tokens; nobody hand-tunes values at call sites.
+///   划词工具条 = .bar   Notes 面板 = .list
+///   结果卡     = .card  Launcher   = .launcher
+enum PanelStyle {
+    enum Surface {
+        case bar, list, card, launcher
+
+        var cornerRadius: CGFloat {
+            switch self {
+            case .bar: return 10
+            case .list: return 16
+            case .card: return 20
+            case .launcher: return 22
+            }
+        }
+    }
+
+    /// Theme-tinted veil between the glass material and the content
+    /// (TinyCast `panelScrim`).
+    static func scrim(dark: Bool) -> NSColor {
+        dark
+            ? NSColor.black.withAlphaComponent(0.40)
+            : NSColor.white.withAlphaComponent(0.55)
+    }
+
+    /// Control-surface stroke (chips, inputs). The PANEL edge itself is the
+    /// glass's own highlight — panels carry no painted border on macOS 26+.
+    static func controlBorder(dark: Bool) -> NSColor {
+        dark
+            ? NSColor.white.withAlphaComponent(0.12)
+            : NSColor.black.withAlphaComponent(0.10)
+    }
+}
+
+/// Shared surface builder for every native panel. macOS 26+: the system
+/// renders `.hudWindow` vibrancy AS Liquid Glass with its own contrast
+/// adaptation and edge highlight (a raw NSGlassEffectView is a nearly clear
+/// sheet that washes out — the original complaint); the theme scrim is
+/// painted on `content` between material and content. Older systems: the
+/// legacy frosted `.menu` vibrancy with its own hairline stroke.
 /// Returns (background, content, isGlass): set the panel's contentView to
 /// `background` and add all subviews to `content`.
 func makePanelBackground(
     frame: NSRect,
-    cornerRadius: CGFloat
+    surface: PanelStyle.Surface
 ) -> (background: NSView, content: NSView, isGlass: Bool) {
+    let cornerRadius = surface.cornerRadius
     if #available(macOS 26.0, *) {
-        // TinyCast's proven recipe: on macOS 26+ the system renders
-        // NSVisualEffectView materials AS Liquid Glass, with its own
-        // contrast adaptation. A raw NSGlassEffectView is a nearly clear
-        // sheet that washes out on dark wallpapers (the original complaint);
-        // .hudWindow + the theme scrim painted on `content` (between the
-        // material and the content, exactly TinyCast's layer order) keeps
-        // every panel legible on any background.
         let vibrancy = NSVisualEffectView(frame: frame)
         vibrancy.autoresizingMask = [.width, .height]
         vibrancy.material = .hudWindow
@@ -1052,7 +1083,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         let (background, content, _) = makePanelBackground(
             frame: panel.contentView?.bounds ?? .zero,
-            cornerRadius: 8.5
+            surface: .bar
         )
         panel.contentView = background
         container = content
@@ -1209,7 +1240,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         let (notesBackground, notesBackgroundContent, _) = makePanelBackground(
             frame: NSRect(x: 0, y: 0, width: notesPanelWidth, height: 200),
-            cornerRadius: 10
+            surface: .list
         )
         notesPanel.contentView = notesBackground
         notesContainer = notesBackgroundContent
@@ -1362,19 +1393,15 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func applyNotesTheme() {
         restateCardChromeTints()
-        let hairline = theme == .dark
-            ? NSColor.white.withAlphaComponent(0.22)
-            : NSColor.black.withAlphaComponent(0.20)
+        let controlStroke = PanelStyle.controlBorder(dark: theme == .dark)
         let appearance = theme == .dark
             ? NSAppearance(named: .vibrantDark)
             : NSAppearance(named: .vibrantLight)
-        notesContainer.layer?.borderColor = hairline.cgColor
         notesPanel.appearance = appearance
 
-        resultContainer?.layer?.borderColor = hairline.cgColor
         resultPanel?.appearance = appearance
         if !isInputFocused {
-            inputContainer?.layer?.borderColor = hairline.withAlphaComponent(0.7).cgColor
+            inputContainer?.layer?.borderColor = controlStroke.cgColor
         }
         if resultPanel != nil {
             rebuildRunTabs()
@@ -1437,7 +1464,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         let (resultBackground, resultContent, isGlass) = makePanelBackground(
             frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 240),
-            cornerRadius: 12
+            surface: .card
         )
         resultContainer = resultContent
         if isGlass {
@@ -2849,12 +2876,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             : NSAppearance(named: .vibrantLight)
         // Contrast scrim: raw glass washes out on dark wallpapers — a
         // theme-tinted veil under the content keeps panels legible anywhere.
-        let scrim = (theme == .dark
-            ? NSColor.black.withAlphaComponent(0.40)
-            : NSColor.white.withAlphaComponent(0.55)).cgColor
-        container.layer?.borderColor = (theme == .dark
-            ? NSColor.white.withAlphaComponent(0.22)
-            : NSColor.black.withAlphaComponent(0.20)).cgColor
+        let scrim = PanelStyle.scrim(dark: theme == .dark).cgColor
         container.layer?.backgroundColor = scrim
         dragHandle.theme = theme
         buttons.forEach { $0.theme = theme }
@@ -2865,10 +2887,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 ? NSAppearance(named: .vibrantDark)
                 : NSAppearance(named: .vibrantLight)
             resultPanel.appearance = cardAppearance
-            let hairline = (theme == .dark
-                ? NSColor.white.withAlphaComponent(0.22)
-                : NSColor.black.withAlphaComponent(0.20)).cgColor
-            resultContainer.layer?.borderColor = hairline
             resultContainer.layer?.backgroundColor = scrim
             notesContainer.layer?.backgroundColor = scrim
             // chips: force a rebuild (the diff skips identical id/status/active)

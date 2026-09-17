@@ -1,17 +1,17 @@
 import AppKit
 
-/// Shared design tokens for the native panels (LauncherPanel,
-/// ClipboardPanel; ActionPanel's card chrome keeps its own CardTheme layer).
+/// GEOMETRY tokens for the native panels (LauncherPanel, ClipboardPanel):
+/// widths, insets, pill/row metrics. Surface APPEARANCE (material, scrim,
+/// border, corner-radius role) lives in PanelStyle — the two namespaces
+/// never overlap.
 ///
-/// One source of truth for panel chrome, pills, selection capsules and row
-/// content geometry — panels never hand-pick spacing numbers again. Values
-/// are in points; every panel renders at the same width so the metrics
-/// transfer exactly.
+/// One source of truth per concern — panels never hand-pick spacing
+/// numbers again. Values are in points; every panel renders at the same
+/// width so the metrics transfer exactly.
 enum PanelDesign {
     // MARK: panel chrome
 
     static let panelWidth: CGFloat = 520
-    static let panelCornerRadius: CGFloat = 14
     /// Panel-level horizontal margin: search field, filter/tab pill row,
     /// footer text — one shared left line down every panel.
     static let sideInset: CGFloat = 12

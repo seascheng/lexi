@@ -95,7 +95,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         panel.backgroundColor = .clear
         let (background, content, _) = makePanelBackground(
             frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 240),
-            cornerRadius: 22
+            surface: .launcher
         )
         panel.contentView = background
         glassContent = content
@@ -211,9 +211,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     private func styleChrome() {
         // Contrast scrim (TinyCast values): dark 40% black / light 55%
         // white, painted between the vibrancy material and the content.
-        glassContent.layer?.backgroundColor = (cardTheme.isDark
-            ? NSColor.black.withAlphaComponent(0.40)
-            : NSColor.white.withAlphaComponent(0.55)).cgColor
+        glassContent.layer?.backgroundColor = PanelStyle.scrim(dark: cardTheme.isDark).cgColor
         emptyLabel.textColor = cardTheme.tertiaryText
         syncTabButtons()
     }
@@ -1011,10 +1009,7 @@ final class FolderChipView: NSView {
             : (hovering ? theme.hoverFill.cgColor : NSColor.clear.cgColor)
         // Quiet hairline so chips read as contained cells on the glass
         // instead of loose text.
-        layer?.borderWidth = 0.5
-        layer?.borderColor = theme.isDark
-            ? NSColor.white.withAlphaComponent(0.10).cgColor
-            : NSColor.black.withAlphaComponent(0.08).cgColor
+        layer?.borderColor = PanelStyle.controlBorder(dark: theme.isDark).cgColor
     }
 
     @objc private func secondaryClicked(_ sender: NSButton) {

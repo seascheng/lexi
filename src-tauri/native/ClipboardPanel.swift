@@ -130,7 +130,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let (background, content, _) = makePanelBackground(
             frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 300),
-            cornerRadius: PanelDesign.panelCornerRadius
+            surface: .list
         )
         panel.contentView = background
         glassContent = content
@@ -410,9 +410,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     private func styleChrome() {
         // Contrast scrim: raw NSGlassEffectView washes out on dark
         // wallpapers (same veil the launcher and card use).
-        glassContent.layer?.backgroundColor = (cardTheme.isDark
-            ? NSColor.black.withAlphaComponent(0.30)
-            : NSColor.white.withAlphaComponent(0.42)).cgColor
+        glassContent.layer?.backgroundColor = PanelStyle.scrim(dark: cardTheme.isDark).cgColor
         emptyLabel.textColor = cardTheme.tertiaryText
         footerLeft.textColor = cardTheme.secondaryText
         footerRight.textColor = cardTheme.tertiaryText
@@ -1394,9 +1392,7 @@ final class ChipInputView: NSView {
             ? NSColor.white.withAlphaComponent(0.06).cgColor
             : NSColor.white.withAlphaComponent(0.30).cgColor
         layer?.borderWidth = 0.5
-        layer?.borderColor = theme.isDark
-            ? NSColor.white.withAlphaComponent(0.14).cgColor
-            : NSColor.black.withAlphaComponent(0.10).cgColor
+        layer?.borderColor = PanelStyle.controlBorder(dark: theme.isDark).cgColor
     }
 }
 
