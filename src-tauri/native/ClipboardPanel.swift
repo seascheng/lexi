@@ -64,9 +64,12 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     /// Which chip is active. `.clipboard` shows the history; `.tag(name)`
     /// shows that category's notes.
     private var tab: Tab = .clipboard
-    /// Inline "new category" input at the end of the chip row.
+    /// Inline "new category" input at the end of the chip row — hidden until
+    /// the ＋ button is clicked.
     private let tagInputView = ChipInputView()
-
+    private let addChip = ChipPillView(frame: NSRect(x: 0, y: 4, width: 32, height: PanelDesign.pillHeight))
+    private let chipsScrollView = NSScrollView()
+    private var chipsContent = FlippedView(frame: .zero)
     /// The app that was frontmost when the panel opened — the paste target.
     private var previousApp: NSRunningApplication?
 
@@ -175,7 +178,9 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             return
         }
         previousApp = NSWorkspace.shared.frontmostApplication
-        searchField.stringValue = ""
+        addChip.isHidden = false
+        tagInputView.isHidden = true
+        tagInputView.stringValue = ""
         tab = .clipboard
         syncChips()
         reload()
@@ -216,8 +221,25 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         searchField.delegate = self
         root.addSubview(searchField)
 
+        // Chip row: horizontal scroller, one line, always the input at the end.
+        chipsScrollView.frame = NSRect(x: Self.side, y: 46, width: Self.panelWidth - Self.side * 2, height: PanelDesign.pillHeight + 4)
+        chipsScrollView.drawsBackground = false
+        chipsScrollView.hasVerticalScroller = false
+        chipsScrollView.hasHorizontalScroller = true
+        chipsScrollView.autohidesScrollers = true
+        chipsScrollView.scrollerStyle = .overlay
+        chipsScrollView.translatesAutoresizingMaskIntoConstraints = true
+        chipsContent = FlippedView(frame: NSRect(x: 0, y: 0, width: chipsScrollView.contentSize.width, height: PanelDesign.pillHeight + 4))
+        chipsScrollView.documentView = chipsContent
+        root.addSubview(chipsScrollView)
+
+        addChip.configureAdd { [weak self] in
+            self?.beginTagCreation()
+        }
+        chipsContent.addSubview(addChip)
         tagInputView.setup(theme: cardTheme, delegate: self)
-        root.addSubview(tagInputView)
+        tagInputView.isHidden = true
+        chipsContent.addSubview(tagInputView)
 
         rebuildChips()
 
@@ -255,33 +277,37 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         root.addSubview(emptyLabel)
     }
 
-    /// Chip tab row: [Clipboard] + one chip per tag + [＋]. Rebuilt whenever
-    /// the notes snapshot arrives (tags may have changed).
+    /// Chip tab row: [Clipboard] + one chip per tag — the ＋ button and the
+    /// inline input live at the row's end (see layoutChipsRow). Rebuilt
+    /// whenever the notes snapshot arrives (tags may have changed).
     private func rebuildChips() {
         chipViews.forEach { $0.view.removeFromSuperview() }
         chipViews.removeAll()
 
-        func add(_ kind: ChipKind, _ view: ChipPillView) {
-            chipViews.append((kind, view))
-            root.addSubview(view)
-        }
-        let clipboard = ChipPillView(frame: NSRect(x: 0, y: 46, width: 64, height: PanelDesign.pillHeight))
-        clipboard.configure(title: "Clipboard", color: .systemGray) { [weak self] in
-            self?.selectTab(.clipboard)
-        }
-        add(.clipboard, clipboard)
-
         for tag in allTags {
-            let view = ChipPillView(frame: NSRect(x: 0, y: 46, width: 64, height: PanelDesign.pillHeight))
+            let view = ChipPillView(frame: NSRect(x: 0, y: 4, width: 64, height: PanelDesign.pillHeight))
             let color = tagColor(for: tag, dark: cardTheme.isDark)
             view.configure(title: tag, color: color) { [weak self] in
                 self?.selectTab(.tag(tag))
             }
-            add(.tag(tag), view)
+            // applyTheme AFTER configure: configure re-applies the stored
+            // (stale) theme — the /card-notes push rebuilds chips while the
+            // panel is light, and the stale dark theme painted unreadable
+            // white labels.
+            view.applyTheme(cardTheme)
+            chipViews.append((.tag(tag), view))
+            chipsContent.addSubview(view)
         }
 
-        // The ⊕ affordance is the inline input chip placed after the tabs
-        // (see layoutChrome) — not a tab itself.
+        let clipboard = ChipPillView(frame: NSRect(x: 0, y: 4, width: 64, height: PanelDesign.pillHeight))
+        clipboard.configure(title: "Clipboard", color: .systemGray) { [weak self] in
+            self?.selectTab(.clipboard)
+        }
+        clipboard.applyTheme(cardTheme)
+        chipViews.insert((.clipboard, clipboard), at: 0)
+        chipsContent.addSubview(clipboard)
+
+        layoutChipsRow()
         syncChips()
     }
 
@@ -317,55 +343,39 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         footerRight.textColor = cardTheme.tertiaryText
     }
 
-    /// Chip-row block height for the CURRENT tag set — layoutChrome measures
-    /// it; panelHeight consumes it. Search(46) + chips + 6 + list + footer.
-    private var chipsBlockHeight: CGFloat = PanelDesign.pillHeight + 6
-
-    /// Flows the tab chips + inline input into up to two lines (greedy):
-    /// line width is the panel minus side insets, 6pt gaps. The input always
-    /// lands on the last occupied line; chips that no longer fit stay hidden
-    /// (their notes remain reachable by search).
-    private func layoutChips() {
-        let maxWidth = Self.panelWidth - Self.side * 2
-        var lines: [[NSView]] = [[]]
+    /// One-line chip row inside a horizontal scroller: [tab chips…] [＋] and
+    /// — once the ＋ is clicked — the inline input, always at the end.
+    private func layoutChipsRow() {
         var x: CGFloat = 0
-
-        func place(_ chip: NSView) {
-            let width = chip.fittingSize.width
-            if x > 0, x + width > maxWidth, lines.count < 2 {
-                lines.append([])
-                x = 0
-            }
-            if x + width > maxWidth {
-                chip.isHidden = true
-                return
-            }
-            chip.isHidden = false
-            lines[lines.count - 1].append(chip)
-            x += width + 6
+        for (_, chip) in chipViews {
+            chip.frame = NSRect(x: x, y: 4, width: max(chip.fittingSize.width, 40), height: PanelDesign.pillHeight)
+            x = chip.frame.maxX + 6
         }
-
-        for (kind, chip) in chipViews {
-            chip.frame = NSRect(x: 0, y: 46, width: chip.fittingSize.width, height: PanelDesign.pillHeight)
-            place(chip)
+        addChip.frame = NSRect(x: x, y: 4, width: 32, height: PanelDesign.pillHeight)
+        x = addChip.frame.maxX + 6
+        tagInputView.frame = NSRect(x: x, y: 4, width: tagInputView.fittingSize.width, height: PanelDesign.pillHeight)
+        if tagInputVisible {
+            x = tagInputView.frame.maxX + 6
         }
-        tagInputView.frame = NSRect(x: 0, y: 46, width: tagInputView.fittingSize.width, height: PanelDesign.pillHeight)
-        place(tagInputView)
+        chipsContent.frame = NSRect(
+            x: 0, y: 0,
+            width: max(x, chipsScrollView.contentSize.width),
+            height: PanelDesign.pillHeight + 8
+        )
+        scrollActiveChipVisible()
+    }
 
-        for (lineIndex, line) in lines.enumerated() {
-            var lineX = Self.side
-            for chip in line {
-                chip.frame.origin.x = lineX
-                chip.frame.origin.y = 46 + CGFloat(lineIndex) * (PanelDesign.pillHeight + 6)
-                lineX = chip.frame.maxX + 6
-            }
-        }
-        chipsBlockHeight = CGFloat(lines.count) * (PanelDesign.pillHeight + 6) - 6
+    private func scrollActiveChipVisible() {
+        guard let index = chipViews.firstIndex(where: { $0.kind == activeChipKind }) else { return }
+        let minX = max(0, chipViews[index].view.frame.minX - 40)
+        chipsScrollView.contentView.scroll(to: NSPoint(x: minX, y: 0))
+        chipsScrollView.reflectScrolledClipView(chipsScrollView.contentView)
     }
 
     private func layoutChrome(height: CGFloat) {
-        layoutChips()
-        let listY = 46 + chipsBlockHeight + 6
+        layoutChipsRow()
+        chipsScrollView.frame = NSRect(x: Self.side, y: 46, width: Self.panelWidth - Self.side * 2, height: PanelDesign.pillHeight + 4)
+        let listY = 46 + PanelDesign.pillHeight + 4 + 6
         scrollView.frame = NSRect(x: 0, y: listY, width: Self.panelWidth, height: height - listY - 24)
         emptyLabel.frame = NSRect(x: Self.side, y: listY, width: Self.panelWidth - Self.side * 2, height: 40)
         let footerY = height - 24
@@ -377,7 +387,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     /// ceiling than the launcher — multi-line previews need the room).
     private var panelHeight: CGFloat {
         let listHeight = min(rows.reduce(0.0) { $0 + rowHeight(for: $1) }, Self.maxListHeight)
-        let chrome = 46 + chipsBlockHeight + 6 + 24 + 10 // search + chips + gap + footer + pad
+        let chrome = 46 + PanelDesign.pillHeight + 4 + 6 + 24 + 10 // search + chips + gap + footer + pad
         return min(max(chrome + max(listHeight, Self.singleLineHeight * 3), 200), 560)
     }
 
@@ -539,10 +549,46 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         }
         updateFooter()
     }
-
     private func deleteSelected() {
         guard tab == .clipboard, let store, let item = selectedItem else { return }
         store.delete(item)
+        reload()
+    }
+
+    private var tagInputVisible = false
+
+    private var tagInputField: NSTextField { tagInputView.field }
+
+    /// ＋ click: reveal the inline input and focus it.
+    private func beginTagCreation() {
+        tagInputVisible = true
+        addChip.isHidden = true
+        tagInputView.isHidden = false
+        layoutChipsRow()
+        scrollActiveChipVisible()
+        panel.makeFirstResponder(tagInputField)
+    }
+
+    /// Esc in the input: fold it back into the ＋ button.
+    private func endTagInput() {
+        tagInputVisible = false
+        tagInputView.stringValue = ""
+        tagInputView.isHidden = true
+        addChip.isHidden = false
+        layoutChipsRow()
+    }
+
+    /// Enter in the inline input: create the category and switch to it.
+    private func commitTagInput() {
+        let name = tagInputView.stringValue.trimmingCharacters(in: .whitespaces)
+        endTagInput()
+        guard !name.isEmpty else { return }
+        // Rust inserts into tags (INSERT OR IGNORE) and re-pushes the notes
+        // snapshot; the new chip appears with that feed. Switch optimistically
+        // so the panel is already on the fresh, empty category.
+        tab = .tag(name)
+        syncChips()
+        onAction?("note-tag-create", name)
         reload()
     }
 
@@ -577,24 +623,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         pasteSelected()
     }
 
-    // MARK: tag creation (inline input at the end of the chip row)
-
-    /// Enter in the inline input: create the category and switch to it.
-    private func commitTagInput() {
-        let name = tagInputView.stringValue.trimmingCharacters(in: .whitespaces)
-        tagInputView.stringValue = ""
-        guard !name.isEmpty else { return }
-        // Rust inserts into tags (INSERT OR IGNORE) and re-pushes the notes
-        // snapshot; the new chip appears with that feed. Switch optimistically
-        // so the panel is already on the fresh, empty category.
-        tab = .tag(name)
-        syncChips()
-        onAction?("note-tag-create", name)
-        reload()
-        panel.makeFirstResponder(tagInputField)
-    }
-
-    private var tagInputField: NSTextField { tagInputView.field }
 
     // MARK: keyboard
 
@@ -672,9 +700,13 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
                 return true
             }
             return false
+        case NSSelectorFromString("insertTab:"):
+            // Tab cycles the chip tabs from EITHER field.
+            cycleTabs(1)
+            return true
         default:
-            // Arrows/Tab stay with the field that holds focus (arrows move
-            // the caret inside the input; Tab exits it).
+            // Arrows inside the tag input move the caret; arrows in the
+            // search field are handled above.
             return false
         }
     }
@@ -923,6 +955,25 @@ final class ChipPillView: NSView {
         }
         dot.isHidden = false
         label.stringValue = title
+        applyTheme(theme)
+    }
+
+    /// The ＋ button chip: centered plus glyph, no dot.
+    func configureAdd(onActivate: @escaping () -> Void) {
+        self.onActivate = onActivate
+        chipColor = .clear
+        if !didLayout {
+            didLayout = true
+            wantsLayer = true
+            layer?.cornerRadius = PanelDesign.pillCornerRadius
+
+            label.font = .systemFont(ofSize: 14, weight: .medium)
+            label.alignment = .center
+            label.lineBreakMode = .byClipping
+            addSubview(label)
+        }
+        dot.isHidden = true
+        label.stringValue = "+"
         applyTheme(theme)
     }
 
