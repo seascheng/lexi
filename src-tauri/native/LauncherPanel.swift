@@ -14,7 +14,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     var onHidden: (() -> Void)?
 
     private static let panelWidth: CGFloat = 520
-    private static let rowHeight: CGFloat = 42
+    private static let rowHeight: CGFloat = 32
     private static let headerHeight: CGFloat = 28
     private static let maxListHeight: CGFloat = 11 * LauncherPanelController.rowHeight
     private static let chromeHeight: CGFloat = 88 // search 12+26+8 + tabs 24+8 + bottom pad 10
@@ -733,33 +733,39 @@ final class LauncherFolderCell: NSView {
             didLayout = true
             dot.wantsLayer = true
             dot.layer?.cornerRadius = 3
-            dot.frame = NSRect(x: 16, y: 18, width: 6, height: 6)
+            dot.frame = NSRect(x: 16, y: 13, width: 6, height: 6)
             addSubview(dot)
-            folderIcon.frame = NSRect(x: 13, y: 13, width: 15, height: 15)
+            folderIcon.frame = NSRect(x: 13, y: 8, width: 15, height: 15)
             addSubview(folderIcon)
 
             nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
-            // Two stacked lines in a NON-flipped cell: y measured from the
-            // BOTTOM. Name on top, path below — the old frames (y 8 and 3)
-            // overlapped by 7pt.
-            nameLabel.frame = NSRect(x: 30, y: 23, width: 340, height: 15)
             addSubview(nameLabel)
 
             pathLabel.font = .systemFont(ofSize: 11)
-            pathLabel.frame = NSRect(x: 30, y: 5, width: 340, height: 13)
+            // Head truncation keeps the LEAF directories when tight (user
+            // preference): "…/sd/Seas/个人" instead of cutting the tail.
+            pathLabel.lineBreakMode = .byTruncatingHead
+            pathLabel.cell?.usesSingleLineMode = true
+            pathLabel.cell?.wraps = false
+            pathLabel.alignment = .right
             addSubview(pathLabel)
 
-            terminalButton.frame = NSRect(x: 448, y: 10, width: 22, height: 22)
+            terminalButton.frame = NSRect(x: 448, y: 5, width: 22, height: 22)
             terminalButton.toolTip = "Open in Terminal"
             addSubview(terminalButton)
 
-            editorButton.frame = NSRect(x: 474, y: 10, width: 22, height: 22)
+            editorButton.frame = NSRect(x: 474, y: 5, width: 22, height: 22)
             editorButton.toolTip = "Open in Editor"
             addSubview(editorButton)
         }
         nameLabel.stringValue = item.name
-        let parent = (item.path as NSString).deletingLastPathComponent
-        pathLabel.stringValue = parent.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        // Single line: name left (capped at 340pt), path right-aligned in
+        // the remaining run-up to the action buttons.
+        nameLabel.sizeToFit()
+        let nameWidth = min(nameLabel.frame.width, 340)
+        nameLabel.frame = NSRect(x: 30, y: 9, width: nameWidth, height: 15)
+        let pathX = 30 + nameWidth + 12
+        pathLabel.frame = NSRect(x: pathX, y: 10, width: max(440 - pathX, 40), height: 13)
         if iconInsteadOfDot {
             dot.isHidden = true
             folderIcon.isHidden = false
@@ -818,11 +824,10 @@ final class LauncherAppCell: NSView {
     ) {
         onActivate = handler
         if !didLayout {
-            didLayout = true
-            iconView.frame = NSRect(x: 16, y: 11, width: 20, height: 20)
+            iconView.frame = NSRect(x: 16, y: 6, width: 20, height: 20)
             addSubview(iconView)
             nameLabel.font = .systemFont(ofSize: 13)
-            nameLabel.frame = NSRect(x: 46, y: 13, width: 440, height: 16)
+            nameLabel.frame = NSRect(x: 46, y: 8, width: 440, height: 16)
             addSubview(nameLabel)
         }
         iconView.image = item.app.icon
