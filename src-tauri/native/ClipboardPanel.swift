@@ -257,9 +257,9 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
-        // Vertical breathing room around the rows — the content area gets
-        // the same padding rhythm on all four sides.
-        scrollView.contentInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
+        // Vertical breathing room comes from the FRAME inset in layoutChrome
+        // — contentInsets on a tableView-backed scroller skews the clip
+        // view's visible rect (rows went blank).
         // Double-click pastes, same as Enter.
         tableView.target = self
         tableView.action = #selector(rowDoubleClicked)
@@ -395,7 +395,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         scrollActiveChipVisible()
         let listY = 46 + PanelDesign.pillHeight + 4 + 6
         let listHeight = height - listY - 24
-        scrollView.frame = NSRect(x: 0, y: listY, width: Self.panelWidth, height: listHeight)
+        scrollView.frame = NSRect(x: 0, y: listY + 4, width: Self.panelWidth, height: listHeight - 8)
         // Empty state floats in the MIDDLE of the content area, not pinned
         // under the chips.
         emptyLabel.frame = NSRect(
@@ -494,7 +494,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             return
         }
         let found = store.search(searchField.stringValue, filter: .all)
-        // The store returns pinned rows leading (pin order) — split them into
+        FileLog.write("CLIP reload query='\(searchField.stringValue)' found=\(found.count) resident=\(store.items.count)")
         // their section header block; recency rows follow unwrapped.
         let pinned = found.prefix { $0.pinnedAt != nil }
         let rest = found.dropFirst(pinned.count)

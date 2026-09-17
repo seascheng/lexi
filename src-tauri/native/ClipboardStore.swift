@@ -184,6 +184,7 @@ final class ClipboardStore {
               searchStmt != nil, staleStmt != nil
         else { return false }
         load()
+        FileLog.write("CLIP store opened items=\(items.count)")
         prune()
         return true
     }
