@@ -1,8 +1,0 @@
-[toolbar] helper launch attempted: action=52448, toolbar=52449
-The application cannot be opened for an unexpected reason, error=Error Domain=RBSRequestErrorDomain Code=5 "Launch failed." UserInfo={NSLocalizedFailureReason=Launch failed., NSUnderlyingError=0xb84c30780 {Error Domain=NSPOSIXErrorDomain Code=162 "Unknown error: 162" UserInfo={NSLocalizedDescription=Launchd job spawn failed}}}
-[toolbar] WARNING: helper did not respond on port 52449 after 5s
-2026-05-06 11:07:19.968 lexi[22247:15188103] TSM AdjustCapsLockLEDForKeyTransitionHandling - _ISSetPhysicalKeyboardCapsLockLED Inhibit
-[speech] engine=volcengine, app_id=Some("9989685160"), has_token=true, voice=Some("zh_female_shuangkuaisisi_moon_bigtts")
-[speech] HTTP request: voice=zh_female_shuangkuaisisi_moon_bigtts, text=Read selected text aloud.
-[speech] total audio: 17709 bytes
-[speech] playing /var/folders/bw/hvc7rj_14p9f7mr2g2w6n5200000gn/T/lexi_tts_18acdb16ee3138f0.mp3

@@ -1,13 +1,5 @@
-# Dependencies
-node_modules/
-
-# Frontend build output
-dist/
-
-# Tauri / Rust build output
-src-tauri/target/
-src-tauri/native/bin/
-src-tauri/native/LexiSelectionHelper.app/
+# Swift build output (the app bundle is force-added per release flow)
+Lexi/LexiSelectionHelper.app/
 
 # Local environment and secrets
 .env
@@ -16,10 +8,6 @@ src-tauri/native/LexiSelectionHelper.app/
 
 # Logs
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
 
 # OS files
 .DS_Store
@@ -31,9 +19,5 @@ Thumbs.db
 *.swp
 *.swo
 
-# Test and cache output
-coverage/
-.nyc_output/
-.eslintcache
-.vite/
-.superpowers/
+# Debug scratch (screenshots, probes)
+.debug/
