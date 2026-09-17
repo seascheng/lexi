@@ -370,7 +370,9 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         return out
     }
 
-    /// Wraps chips into grid lines of at most `maxWidth` points (6pt gaps).
+    /// Wraps chips into grid lines of at most `maxWidth` points (8pt gaps).
+    /// Chips are UNIFORM width — an even grid reads far cleaner than a
+    /// ragged word-cloud of variable-width capsules.
     private func flowChipLines(_ chips: [FolderChip], maxWidth: CGFloat = 496) -> [[FolderChip]] {
         var lines: [[FolderChip]] = [[]]
         var x: CGFloat = 0
@@ -384,21 +386,13 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
             placed.x = x
             placed.width = width
             lines[lines.count - 1].append(placed)
-            x += width + 6
+            x += width + 8
         }
         return lines.filter { !$0.isEmpty }
     }
 
-    static func chipWidth(for chip: FolderChip) -> CGFloat {
-        let nameWidth = (chip.item.name as NSString)
-            .size(withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium)]).width
-        var width = 30 + min(nameWidth, 190) + 10
-        if let suffix = chip.suffix {
-            width += (suffix as NSString)
-                .size(withAttributes: [.font: NSFont.systemFont(ofSize: 10)]).width + 6
-        }
-        return min(width, 240)
-    }
+    /// Uniform chip cell: 4 per row in a 520pt panel (116 + 8 gap).
+    static func chipWidth(for chip: FolderChip) -> CGFloat { 116 }
 
     // MARK: tagged folders (Spotlight metadata)
     private var didRequestProtectedAccess = false
@@ -932,7 +926,7 @@ final class FolderChipView: NSView {
         if !didLayout {
             didLayout = true
             wantsLayer = true
-            layer?.cornerRadius = 7
+            layer?.cornerRadius = 6
 
             dot.wantsLayer = true
             dot.layer?.cornerRadius = 3
@@ -943,12 +937,20 @@ final class FolderChipView: NSView {
             addSubview(glyphView)
 
             nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
+            nameLabel.lineBreakMode = .byTruncatingTail
+            nameLabel.cell?.usesSingleLineMode = true
             addSubview(nameLabel)
 
             suffixLabel.font = .systemFont(ofSize: 10)
             suffixLabel.textColor = theme.tertiaryText
+            suffixLabel.alignment = .right
+            suffixLabel.lineBreakMode = .byTruncatingTail
+            suffixLabel.cell?.usesSingleLineMode = true
             addSubview(suffixLabel)
 
+            // Hover key-caps: two rounded-square buttons parked over the
+            // leading glyph zone. Caps get their own inset background so
+            // they read as buttons, not floating glyphs.
             for (button, icon, action) in [
                 (editorButton, "code", FolderChipAction.editor),
                 (terminalButton, "terminal", FolderChipAction.terminal),
@@ -956,8 +958,11 @@ final class FolderChipView: NSView {
                 button.isBordered = false
                 button.title = ""
                 button.setButtonType(.momentaryChange)
+                button.wantsLayer = true
+                button.layer?.cornerRadius = 5
+                button.layer?.backgroundColor = theme.inputFill.cgColor
                 if var image = lucideImage(for: icon, title: "", color: theme.iconTint) {
-                    image.size = NSSize(width: 11, height: 11)
+                    image.size = NSSize(width: 9, height: 9)
                     button.image = image
                 }
                 button.target = self
@@ -966,7 +971,7 @@ final class FolderChipView: NSView {
                     action == .editor ? "editor" : "terminal"
                 )
                 button.frame = NSRect(
-                    x: action == .editor ? 2 : 15, y: 7, width: 12, height: 12
+                    x: action == .editor ? 2 : 15, y: 3, width: 11, height: 20
                 )
                 addSubview(button)
             }
@@ -974,24 +979,27 @@ final class FolderChipView: NSView {
         editorButton.isHidden = true
         terminalButton.isHidden = true
 
+        // Name left (truncating), path suffix right-aligned in the tail —
+        // name yields first when the two would collide.
         nameLabel.stringValue = chip.item.name
         nameLabel.textColor = theme.foreground
-        let nameWidth = min(
-            (chip.item.name as NSString)
-                .size(withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium)]).width,
-            190
+        let suffixText = chip.suffix ?? ""
+        let suffixWidth: CGFloat = suffixText.isEmpty ? 0 : min(
+            (suffixText as NSString)
+                .size(withAttributes: [.font: NSFont.systemFont(ofSize: 10)]).width + 2,
+            58
         )
-        nameLabel.frame = NSRect(x: 28, y: 6, width: nameWidth, height: 14)
+        let nameMax = chip.width - 32 - suffixWidth - (suffixWidth > 0 ? 10 : 10)
+        nameLabel.frame = NSRect(x: 32, y: 6, width: max(nameMax, 36), height: 14)
 
-        if let suffix = chip.suffix {
-            suffixLabel.stringValue = suffix
-            suffixLabel.isHidden = false
-            let suffixX = 28 + nameWidth + 5
-            suffixLabel.frame = NSRect(
-                x: suffixX, y: 7, width: max(chip.width - suffixX - 7, 12), height: 12
-            )
-        } else {
+        if suffixText.isEmpty {
             suffixLabel.isHidden = true
+        } else {
+            suffixLabel.stringValue = suffixText
+            suffixLabel.isHidden = false
+            suffixLabel.frame = NSRect(
+                x: chip.width - 8 - suffixWidth, y: 7, width: suffixWidth, height: 12
+            )
         }
 
         switch chip.kind {
@@ -1013,16 +1021,21 @@ final class FolderChipView: NSView {
 
     private func applyBackground(hovering: Bool) {
         wantsLayer = true
-        layer?.cornerRadius = 7
+        layer?.cornerRadius = 6
         layer?.backgroundColor = isSelectedChip
             ? theme.selectedFill.cgColor
             : (hovering ? theme.hoverFill.cgColor : NSColor.clear.cgColor)
+        // Quiet hairline so chips read as contained cells on the glass
+        // instead of loose text.
+        layer?.borderWidth = 0.5
+        layer?.borderColor = theme.isDark
+            ? NSColor.white.withAlphaComponent(0.10).cgColor
+            : NSColor.black.withAlphaComponent(0.08).cgColor
     }
 
     @objc private func secondaryClicked(_ sender: NSButton) {
         onSecondary?(sender.identifier?.rawValue == "editor" ? .editor : .terminal)
     }
-
 }
 
 /// Selection capsule row view (selectedFill on activation).
