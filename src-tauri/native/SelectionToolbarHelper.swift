@@ -696,6 +696,16 @@ private final class ToolbarDragHandle: NSView {
 }
 final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
+
+    /// Panels embed their own key-equivalent routing (e.g. the clipboard
+    /// panel's ⌘P pin toggle, which the search field's command path never
+    /// sees). Return true from the handler to consume the event.
+    var keyEquivalentHandler: ((NSEvent) -> Bool)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if let keyEquivalentHandler, keyEquivalentHandler(event) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
 }
 
 /// Borderless icon button with hover/press feedback (system-feel chrome):
@@ -884,6 +894,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
         return controller
     }()
+
+    private lazy var clipboardController: ClipboardPanelController = {
+        let controller = ClipboardPanelController()
+        controller.onHidden = { [weak self] in
+            self?.postAction(action: "clipboard-hidden", text: "-")
+        }
+        return controller
+    }()
     private var notesContainer: NSView!
     private var notesContent: NSView!
     private var notesScrollView: NSScrollView!
@@ -973,6 +991,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         buildResultCard()
         installMouseMonitors()
         startDisplayServer()
+        // Clipboard capture: own store + 0.5s poller, started once the TCP
+        // server is up so suspend/resume posts can flow both ways.
+        if let store = ClipboardStore.open() {
+            clipboardController.attach(store: store)
+            ClipboardMonitor.shared.start(store: store)
+        } else {
+            FileLog.write("CLIP store unavailable — capture disabled")
+        }
     }
 
     private static func argumentValue(_ name: String) -> String? {
@@ -2633,6 +2659,36 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             return
         }
 
+        if request.hasPrefix("POST /clipboard-show ") {
+            DispatchQueue.main.async {
+                self.clipboardController.show()
+            }
+            return
+        }
+
+        if request.hasPrefix("POST /clipboard-hide ") {
+            DispatchQueue.main.async {
+                self.clipboardController.hide(notify: false)
+            }
+            return
+        }
+
+        if request.hasPrefix("POST /clipboard-suspend "),
+           let body = request.components(separatedBy: "\r\n\r\n").last,
+           let bodyData = body.data(using: .utf8),
+           let payload = try? JSONDecoder().decode(ClipboardLeasePayload.self, from: bodyData) {
+            ClipboardMonitor.shared.suspend(changeCount: payload.changeCount)
+            return
+        }
+
+        if request.hasPrefix("POST /clipboard-resume "),
+           let body = request.components(separatedBy: "\r\n\r\n").last,
+           let bodyData = body.data(using: .utf8),
+           let payload = try? JSONDecoder().decode(ClipboardLeasePayload.self, from: bodyData) {
+            ClipboardMonitor.shared.resume(changeCount: payload.changeCount)
+            return
+        }
+
         if request.hasPrefix("POST /theme "),
            let body = request.components(separatedBy: "\r\n\r\n").last,
            let bodyData = body.data(using: .utf8),
@@ -2810,6 +2866,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             layoutResultCard()
         }
         launcherController.applyTheme(dark: theme == .dark)
+        clipboardController.applyTheme(dark: theme == .dark)
         log("theme applied \(theme.rawValue)")
     }
 

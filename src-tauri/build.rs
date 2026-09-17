@@ -54,6 +54,9 @@ fn build_native_selection_toolbar() {
             "swiftc",
             "native/SelectionToolbarHelper.swift",
             "native/LauncherPanel.swift",
+            "native/ClipboardStore.swift",
+            "native/ClipboardMonitor.swift",
+            "native/ClipboardPanel.swift",
             "native/main.swift",
             "-o",
             "native/LexiSelectionHelper.app/Contents/MacOS/LexiSelectionHelper",
@@ -65,6 +68,7 @@ fn build_native_selection_toolbar() {
             "Foundation",
             "-framework",
             "Network",
+            "-lsqlite3",
         ])
         .status()
         .expect("failed to start swiftc for native selection toolbar helper");
@@ -92,5 +96,8 @@ fn build_native_selection_toolbar() {
 
     println!("cargo:rerun-if-changed=native/SelectionToolbarHelper.swift");
     println!("cargo:rerun-if-changed=native/LauncherPanel.swift");
+    println!("cargo:rerun-if-changed=native/ClipboardStore.swift");
+    println!("cargo:rerun-if-changed=native/ClipboardMonitor.swift");
+    println!("cargo:rerun-if-changed=native/ClipboardPanel.swift");
     println!("cargo:rerun-if-changed=native/main.swift");
 }
