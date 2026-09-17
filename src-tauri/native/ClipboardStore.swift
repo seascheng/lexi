@@ -109,19 +109,27 @@ final class ClipboardStore {
 
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-    // MARK: open
-
     /// Opens (creating if needed) the store under the helper's Application
     /// Support directory. A database that cannot be opened is deleted and
     /// recreated once — a history is captured rather than authored. If that
     /// fails too, the store degrades to an empty in-memory window.
+    /// Convenience: tests inject a scratch directory — NSHomeDirectory()
+    /// ignores the HOME environment variable, so Application Support cannot
+    /// be redirected from the environment.
     static func open() -> ClipboardStore? {
         let fileManager = FileManager.default
         guard let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
-        let directory = base.appendingPathComponent("com.lexi.selection-helper", isDirectory: true)
-        let imagesDir = directory.appendingPathComponent("images", isDirectory: true)
+        return open(
+            directory: base.appendingPathComponent("com.lexi.selection-helper", isDirectory: true),
+            imagesDirectoryName: "images"
+        )
+    }
+
+    static func open(directory: URL, imagesDirectoryName: String) -> ClipboardStore? {
+        let fileManager = FileManager.default
+        let imagesDir = directory.appendingPathComponent(imagesDirectoryName, isDirectory: true)
         for dir in [directory, imagesDir] {
             if !fileManager.fileExists(atPath: dir.path) {
                 try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -286,22 +294,30 @@ final class ClipboardStore {
 
     // MARK: capture
 
-    /// Re-copy of what already leads the history is a no-op, not a promote.
+    /// Re-copy semantics: a repeat of the leading row is the same ⌘C (no-op);
+    /// an older row with the same content moves to the top instead of
+    /// duplicating (Maccy/Paste semantics — keeps search duplicate-free).
     func addText(_ text: String, sourceBundleID: String?) {
         if let first = items.first, first.kind == .text, first.text == text { return }
+        if let existing = items.first(where: { $0.kind == .text && $0.text == text }) {
+            promote(existing)
+            return
+        }
         insert(ClipboardItem(
             id: UUID(), kind: .text, text: text, imagePath: nil,
             createdAt: Date(), sourceBundleID: sourceBundleID, pinnedAt: nil))
     }
 
     /// Multiple files arrive oldest-last: reversed so the FIRST file copied
-    /// ends up leading the history. A single-file repeat of the leading row
-    /// is the same ⌘C `addText` guards.
+    /// ends up leading the history. A single-file repeat promotes its row
+    /// (same rule as addText).
     func addFiles(_ paths: [String], sourceBundleID: String?) {
-        if paths.count == 1, let first = items.first, first.kind == .file, first.text == paths[0] {
-            return
-        }
         for path in paths.reversed() {
+            if let first = items.first, first.kind == .file, first.text == path { continue }
+            if let existing = items.first(where: { $0.kind == .file && $0.text == path }) {
+                promote(existing)
+                continue
+            }
             insert(ClipboardItem(
                 id: UUID(), kind: .file, text: path, imagePath: nil,
                 createdAt: Date(), sourceBundleID: sourceBundleID, pinnedAt: nil))
