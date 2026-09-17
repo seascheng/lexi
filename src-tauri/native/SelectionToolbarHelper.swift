@@ -1090,7 +1090,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         buildResultCard()
         installMouseMonitors()
         installStatusItem()
-        startDisplayServer()
+        refreshCardActions()
         probeEventTapAccess()
         shortcutMonitor = ShortcutMonitor(
             onLauncher: { [weak self] in
@@ -1214,6 +1214,56 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             log("terminating stale helper pid=\(application.processIdentifier)")
             application.terminate()
         }
+    }
+
+    /// The card's tab row + input action buttons read one config snapshot.
+    /// Rust only pushed it on ITS card opens — every locally-opened card
+    /// since Phase 2 ran on stale data, and a helper restart left both
+    /// empty (the missing tabs/buttons). The helper owns the snapshot now:
+    /// read the shared DB (panel_config_items parity) at launch and on
+    /// every settings change.
+    func refreshCardActions() {
+        struct Entry {
+            var order: Int
+            var item: CardActionsPayload.Item
+        }
+        var entries: [Entry] = []
+
+        for tool in LexiStore.toolbarTools() where tool.panelEnabled && !tool.id.isEmpty {
+            entries.append(Entry(order: tool.panelSortOrder, item: .init(
+                id: tool.id, name: tool.name.isEmpty ? "Tool" : tool.name,
+                icon: tool.icon.isEmpty ? "wand" : tool.icon, kind: "tool")))
+        }
+        for feature in LexiStore.features() where feature.enabled && !feature.id.isEmpty {
+            entries.append(Entry(order: feature.sortOrder, item: .init(
+                id: feature.id, name: feature.name.isEmpty ? "AI" : feature.name,
+                icon: feature.icon.isEmpty ? "wand" : feature.icon, kind: "feature")))
+        }
+        entries.sort { $0.order < $1.order }
+
+        // Panel tabs: DB rows + the built-ins appended when missing, then
+        // canonical order (Actions, Review first).
+        var panels = LexiStore.customPanels().map {
+            CardActionsPayload.PanelDef(id: $0.id, name: $0.name, icon: $0.icon)
+        }
+        for (id, name, icon) in [("translate", "Actions", "file-text"), ("review", "Review", "book-open")]
+        where !panels.contains(where: { $0.id == id }) {
+            panels.append(CardActionsPayload.PanelDef(id: id, name: name, icon: icon))
+        }
+        let canonical = ["translate", "review"]
+        var ordered: [CardActionsPayload.PanelDef] = []
+        for id in canonical {
+            if let index = panels.firstIndex(where: { $0.id == id }) {
+                ordered.append(panels.remove(at: index))
+            }
+        }
+        ordered.append(contentsOf: panels)
+
+        FileLog.write("CARD actions refreshed tools+features=\(entries.count) panels=\(ordered.count)")
+        handleCardActions(CardActionsPayload(
+            actions: entries.map(\.item),
+            panels: ordered
+        ))
     }
 
     private func buildPanel() {
@@ -3165,6 +3215,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 controller.onNativeSettingsReload = { [weak self] in
                     self?.shortcutMonitor?.reload()
                     self?.selectionPipeline?.reload()
+                    self?.refreshCardActions()
                     self?.postAction(action: "reload-native-settings", text: "")
                 }
                 controller.show(tab: tab)
@@ -3705,20 +3756,38 @@ struct ResultEventPayload: Decodable {
     }
 }
 
-private struct CardActionsPayload: Decodable {
+struct CardActionsPayload: Decodable {
     struct Item: Decodable {
         let id: String
         let name: String
         let icon: String
         let kind: String?
+
+        init(id: String, name: String, icon: String, kind: String? = nil) {
+            self.id = id
+            self.name = name
+            self.icon = icon
+            self.kind = kind
+        }
     }
     struct PanelDef: Decodable {
         let id: String
         let name: String
         let icon: String
+
+        init(id: String, name: String, icon: String) {
+            self.id = id
+            self.name = name
+            self.icon = icon
+        }
     }
     let actions: [Item]
     let panels: [PanelDef]?
+
+    init(actions: [Item], panels: [PanelDef]? = nil) {
+        self.actions = actions
+        self.panels = panels
+    }
 }
 
 /// One notes-table row (view-based NSTableView cell). The system provides

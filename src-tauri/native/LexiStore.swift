@@ -495,6 +495,32 @@ extension LexiStore {
     }
 }
 
+extension LexiStore {
+    /// Custom panel tabs (enabled, DB order) — merged with the built-ins
+    /// by the caller (panel_config_items parity).
+    static func customPanels() -> [(id: String, name: String, icon: String)] {
+        guard let db = open() else { return [] }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "SELECT id, name, IFNULL(icon,'file-text') FROM panels WHERE enabled = 1 ORDER BY sort_order;",
+            -1, &statement, nil
+        ) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(statement) }
+
+        var rows: [(String, String, String)] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            func text(_ i: Int32) -> String {
+                guard let cString = sqlite3_column_text(statement, i) else { return "" }
+                return String(cString: cString)
+            }
+            rows.append((text(0), text(1), text(2)))
+        }
+        return rows
+    }
+}
+
 /// One entry of the shared action registry (`toolbar_tools` blob): the
 /// toolbar scope and the card's Actions-tab scope each read their columns.
 struct LexiToolEntry: Codable, Identifiable, Hashable {
