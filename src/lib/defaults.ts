@@ -149,8 +149,7 @@ export const DEFAULT_AI_FEATURE: AiFeature = {
 
 export const DEFAULT_PANELS: Panel[] = [
   { id: "translate", name: "Actions", icon: "file-text", enabled: true, sortOrder: 0 },
-  { id: "notes", name: "Notes", icon: "notebook-pen", enabled: true, sortOrder: 1 },
-  { id: "review", name: "Review", icon: "book-open", enabled: true, sortOrder: 2 },
+  { id: "review", name: "Review", icon: "book-open", enabled: true, sortOrder: 1 },
 ];
 
 export const DEFAULT_SETTINGS: AppSettings = {

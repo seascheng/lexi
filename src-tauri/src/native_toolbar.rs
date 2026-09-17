@@ -2093,18 +2093,13 @@ fn trigger_popup_with_selection(app: &tauri::AppHandle) {
     };
 
     // Selection → native result card streaming the AI run directly (WebView
-    // popup_card no longer participates). No selection → native Notes panel:
-    // real AppKit rendering, keyboard routed through this tap, and the source
-    // app's caret never stops.
+    // popup_card no longer participates). No selection → the idle input card
+    // on its Actions tab. Notes browsing lives in the ClipboardPanel now.
     if let Some(selected) = &text {
         show_result_card(app, selected, "translation");
     } else {
-        // Cursor sits in an input with nothing selected: open the native card
-        // straight onto its Notes tab — ↑/↓ select, Enter injects at the
-        // source app's caret (the panel's core purpose).
         show_idle_card(app);
-        let _ = send_card_notes(app);
-        log_native(&format!("shortcut notes mode (source={})", source));
+        log_native(&format!("shortcut idle mode (source={})", source));
     }
 }
 

@@ -1856,7 +1856,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             buildPanelTabPills()
         }
         if panelDefs.isEmpty {
-            panelDefs = [("translate", "Actions", "file-text"), ("notes", "Notes", "notebook-pen"), ("review", "Review", "book-open")]
+            panelDefs = [("translate", "Actions", "file-text"), ("review", "Review", "book-open")]
         }
         rebuildInputButtons()
         layoutResultCard()

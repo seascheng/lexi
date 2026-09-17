@@ -159,6 +159,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/012_tag_order.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 13,
+            description: "drop notes panel (moved to ClipboardPanel)",
+            sql: include_str!("../migrations/013_drop_notes_panel.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
