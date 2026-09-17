@@ -44,34 +44,27 @@ settings DB migrations, bundler.
 | Settings window | SettingsWindow.swift | TinyCast recipe: NSWindow fullSizeContentView, NSSplitViewController, AppKit toolbar `[.sidebarTrackingSeparator, back, forward]`, `isNavigational` items, inline title = tab, unified bar, titlebar NOT transparent |
 | Panes | SettingsPanes / StudyPanes / ContentPanes / SurfacePanes | General, Appearance, AI, Shortcuts, Vocabulary, Review, Notebook, Configs, Toolbar, Card&Notes, Clipboard, Launcher |
 | LexiStore | LexiStore.swift | Same `com.lexi.app/lexi.db`; settings KV, words (+SM-2), notes, ai_features CRUD, toolbar_tools blob, excluded apps, card frame |
-| SM-2 | SM2.swift | 12/12 vectors vs Rust formula |
-| AI | AIService.swift | URLSession `bytes.lines` SSE, 40ms coalescing, thinking toggle, translation_json + auto-save; `showResultCard` is the single run orchestrator |
-| TTS | AIService.swift (LexiSpeech) | Volcengine NDJSON → AVAudioPlayer, `say` fallback |
-| Shortcuts | ShortcutMonitor.swift | Active session tap; launcher+clipboard in-process; clipboard combo DROPS (Alt+V √); typing-guarded double press |
-| Status item | SelectionToolbarHelper.swift | ✨ menu: Settings/Launcher/Quit; quit coordinates via `quit-lexi` + `QUITTING` flag |
-| Card review tab | SelectionToolbarHelper.swift | `loadReviewWord()`/`gradeClicked` local (panel-review/review-grade retired) |
+### 1. Selection pipeline (Layer status)
 
-## Remaining
-
-### 1. Selection pipeline (blocked on user validation)
-
-Rust home: `native_toolbar.rs` — mouse tap ~line 1576-1715 (down origin
-tracking for drag-detection, mouse-up → excluded apps → self-window checks
-→ AX read chain `read_selected_text_via_ax_text` → `read_web_area_selection`
-(AXWebArea DFS, WEB_AREA_CHILD_SEARCH_DEPTH) → menu-copy
-(`read_selected_text_via_menu`) → Cmd+C (`handle_copy_for_toolbar`,
-5s last-copied cache)) + `show_toolbar` posting `/show`.
-
-Protocol: port in two layers, dual-track with helper-side dedup (drop a
-`/show` if an identical text arrived <500ms ago — Rust and Swift will both
-fire during the overlap window).
-
-- Layer 1: mouse-up + excluded apps + AX direct read (covers native apps)
-- Layer 2: WebArea DFS + menu-copy + Cmd+C fallback (browsers, Ghostty/Zed)
-
-`trigger_popup_with_selection` (line ~1979) migrates with Layer 2 (popup
-shortcut prefill depends on the reader).
-
+- ✅ Mouse tap (listen-only, worker queue, 0.3s AX timeout, dedup gate)
+- ✅ Tier 1/2/3 read chain: kAXSelectedText → AXValue+range slice
+  (UTF-16 exact) → web-area markers (9b043de)
+- ✅ Cmd+C copied-text fallback with 5s freshness (431a418)
+- ⬜ Layer 2c: menu Copy (AXPress Edit→Copy, pasteboard borrow/restore,
+  ClipboardMonitor suspend coordination — same-process now, no TCP lease)
+  and the session-tap Cmd+C injection (full 4-event modifier sequence,
+  `combinedSessionState` + hardware bit). Both stay RUST-ONLY during
+  dual-track (dedup absorbs; Ghostty/Zed keep working); port only at
+  tap retirement. Rust bodies: read_selected_text_via_menu ~2399,
+  post_cmd_c_and_read ~2541.
+- Rust also keeps: popup shortcut (trigger_popup_with_selection ~1979),
+  mouse-up drag-detection rich logic, handoff tool.
+- Protocol: dual-track with helper-side dedup (600ms same-text gate) —
+  validated live: Swift crash-looped for 30min while Rust kept every
+  selection working.
+(The original two-layer protocol above is superseded by the status list;
+Rust bodies for the remaining tiers: read_selected_text_via_menu ~2399,
+post_cmd_c_and_read ~2541, trigger_popup_with_selection ~1979.)
 ### 2. Actions table normalization (fold into cutover)
 
 `toolbar_tools` JSON blob stays the storage format while Rust readers live
