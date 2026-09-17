@@ -64,6 +64,7 @@ fn build_native_selection_toolbar() {
             "native/AIService.swift",
             "native/SM2.swift",
             "native/StudyPanes.swift",
+            "native/ContentPanes.swift",
             "native/main.swift",
             "-o",
             "native/LexiSelectionHelper.app/Contents/MacOS/LexiSelectionHelper",
@@ -117,4 +118,5 @@ fn build_native_selection_toolbar() {
     println!("cargo:rerun-if-changed=native/AIService.swift");
     println!("cargo:rerun-if-changed=native/SM2.swift");
     println!("cargo:rerun-if-changed=native/StudyPanes.swift");
+    println!("cargo:rerun-if-changed=native/ContentPanes.swift");
 }

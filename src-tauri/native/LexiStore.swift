@@ -334,3 +334,133 @@ extension LexiStore {
         sqlite3_step(statement)
     }
 }
+
+
+/// One notes-table row with its tags.
+struct LexiNote: Identifiable, Hashable {
+    let id: Int64
+    let name: String
+    let content: String
+    let tags: [String]
+}
+
+/// One ai_features row (full editor surface).
+struct LexiFeatureRow: Identifiable, Hashable {
+    var id: String
+    var name: String
+    var kind: String
+    var promptTemplate: String
+    var outputMode: String
+    var enabled: Bool
+    var sortOrder: Int
+    var autoSave: Bool
+    var targetLanguage: String
+    var icon: String
+    var isBuiltin: Bool
+    var thinking: Bool
+}
+
+extension LexiStore {
+    /// Latest notes with their tags (the card Notes tab's query, unpagified
+    /// for the pane's 200-row window).
+    static func notes(limit: Int = 200) -> [LexiNote] {
+        guard let db = open() else { return [] }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "SELECT n.id, IFNULL(n.name,''), n.content, IFNULL((SELECT GROUP_CONCAT(t.name) FROM note_tags nt JOIN tags t ON t.id = nt.tag_id WHERE nt.note_id = n.id), '') FROM notes n ORDER BY n.created_at DESC, n.id DESC LIMIT \(limit);",
+            -1, &statement, nil
+        ) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(statement) }
+
+        var rows: [LexiNote] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            func text(_ i: Int32) -> String {
+                guard let cString = sqlite3_column_text(statement, i) else { return "" }
+                return String(cString: cString)
+            }
+            let tagList = text(3).split(whereSeparator: { $0 == "," }).map(String.init)
+            rows.append(LexiNote(id: sqlite3_column_int64(statement, 0), name: text(1), content: text(2), tags: tagList))
+        }
+        return rows
+    }
+
+    static func deleteNote(id: Int64) {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM notes WHERE id = ?1;", -1, &statement, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, id)
+        sqlite3_step(statement)
+    }
+
+    // MARK: - AI features
+
+    static func features() -> [LexiFeatureRow] {
+        guard let db = open() else { return [] }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "SELECT id, name, kind, prompt_template, output_mode, enabled, sort_order, auto_save_to_vocabulary, IFNULL(target_language,''), icon, is_builtin, thinking FROM ai_features ORDER BY sort_order, created_at;",
+            -1, &statement, nil
+        ) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(statement) }
+
+        var rows: [LexiFeatureRow] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            func text(_ i: Int32) -> String {
+                guard let cString = sqlite3_column_text(statement, i) else { return "" }
+                return String(cString: cString)
+            }
+            rows.append(LexiFeatureRow(
+                id: text(0), name: text(1), kind: text(2), promptTemplate: text(3),
+                outputMode: text(4), enabled: sqlite3_column_int64(statement, 5) == 1,
+                sortOrder: Int(sqlite3_column_int(statement, 6)),
+                autoSave: sqlite3_column_int64(statement, 7) == 1,
+                targetLanguage: text(8), icon: text(9),
+                isBuiltin: sqlite3_column_int64(statement, 10) == 1,
+                thinking: sqlite3_column_int64(statement, 11) == 1
+            ))
+        }
+        return rows
+    }
+
+    /// Insert or update one feature row.
+    static func saveFeature(_ row: LexiFeatureRow) {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "INSERT INTO ai_features (id, name, kind, prompt_template, output_mode, enabled, sort_order, auto_save_to_vocabulary, target_language, icon, is_builtin, thinking, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12, datetime('now')) ON CONFLICT(id) DO UPDATE SET name=excluded.name, kind=excluded.kind, prompt_template=excluded.prompt_template, output_mode=excluded.output_mode, enabled=excluded.enabled, sort_order=excluded.sort_order, auto_save_to_vocabulary=excluded.auto_save_to_vocabulary, target_language=excluded.target_language, icon=excluded.icon, thinking=excluded.thinking, updated_at=datetime('now');",
+            -1, &statement, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, row.id, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, row.name, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, row.kind, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 4, row.promptTemplate, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 5, row.outputMode, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 6, row.enabled ? 1 : 0)
+        sqlite3_bind_int(statement, 7, Int32(row.sortOrder))
+        sqlite3_bind_int(statement, 8, row.autoSave ? 1 : 0)
+        sqlite3_bind_text(statement, 9, row.targetLanguage, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 10, row.icon, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 11, row.isBuiltin ? 1 : 0)
+        sqlite3_bind_int(statement, 12, row.thinking ? 1 : 0)
+        sqlite3_step(statement)
+    }
+
+    static func deleteFeature(id: String) {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM ai_features WHERE id = ?1 AND is_builtin = 0;", -1, &statement, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, id, -1, SQLITE_TRANSIENT)
+        sqlite3_step(statement)
+    }
+}

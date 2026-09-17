@@ -75,7 +75,7 @@ final class SettingsNavigationState {
 /// The settings sidebar's flat tab list, grouped for display. New pages
 /// join here as the migration proceeds.
 enum SettingsTab: CaseIterable, Identifiable {
-    case general, appearance, ai, shortcuts, vocabulary, review
+    case general, appearance, ai, shortcuts, vocabulary, review, notebook, configs
 
     var id: Self { self }
 
@@ -87,6 +87,8 @@ enum SettingsTab: CaseIterable, Identifiable {
         case .shortcuts: "Shortcuts"
         case .vocabulary: "Vocabulary"
         case .review: "Review"
+        case .notebook: "Notebook"
+        case .configs: "Configs"
         }
     }
 
@@ -98,6 +100,8 @@ enum SettingsTab: CaseIterable, Identifiable {
         case .shortcuts: "keyboard"
         case .vocabulary: "book"
         case .review: "brain"
+        case .notebook: "notebook-pen"
+        case .configs: "list.bullet.rectangle"
         }
     }
 }
@@ -117,7 +121,7 @@ enum SettingsSection: CaseIterable, Identifiable {
     var tabs: [SettingsTab] {
         switch self {
         case .general: [.general, .appearance, .ai, .shortcuts]
-        case .study: [.vocabulary, .review]
+        case .study: [.vocabulary, .review, .notebook, .configs]
         }
     }
 }
@@ -274,6 +278,8 @@ struct LexiSettingsDetail: View {
             case .shortcuts: ShortcutsSettingsPane()
             case .vocabulary: VocabularyPane()
             case .review: ReviewPane()
+            case .notebook: NotebookPane()
+            case .configs: ConfigsPane()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
