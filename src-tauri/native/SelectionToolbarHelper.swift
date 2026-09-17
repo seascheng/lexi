@@ -973,7 +973,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             self?.postAction(action: "launcher-hidden", text: "-")
         }
         controller.onOpenSettings = { [weak self] in
-            self?.launcherController.hide(notify: false)
+            // The coordinator retires the launcher (and any other overlay).
             self?.showSettingsWindow()
         }
         return controller
@@ -991,9 +991,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         // the helper's other key panel forward and the ⌘V would land in
         // its input bar instead of the target app.
         controller.onPasteThrough = { [weak self] in
-            guard let self, self.resultPanel.isVisible else { return }
-            self.resultPanel.orderOut(nil)
-            self.postAction(action: "card-hidden", text: "-")
+            // Every surface of ours retires — nothing can surface-jump
+            // while the target app takes focus (PanelCoordinator policy).
+            self?.panels.dismissAll()
         }
         return controller
     }()
@@ -1093,7 +1093,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         startDisplayServer()
         probeEventTapAccess()
         shortcutMonitor = ShortcutMonitor(
-            onLauncher: { [weak self] in self?.launcherController.show() },
+            onLauncher: { [weak self] in
+                self?.panels.present(.launcher)
+                self?.launcherController.show()
+            },
             onClipboard: { [weak self] in self?.showClipboardPanel() }
         )
         shortcutMonitor?.onCopyCommand = { [weak self] in
@@ -1117,6 +1120,26 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         selectionPipeline?.start()
     }
 
+    /// The single presentation gate for every panel.
+    private lazy var panels: PanelCoordinator = {
+        let coordinator = PanelCoordinator()
+        coordinator.hideToolbar = { [weak self] in
+            self?.hidePanel(force: true)
+        }
+        coordinator.hideLauncher = { [weak self] in
+            self?.launcherController.hide(notify: false)
+        }
+        coordinator.hideClipboard = { [weak self] in
+            self?.clipboardController.hide(notify: false)
+        }
+        coordinator.hideCard = { [weak self] in
+            guard let self, self.resultPanel.isVisible else { return }
+            self.resultPanel.orderOut(nil)
+            self.postAction(action: "card-hidden", text: "-")
+        }
+        return coordinator
+    }()
+
     /// Global keyboard shortcuts (launcher + clipboard), in-process.
     private var shortcutMonitor: ShortcutMonitor?
     private var selectionPipeline: SelectionPipeline?
@@ -1134,11 +1157,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         return true
     }
 
-    /// Layer-1 selection trigger from the helper's own tap.
-    func showToolbarFromSwift(text: String, at point: NSPoint) {
-        guard selectionShowGate(text) else { return }
-        showPanel(ShowPayload(text: text, x: Int(point.x), y: Int(point.y)))
-    }
 
     private static func argumentValue(_ name: String) -> String? {
         let arguments = CommandLine.arguments
@@ -1150,8 +1168,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     /// The clipboard shortcut's local path: refresh the notes snapshot from
-    /// the shared DB (the tag tabs read it) and present the panel. This
-    /// replaces Rust's show_clipboard (send_card_notes + /clipboard-show).
+    /// the shared DB (the tag tabs read it) and present the panel through
+    /// the coordinator gate (retires toolbar/launcher first).
     func showClipboardPanel() {
         let rows = LexiStore.notes(limit: 50)
         var tags = Set<String>()
@@ -1172,7 +1190,15 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                     tags: $0.tags ?? [])
             },
             tags: payload.allTags ?? [])
+        panels.present(.clipboard)
         clipboardController.show()
+    }
+
+    /// Layer-1 selection trigger from the helper's own tap.
+    func showToolbarFromSwift(text: String, at point: NSPoint) {
+        guard selectionShowGate(text) else { return }
+        panels.present(.toolbar)
+        showPanel(ShowPayload(text: text, x: Int(point.x), y: Int(point.y)))
     }
 
     private func terminateOlderHelperInstances() {
@@ -1845,8 +1871,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             string: "Enter text",
             attributes: [.foregroundColor: cardTheme.tertiaryText, .font: NSFont.systemFont(ofSize: 13)]
         )
-        inputContainer.addSubview(inputTextView)
-
         inputButtonsRow = NSView(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
         inputButtonsClip = HorizontalOnlyClip(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
         inputButtonsClip.drawsBackground = false
@@ -2008,6 +2032,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     func showResultCard(_ payload: ResultShowPayload) {
+        // Every card presentation retires the transient overlays — the
+        // card's actions replace them (PanelCoordinator policy).
+        panels.present(.card)
         // Every run trigger funnels here (Rust surface events, toolbar
         // buttons, the input bar): the card presents and the AI stream
         // starts locally from the shared DB.
@@ -3047,6 +3074,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             return
         }
 
+
         if request.hasPrefix("POST /card-actions "),
            let body = request.components(separatedBy: "\r\n\r\n").last,
            let bodyData = body.data(using: .utf8),
@@ -3099,6 +3127,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     /// both ways: applied in-process here, and mirrored into the Rust
     /// caches so a helper restart preserves them.
     func showSettingsWindow(tab: SettingsTab = .general) {
+        panels.present(.settings)
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
                 let controller: LexiSettingsWindowController

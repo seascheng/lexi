@@ -68,6 +68,7 @@ fn build_native_selection_toolbar() {
             "native/SurfacePanes.swift",
             "native/ShortcutMonitor.swift",
             "native/SelectionPipeline.swift",
+            "native/PanelCoordinator.swift",
             "native/main.swift",
             "-o",
             "native/LexiSelectionHelper.app/Contents/MacOS/LexiSelectionHelper",
