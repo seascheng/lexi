@@ -3262,6 +3262,41 @@ fn dispatch_toolbar_action(
         }
         return send_card_notes(app);
     }
+
+    if action.action == "note-create" {
+        // text = JSON {"name","content","tag"} — the clipboard panel's
+        // "移动到分类" saves a clip as a note in the chosen category (the
+        // panel then deletes the local clip row). Tag binding uses the
+        // newest note id; the helper is the only writer at this moment.
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&action.text) {
+            let name = value["name"].as_str().unwrap_or("").trim();
+            let content = value["content"].as_str().unwrap_or("");
+            let tag = value["tag"].as_str().unwrap_or("");
+            if !content.is_empty() {
+                let escaped_name = name.replace('\'', "''");
+                let escaped_content = content.replace('\'', "''");
+                let _ = sqlite_query_json(
+                    app,
+                    &format!(
+                        "INSERT INTO notes (name, content) VALUES('{escaped_name}', '{escaped_content}');"
+                    ),
+                );
+                if !tag.is_empty() {
+                    let escaped_tag = tag.replace('\'', "''");
+                    let _ = sqlite_query_json(
+                        app,
+                        &format!(
+                            "INSERT INTO note_tags (note_id, tag_id) \
+                             SELECT (SELECT id FROM notes ORDER BY id DESC LIMIT 1), id \
+                             FROM tags WHERE name = '{escaped_tag}';"
+                        ),
+                    );
+                }
+                let _ = app.emit("lexi://notes-changed", ());
+            }
+        }
+        return send_card_notes(app);
+    }
     if action.action == "card-key" {
         return Ok(());
     }

@@ -42,7 +42,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     private let searchField = NSSearchField()
     private var chipViews: [(kind: ChipKind, view: ChipPillView)] = []
     private let scrollView = NSScrollView()
-    private let tableView = NSTableView()
+    private let tableView = ClipTable()
     private let emptyLabel = NSTextField(labelWithString: "")
     private let footerLeft = NSTextField(labelWithString: "")
     private let footerRight = NSTextField(labelWithString: "")
@@ -262,6 +262,10 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         // Double-click pastes, same as Enter.
         tableView.target = self
         tableView.action = #selector(rowDoubleClicked)
+        // Right-click management menus (delete / move / rename).
+        tableView.onMenu = { [weak self] row in
+            self?.contextMenu(for: row)
+        }
 
         footerLeft.font = .systemFont(ofSize: 11)
         footerRight.font = .systemFont(ofSize: 11)
@@ -657,6 +661,133 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 
     @objc private func rowDoubleClicked() {
         pasteSelected()
+    }
+
+    // MARK: management (right-click)
+
+    /// Right-click menus. Clips: delete / move-to-category (saves the clip
+    /// as a note under the chosen tag, then removes the clip). Notes: delete
+    /// / rename / move-to-category (re-tag via the existing note-tag action).
+    func contextMenu(for row: Int) -> NSMenu? {
+        guard row >= 0, row < rows.count else { return nil }
+        switch rows[row] {
+        case .header:
+            return nil
+        case .clip(let item):
+            let menu = NSMenu()
+            let delete = NSMenuItem(title: "删除", action: #selector(deleteClipFromMenu(_:)), keyEquivalent: "")
+            delete.target = self
+            delete.representedObject = item.id.uuidString
+            menu.addItem(delete)
+            menu.addItem(withTitle: "移动到分类…", action: nil, keyEquivalent: "").submenu = tagSubmenu(
+                selector: #selector(moveClipToTagFromMenu(_:)),
+                payloadPrefix: item.id.uuidString + "|"
+            )
+            return menu
+        case .note(let note):
+            guard let noteId = note.id as Int64?, noteId != 0 else { return nil }
+            let menu = NSMenu()
+            let delete = NSMenuItem(title: "删除", action: #selector(deleteNoteFromMenu(_:)), keyEquivalent: "")
+            delete.target = self
+            delete.representedObject = String(noteId)
+            menu.addItem(delete)
+            let rename = NSMenuItem(title: "重命名…", action: #selector(renameNoteFromMenu(_:)), keyEquivalent: "")
+            rename.target = self
+            rename.representedObject = "\(noteId)|\(note.name)"
+            menu.addItem(rename)
+            let move = NSMenuItem(title: "移动到分类…", action: nil, keyEquivalent: "")
+            move.submenu = tagSubmenu(
+                selector: #selector(moveNoteToTagFromMenu(_:)),
+                payloadPrefix: "\(noteId)|",
+                excluding: note.tags.first
+            )
+            menu.addItem(move)
+            return menu
+        }
+    }
+
+    private func tagSubmenu(
+        selector: Selector, payloadPrefix: String, excluding current: String? = nil
+    ) -> NSMenu {
+        let submenu = NSMenu()
+        for tag in allTags where tag != current {
+            let item = NSMenuItem(title: tag, action: selector, keyEquivalent: "")
+            item.target = self
+            item.representedObject = payloadPrefix + tag
+            submenu.addItem(item)
+        }
+        if submenu.items.isEmpty {
+            submenu.addItem(withTitle: "暂无其他分类", action: nil, keyEquivalent: "").isEnabled = false
+        }
+        return submenu
+    }
+
+    @objc private func deleteClipFromMenu(_ sender: NSMenuItem) {
+        guard let idString = sender.representedObject as? String,
+              let id = UUID(uuidString: idString),
+              let store,
+              let item = store.items.first(where: { $0.id == id })
+        else { return }
+        store.delete(item)
+        reload()
+    }
+
+    /// Move a clip into a note category: create the note server-side, then
+    /// remove the clip row. Image/file clips move their text form only.
+    @objc private func moveClipToTagFromMenu(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? String,
+              let separator = payload.firstIndex(of: "|"),
+              let id = UUID(uuidString: String(payload[..<separator])),
+              let tag = payload[payload.index(after: separator)...].isEmpty
+                ? nil : String(payload[payload.index(after: separator)...]),
+              let store,
+              let item = store.items.first(where: { $0.id == id }),
+              let content = item.previewText
+        else { return }
+        let body: [String: String] = ["name": "", "content": content, "tag": tag ?? Self.defaultTag]
+        if let data = try? JSONSerialization.data(withJSONObject: body),
+           let json = String(data: data, encoding: .utf8) {
+            onAction?("note-create", json)
+        }
+        store.delete(item)
+        reload()
+    }
+
+    @objc private func deleteNoteFromMenu(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        onAction?("note-delete", id)
+    }
+
+    @objc private func renameNoteFromMenu(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? String,
+              let separator = payload.firstIndex(of: "|") else { return }
+        let id = String(payload[..<separator])
+        let current = String(payload[payload.index(after: separator)...])
+
+        let alert = NSAlert()
+        alert.messageText = "重命名笔记"
+        alert.informativeText = "修改笔记名称（name）"
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        input.stringValue = current
+        alert.accessoryView = input
+        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn,
+              !input.stringValue.trimmingCharacters(in: .whitespaces).isEmpty
+        else { return }
+        let body: [String: Any] = ["id": Int64(id) ?? 0, "name": input.stringValue]
+        if let data = try? JSONSerialization.data(withJSONObject: body),
+           let json = String(data: data, encoding: .utf8) {
+            onAction?("note-rename", json)
+        }
+    }
+
+    @objc private func moveNoteToTagFromMenu(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? String,
+              let separator = payload.firstIndex(of: "|") else { return }
+        let id = String(payload[..<separator])
+        let tag = String(payload[payload.index(after: separator)...])
+        onAction?("note-tag", "\(id)|\(tag)")
     }
 
 
@@ -1183,7 +1314,6 @@ final class ClipboardHeaderCell: NSView {
 ///   icon: leading 16, 24×24, vertically centered
 ///   text: leading icon+10, trailing ≤ superview-16
 ///   selection capsule (insetDx 6 → 6..514): pads the content 10pt per side
-///
 /// Rows show exactly one of: single-line text (name label, centered),
 /// wrapping text (up to 2 lines, fills the row), file (name over dim path),
 /// image (40pt thumbnail; quiet placeholder while it decodes), note (same
@@ -1349,5 +1479,18 @@ final class ClipCell: NSView {
 
         nameCenterY = nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
         nameTop = nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8)
+    }
+}
+
+/// Table with a right-click hook: hit-tests the row and asks the controller
+/// for its management menu (NotesTable precedent in SelectionToolbarHelper).
+final class ClipTable: NSTableView {
+    var onMenu: ((Int) -> NSMenu?)?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        let row = row(at: point)
+        guard row >= 0 else { return nil }
+        return onMenu?(row)
     }
 }
