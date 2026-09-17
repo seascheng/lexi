@@ -16,6 +16,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     private static let panelWidth: CGFloat = 520
     private static let rowHeight: CGFloat = 32
     private static let headerHeight: CGFloat = 28
+    private static let chipLineHeight: CGFloat = 30
     private static let maxListHeight: CGFloat = 11 * LauncherPanelController.rowHeight
     private static let chromeHeight: CGFloat = 88 // search 12+26+8 + tabs 24+8 + bottom pad 10
     private static let recentsKey = "launcher.recents"
@@ -37,9 +38,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
 
     enum Row {
         case header(String)
-        case favorite(FolderItem)
-        case folder(FolderItem)
-        case recent(RecentItem)
+        case chipLine([FolderChip])
         case app(RunningAppItem)
     }
 
@@ -47,7 +46,22 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     struct RecentItem: Codable, Equatable { var path: String; var count: Int; var lastAt: Double }
     struct RunningAppItem { let app: NSRunningApplication; let name: String }
 
+    /// One folder chip inside a wrapping grid line. `x`/`width` are assigned
+    /// by the flow-layout pass (`flowChipLines`).
+    struct FolderChip {
+        enum Kind { case favorite, recent, tagged }
+        let item: FolderItem
+        let kind: Kind
+        /// One-level parent folder name shown after the chip title.
+        let suffix: String?
+        var x: CGFloat = 0
+        var width: CGFloat = 0
+    }
+
     var rows: [Row] = []
+    /// Grid selection for the Folders tab: (chipLine table row, chip index).
+    /// Chips self-highlight from this state — no table selection involved.
+    var selectedChip: (row: Int, chip: Int)?
 
     // folders data
     private var taggedFolders: [FolderItem] = []
@@ -220,8 +234,11 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     }
 
     private func rowHeight(for row: Row) -> CGFloat {
-        if case .header = row { return Self.headerHeight }
-        return Self.rowHeight
+        switch row {
+        case .header: return Self.headerHeight
+        case .chipLine: return Self.chipLineHeight
+        case .app: return Self.rowHeight
+        }
     }
 
     private func placePanel() {
@@ -248,9 +265,20 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
             NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)
         }.first
         tableView.reloadData()
-        let selectable = selectableRowIndexes()
-        if let first = selectable.first {
-            tableView.selectRowIndexes(IndexSet(integer: first), byExtendingSelection: false)
+        switch tab {
+        case .folders:
+            // Grid selection lives in `selectedChip`; default to the first
+            // chip so Enter works immediately.
+            if let first = chipLineRows().first {
+                selectedChip = (row: first, chip: 0)
+            } else {
+                selectedChip = nil
+            }
+        case .apps:
+            let selectable = selectableRowIndexes()
+            if let first = selectable.first {
+                tableView.selectRowIndexes(IndexSet(integer: first), byExtendingSelection: false)
+            }
         }
         let empty = rows.isEmpty
         emptyLabel.isHidden = !empty
@@ -262,62 +290,114 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
 
     private func selectableRowIndexes() -> [Int] {
         rows.indices.filter { row in
-            if case .header = rows[row] { return false }
-            return true
+            switch rows[row] {
+            case .header: return false
+            case .chipLine: return tab == .folders
+            case .app: return tab == .apps
+            }
         }
     }
 
+    private func chipLineRows() -> [Int] {
+        rows.indices.filter { row in
+            if case .chipLine = rows[row] { return true }
+            return false
+        }
+    }
+
+
     /// Canonical home subfolders pinned to the top of the Folders tab
-    /// (user-requested ordering: Favorites → Recent → tag groups). Displayed
-    /// with the system-localized name (桌面/下载/…); only folders that
-    /// actually exist are listed.
+    /// (Favorites → Recent → tag groups). Displayed with the system-
+    /// localized name (桌面/下载/…); only folders that exist are listed.
     private static let favoriteFolderNames = ["Desktop", "Documents", "Downloads", "Movies", "Pictures"]
 
     private func buildFolderRows() -> [Row] {
         let filter = filterText
         var out: [Row] = []
 
-        let favorites = Self.favoriteFolderNames.compactMap { name -> FolderItem? in
+        func matches(_ name: String, path: String) -> Bool {
+            filter.isEmpty
+                || name.lowercased().contains(filter)
+                || path.lowercased().contains(filter)
+        }
+
+        var favorites: [FolderChip] = []
+        for name in Self.favoriteFolderNames {
             let url = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(name)
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
-                  isDirectory.boolValue else { return nil }
+                  isDirectory.boolValue else { continue }
             let localizedName = (try? url.resourceValues(forKeys: [.localizedNameKey]))?.localizedName ?? name
-            guard filter.isEmpty
-                || localizedName.lowercased().contains(filter)
-                || name.lowercased().contains(filter)
-                || url.path.lowercased().contains(filter)
-            else { return nil }
-            return FolderItem(path: url.path, name: localizedName, tag: "")
+            guard matches(localizedName, path: url.path) else { continue }
+            favorites.append(FolderChip(
+                item: FolderItem(path: url.path, name: localizedName, tag: ""),
+                kind: .favorite, suffix: nil
+            ))
         }
         if !favorites.isEmpty {
             out.append(.header("Favorites"))
-            out += favorites.map { .favorite($0) }
+            out += flowChipLines(favorites).map { .chipLine($0) }
         }
 
-        let recentMatches = recents.filter { item in
-            filter.isEmpty
-                || item.path.lowercased().contains(filter)
-                || URL(fileURLWithPath: item.path).lastPathComponent.lowercased().contains(filter)
+        var recentChips: [FolderChip] = []
+        for item in recents where matches(item.path, path: item.path) {
+            let url = URL(fileURLWithPath: item.path)
+            let parent = url.deletingLastPathComponent().lastPathComponent
+            recentChips.append(FolderChip(
+                item: FolderItem(path: item.path, name: url.lastPathComponent, tag: ""),
+                kind: .recent, suffix: parent.isEmpty ? nil : parent
+            ))
         }
-        if !recentMatches.isEmpty {
+        if !recentChips.isEmpty {
             out.append(.header("Recent"))
-            out += recentMatches.map { .recent($0) }
+            out += flowChipLines(recentChips).map { .chipLine($0) }
         }
 
-        let matching = taggedFolders.filter { item in
-            filter.isEmpty
-                || item.name.lowercased().contains(filter)
-                || item.path.lowercased().contains(filter)
-        }
+        let matching = taggedFolders.filter { matches($0.name, path: $0.path) }
         let grouped = Dictionary(grouping: matching) { $0.tag.isEmpty ? "Untagged" : $0.tag }
         for tag in grouped.keys.sorted() {
             out.append(.header(tag))
-            out += grouped[tag]!
+            let chips = grouped[tag]!
                 .sorted { $0.name.lowercased() < $1.name.lowercased() }
-                .map { .folder($0) }
+                .map { item -> FolderChip in
+                    let parent = URL(fileURLWithPath: item.path).deletingLastPathComponent()
+                    let parentName = (try? parent.resourceValues(forKeys: [.localizedNameKey]))?.localizedName
+                        ?? parent.lastPathComponent
+                    return FolderChip(item: item, kind: .tagged, suffix: parentName.isEmpty ? nil : parentName)
+                }
+            out += flowChipLines(chips).map { .chipLine($0) }
         }
         return out
+    }
+
+    /// Wraps chips into grid lines of at most `maxWidth` points (6pt gaps).
+    private func flowChipLines(_ chips: [FolderChip], maxWidth: CGFloat = 496) -> [[FolderChip]] {
+        var lines: [[FolderChip]] = [[]]
+        var x: CGFloat = 0
+        for chip in chips {
+            let width = Self.chipWidth(for: chip)
+            if x > 0, x + width > maxWidth {
+                lines.append([])
+                x = 0
+            }
+            var placed = chip
+            placed.x = x
+            placed.width = width
+            lines[lines.count - 1].append(placed)
+            x += width + 6
+        }
+        return lines.filter { !$0.isEmpty }
+    }
+
+    static func chipWidth(for chip: FolderChip) -> CGFloat {
+        let nameWidth = (chip.item.name as NSString)
+            .size(withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium)]).width
+        var width = 30 + min(nameWidth, 190) + 10
+        if let suffix = chip.suffix {
+            width += (suffix as NSString)
+                .size(withAttributes: [.font: NSFont.systemFont(ofSize: 10)]).width + 6
+        }
+        return min(width, 240)
     }
 
     // MARK: tagged folders (Spotlight metadata)
@@ -469,9 +549,111 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         recordOpen(path: path, ok: true)
         hide(notify: false)
     }
+    private func activateRow(_ index: Int) {
+        guard index >= 0, index < rows.count else { return }
+        switch rows[index] {
+        case .chipLine(let chips):
+            let chip = selectedChip?.row == index ? (selectedChip?.chip ?? 0) : 0
+            if chips.indices.contains(chip) {
+                openPath(chips[chip].item.path, target: .finder)
+            }
+        case .app(let item): activateApp(item)
+        case .header: break
+        }
+    }
 
-    // MARK: running apps
+    // MARK: keyboard
 
+    /// Folders grid: selection is (chipLine row, chip index) — chips
+    /// highlight from `selectedChip` state, no table selection involved.
+    private func selectChip(row: Int, chip: Int) {
+        selectedChip = (row: row, chip: chip)
+        tableView.reloadData()
+        tableView.scrollRowToVisible(row)
+    }
+
+    private func currentChip() -> (row: Int, chip: Int, chips: [FolderChip])? {
+        guard let sel = selectedChip, rows.indices.contains(sel.row),
+              case .chipLine(let chips) = rows[sel.row], chips.indices.contains(sel.chip)
+        else { return nil }
+        return (sel.row, sel.chip, chips)
+    }
+
+    private func moveVertical(_ delta: Int) {
+        if tab == .apps {
+            let selectable = selectableRowIndexes()
+            guard !selectable.isEmpty else { return }
+            let next: Int
+            if let current = selectable.firstIndex(of: tableView.selectedRow) {
+                let target = current + delta
+                next = selectable[min(max(target, 0), selectable.count - 1)]
+            } else {
+                next = delta > 0 ? selectable[0] : selectable[selectable.count - 1]
+            }
+            tableView.selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
+            tableView.scrollRowToVisible(next)
+            return
+        }
+        let lines = chipLineRows()
+        guard !lines.isEmpty else { return }
+        let target: Int
+        var refChip: FolderChip?
+        if let cur = currentChip(), let pos = lines.firstIndex(of: cur.row) {
+            let next = pos + delta
+            guard lines.indices.contains(next) else { return }
+            target = lines[next]
+            refChip = cur.chips[cur.chip]
+        } else {
+            target = delta > 0 ? lines[0] : lines[lines.count - 1]
+        }
+        // Land on the chip whose x-range overlaps the current one most
+        // (text-editor line navigation).
+        var chipIndex = 0
+        if let refChip, case .chipLine(let chips) = rows[target] {
+            var bestOverlap = CGFloat(-1)
+            for (i, chip) in chips.enumerated() {
+                let lo = max(refChip.x, chip.x)
+                let hi = min(refChip.x + refChip.width, chip.x + chip.width)
+                if hi - lo > bestOverlap {
+                    bestOverlap = hi - lo
+                    chipIndex = i
+                }
+            }
+        }
+        selectChip(row: target, chip: chipIndex)
+    }
+
+    private func moveHorizontal(_ delta: Int) {
+        guard tab == .folders, let cur = currentChip() else { return }
+        var row = cur.row
+        var chip = cur.chip + delta
+        while rows.indices.contains(row) {
+            if case .chipLine(let chips) = rows[row] {
+                if chips.indices.contains(chip) {
+                    selectChip(row: row, chip: chip)
+                    return
+                }
+                chip = delta > 0 ? 0 : chips.count - 1
+            }
+            row += delta
+        }
+    }
+
+    private func activateSelected() {
+        switch tab {
+        case .folders:
+            if let cur = currentChip() {
+                openPath(cur.chips[cur.chip].item.path, target: .finder)
+            }
+        case .apps:
+            let row = tableView.selectedRow
+            if row >= 0, row < rows.count {
+                activateRow(row)
+            } else if let first = selectableRowIndexes().first {
+                activateRow(first)
+            }
+        }
+    }
     private func buildAppRows() -> [Row] {
         let filter = filterText
         let own = ProcessInfo.processInfo.processIdentifier
@@ -519,52 +701,29 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         hide(notify: false)
     }
 
-    private func activateRow(_ index: Int) {
-        guard index >= 0, index < rows.count else { return }
-        switch rows[index] {
-        case .favorite(let item): openPath(item.path, target: .finder)
-        case .folder(let item): openPath(item.path, target: .finder)
-        case .recent(let item): openPath(item.path, target: .finder)
-        case .app(let item): activateApp(item)
-        case .header: break
-        }
-    }
-
-    // MARK: keyboard
-
-    private func moveSelection(_ delta: Int) {
-        let selectable = selectableRowIndexes()
-        guard !selectable.isEmpty else { return }
-        let next: Int
-        if let current = selectable.firstIndex(of: tableView.selectedRow) {
-            let target = current + delta
-            next = selectable[min(max(target, 0), selectable.count - 1)]
-        } else {
-            next = delta > 0 ? selectable[0] : selectable[selectable.count - 1]
-        }
-        tableView.selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
-        tableView.scrollRowToVisible(next)
-    }
-
-    private func activateSelected() {
-        let row = tableView.selectedRow
-        if row >= 0, row < rows.count {
-            activateRow(row)
-        } else if let first = selectableRowIndexes().first {
-            activateRow(first)
-        }
-    }
 
     // NSSearchFieldDelegate — arrows/table/Enter/Tab/Esc while the search
     // field holds first responder.
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         switch commandSelector {
         case NSSelectorFromString("moveUp:"):
-            moveSelection(-1)
+            moveVertical(-1)
             return true
         case NSSelectorFromString("moveDown:"):
-            moveSelection(1)
+            moveVertical(1)
             return true
+        case NSSelectorFromString("moveLeft:"):
+            if tab == .folders {
+                moveHorizontal(-1)
+                return true
+            }
+            return false
+        case NSSelectorFromString("moveRight:"):
+            if tab == .folders {
+                moveHorizontal(1)
+                return true
+            }
+            return false
         case NSSelectorFromString("insertNewline:"):
             activateSelected()
             return true
@@ -611,55 +770,24 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
                 : tagColor(for: title, dark: cardTheme.isDark)
             cell.configure(title: title, color: color)
             return cell
-        case .favorite(let item):
-            let cell = reuse(LauncherFolderCell.self, row: row)
+        case .chipLine(let chips):
+            let cell = reuse(LauncherChipLineCell.self, row: row)
             cell.configure(
-                item: item,
+                chips: chips,
                 theme: cardTheme,
-                showsEditor: editorAppURL != nil,
-                missing: false,
-                leadingIcon: "folder"
-            ) { [weak self] action in
-                guard let self else { return }
-                switch action {
-                case .row: self.openPath(item.path, target: .finder)
-                case .editor: self.openPath(item.path, target: .editor)
-                case .terminal: self.openPath(item.path, target: .terminal)
+                selectedIndex: selectedChip?.row == row ? selectedChip?.chip : nil,
+                onActivate: { [weak self] chipIndex in
+                    guard let self, chips.indices.contains(chipIndex) else { return }
+                    self.openPath(chips[chipIndex].item.path, target: .finder)
+                },
+                onSecondary: { [weak self] chipIndex, action in
+                    guard let self, chips.indices.contains(chipIndex) else { return }
+                    switch action {
+                    case .editor: self.openPath(chips[chipIndex].item.path, target: .editor)
+                    case .terminal: self.openPath(chips[chipIndex].item.path, target: .terminal)
+                    }
                 }
-            }
-            return cell
-        case .folder(let item):
-            let cell = reuse(LauncherFolderCell.self, row: row)
-            cell.configure(
-                item: item,
-                theme: cardTheme,
-                showsEditor: editorAppURL != nil,
-                missing: !FileManager.default.fileExists(atPath: item.path)
-            ) { [weak self] action in
-                guard let self else { return }
-                switch action {
-                case .row: self.openPath(item.path, target: .finder)
-                case .editor: self.openPath(item.path, target: .editor)
-                case .terminal: self.openPath(item.path, target: .terminal)
-                }
-            }
-            return cell
-        case .recent(let item):
-            let cell = reuse(LauncherFolderCell.self, row: row)
-            cell.configure(
-                item: FolderItem(path: item.path, name: URL(fileURLWithPath: item.path).lastPathComponent, tag: ""),
-                theme: cardTheme,
-                showsEditor: editorAppURL != nil,
-                missing: !FileManager.default.fileExists(atPath: item.path),
-                leadingIcon: "clock"
-            ) { [weak self] action in
-                guard let self else { return }
-                switch action {
-                case .row: self.openPath(item.path, target: .finder)
-                case .editor: self.openPath(item.path, target: .editor)
-                case .terminal: self.openPath(item.path, target: .terminal)
-                }
-            }
+            )
             return cell
         case .app(let item):
             let cell = reuse(LauncherAppCell.self, row: row)
@@ -713,109 +841,188 @@ final class LauncherHeaderCell: NSView {
     }
 }
 
-/// Folder / recent row: tag dot, name, parent path, editor + terminal buttons.
-final class LauncherFolderCell: NSView {
-    enum Action { case row, editor, terminal }
+enum FolderChipAction { case editor, terminal }
 
+/// One wrapping grid line of folder chips (single-line Folders layout).
+final class LauncherChipLineCell: NSView {
+    private var chipViews: [FolderChipView] = []
+
+    func configure(
+        chips: [LauncherPanelController.FolderChip],
+        theme: CardTheme,
+        selectedIndex: Int?,
+        onActivate: @escaping (Int) -> Void,
+        onSecondary: @escaping (Int, FolderChipAction) -> Void
+    ) {
+        chipViews.forEach { $0.removeFromSuperview() }
+        chipViews.removeAll()
+        for (index, chip) in chips.enumerated() {
+            let view = FolderChipView(frame: NSRect(x: chip.x, y: 2, width: chip.width, height: 26))
+            view.configure(chip: chip, theme: theme, selected: index == selectedIndex) {
+                onActivate(index)
+            } onSecondary: { action in
+                onSecondary(index, action)
+            }
+            addSubview(view)
+            chipViews.append(view)
+        }
+    }
+}
+
+/// A single folder chip: leading glyph, title, one-level path suffix. The
+/// leading glyph is replaced by editor/terminal mini-buttons while hovered.
+final class FolderChipView: NSView {
     private let dot = NSView()
-    private let folderIcon = NSImageView()
+    private let glyphView = NSImageView()
     private let nameLabel = NSTextField(labelWithString: "")
-    private let pathLabel = NSTextField(labelWithString: "")
-    private let editorButton = HoverIconButton(frame: .zero)
-    private let terminalButton = HoverIconButton(frame: .zero)
-    private var onAction: ((Action) -> Void)?
+    private let suffixLabel = NSTextField(labelWithString: "")
+    private let editorButton = NSButton()
+    private let terminalButton = NSButton()
     private var hoverArea: NSTrackingArea?
+    private var onActivate: (() -> Void)?
+    private var onSecondary: ((FolderChipAction) -> Void)?
+    private var theme: CardTheme = .dark
+    private var isTaggedChip = false
+    private var isSelectedChip = false
     private var didLayout = false
+
+    override var isFlipped: Bool { true }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let hoverArea { removeTrackingArea(hoverArea) }
         let area = NSTrackingArea(
-            rect: bounds, options: [.mouseEnteredAndExited, .activeAlways],
+            rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
             owner: self, userInfo: nil
         )
         addTrackingArea(area)
         hoverArea = area
     }
 
-    override func mouseDown(with event: NSEvent) { onAction?(.row) }
-
-    func configure(
-        item: LauncherPanelController.FolderItem,
-        theme: CardTheme,
-        showsEditor: Bool,
-        missing: Bool,
-        leadingIcon: String? = nil,
-        _ handler: @escaping (Action) -> Void
-    ) {
-        onAction = handler
-        alphaValue = missing ? 0.45 : 1.0
-        if !didLayout {
-            didLayout = true
-            dot.wantsLayer = true
-            dot.layer?.cornerRadius = 3
-            dot.frame = NSRect(x: 16, y: 13, width: 6, height: 6)
-            addSubview(dot)
-            folderIcon.frame = NSRect(x: 13, y: 8, width: 15, height: 15)
-            addSubview(folderIcon)
-
-            nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
-            addSubview(nameLabel)
-
-            pathLabel.font = .systemFont(ofSize: 11)
-            // Head truncation keeps the LEAF directories when tight (user
-            // preference): "…/sd/Seas/个人" instead of cutting the tail.
-            pathLabel.lineBreakMode = .byTruncatingHead
-            pathLabel.cell?.usesSingleLineMode = true
-            pathLabel.cell?.wraps = false
-            pathLabel.alignment = .right
-            addSubview(pathLabel)
-
-            terminalButton.frame = NSRect(x: 448, y: 5, width: 22, height: 22)
-            terminalButton.toolTip = "Open in Terminal"
-            addSubview(terminalButton)
-
-            editorButton.frame = NSRect(x: 474, y: 5, width: 22, height: 22)
-            editorButton.toolTip = "Open in Editor"
-            addSubview(editorButton)
-        }
-        nameLabel.stringValue = item.name
-        // Single line: name left (capped at 340pt), path right-aligned in
-        // the remaining run-up to the action buttons.
-        nameLabel.sizeToFit()
-        let nameWidth = min(nameLabel.frame.width, 340)
-        nameLabel.frame = NSRect(x: 30, y: 9, width: nameWidth, height: 15)
-        let pathX = 30 + nameWidth + 12
-        pathLabel.frame = NSRect(x: pathX, y: 10, width: max(440 - pathX, 40), height: 13)
-        if let leadingIcon {
-            dot.isHidden = true
-            folderIcon.isHidden = false
-            folderIcon.image = lucideImage(for: leadingIcon, title: item.name, color: theme.secondaryText)
-        } else {
-            dot.layer?.backgroundColor = item.tag.isEmpty
-                ? NSColor.clear.cgColor
-                : tagColor(for: item.tag, dark: theme.isDark).cgColor
-            dot.isHidden = item.tag.isEmpty
-            folderIcon.isHidden = true
-        }
-        nameLabel.textColor = theme.foreground
-        pathLabel.textColor = theme.secondaryText
-
-        editorButton.isHidden = !showsEditor
-        if let editorImage = lucideImage(for: "code", title: "Editor", color: theme.iconTint) {
-            editorButton.image = editorImage
-        }
-        if let terminalImage = lucideImage(for: "terminal", title: "Terminal", color: theme.iconTint) {
-            terminalButton.image = terminalImage
-        }
-        editorButton.target = self
-        editorButton.action = #selector(editorClicked)
-        terminalButton.target = self
-        terminalButton.action = #selector(terminalClicked)
+    override func mouseEntered(with event: NSEvent) {
+        applyBackground(hovering: true)
+        glyphView.isHidden = true
+        dot.isHidden = true
+        editorButton.isHidden = false
+        terminalButton.isHidden = false
     }
 
-    @objc private func editorClicked() { onAction?(.editor) }
-    @objc private func terminalClicked() { onAction?(.terminal) }
+    override func mouseExited(with event: NSEvent) {
+        applyBackground(hovering: false)
+        editorButton.isHidden = true
+        terminalButton.isHidden = true
+        glyphView.isHidden = isTaggedChip
+        dot.isHidden = !isTaggedChip
+    }
+
+    override func mouseDown(with event: NSEvent) { onActivate?() }
+
+    func configure(
+        chip: LauncherPanelController.FolderChip,
+        theme: CardTheme,
+        selected: Bool,
+        onActivate: @escaping () -> Void,
+        onSecondary: @escaping (FolderChipAction) -> Void
+    ) {
+        self.theme = theme
+        self.isTaggedChip = chip.kind == .tagged
+        self.isSelectedChip = selected
+        self.onActivate = onActivate
+        self.onSecondary = onSecondary
+        if !didLayout {
+            didLayout = true
+            wantsLayer = true
+            layer?.cornerRadius = 7
+
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = 3
+            dot.frame = NSRect(x: 11, y: 10, width: 6, height: 6)
+            addSubview(dot)
+
+            glyphView.frame = NSRect(x: 7, y: 6, width: 14, height: 14)
+            addSubview(glyphView)
+
+            nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
+            addSubview(nameLabel)
+
+            suffixLabel.font = .systemFont(ofSize: 10)
+            suffixLabel.textColor = theme.tertiaryText
+            addSubview(suffixLabel)
+
+            for (button, icon, action) in [
+                (editorButton, "code", FolderChipAction.editor),
+                (terminalButton, "terminal", FolderChipAction.terminal),
+            ] {
+                button.isBordered = false
+                button.title = ""
+                button.setButtonType(.momentaryChange)
+                if var image = lucideImage(for: icon, title: "", color: theme.iconTint) {
+                    image.size = NSSize(width: 11, height: 11)
+                    button.image = image
+                }
+                button.target = self
+                button.action = #selector(secondaryClicked(_:))
+                button.identifier = NSUserInterfaceItemIdentifier(
+                    action == .editor ? "editor" : "terminal"
+                )
+                button.frame = NSRect(
+                    x: action == .editor ? 2 : 15, y: 7, width: 12, height: 12
+                )
+                addSubview(button)
+            }
+        }
+        editorButton.isHidden = true
+        terminalButton.isHidden = true
+
+        nameLabel.stringValue = chip.item.name
+        nameLabel.textColor = theme.foreground
+        let nameWidth = min(
+            (chip.item.name as NSString)
+                .size(withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium)]).width,
+            190
+        )
+        nameLabel.frame = NSRect(x: 28, y: 6, width: nameWidth, height: 14)
+
+        if let suffix = chip.suffix {
+            suffixLabel.stringValue = suffix
+            suffixLabel.isHidden = false
+            let suffixX = 28 + nameWidth + 5
+            suffixLabel.frame = NSRect(
+                x: suffixX, y: 7, width: max(chip.width - suffixX - 7, 12), height: 12
+            )
+        } else {
+            suffixLabel.isHidden = true
+        }
+
+        switch chip.kind {
+        case .favorite:
+            glyphView.image = lucideImage(for: "folder", title: chip.item.name, color: theme.secondaryText)
+            glyphView.isHidden = false
+            dot.isHidden = true
+        case .recent:
+            glyphView.image = lucideImage(for: "clock", title: chip.item.name, color: theme.secondaryText)
+            glyphView.isHidden = false
+            dot.isHidden = true
+        case .tagged:
+            glyphView.isHidden = true
+            dot.isHidden = false
+            dot.layer?.backgroundColor = tagColor(for: chip.item.tag, dark: theme.isDark).cgColor
+        }
+        applyBackground(hovering: false)
+    }
+
+    private func applyBackground(hovering: Bool) {
+        wantsLayer = true
+        layer?.cornerRadius = 7
+        layer?.backgroundColor = isSelectedChip
+            ? theme.selectedFill.cgColor
+            : (hovering ? theme.hoverFill.cgColor : NSColor.clear.cgColor)
+    }
+
+    @objc private func secondaryClicked(_ sender: NSButton) {
+        onSecondary?(sender.identifier?.rawValue == "editor" ? .editor : .terminal)
+    }
+
 }
 
 /// Selection capsule row view (selectedFill on activation).
