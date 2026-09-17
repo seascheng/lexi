@@ -14,18 +14,27 @@ settings DB migrations, bundler.
 
 ## Key findings (do not re-derive)
 
-1. **TCC trust resolves through the parent bundle.** The helper, living at
+1. **Event-tap userInfo must be recovered with
+   `Unmanaged<T>.fromOpaque(userInfo).takeUnretainedValue()`** — never
+   `assumingMemoryBound(to:).pointee`. `toOpaque()` is the instance's own
+   address; `.pointee` reinterprets the object header (isa + refcount) as
+   a reference → PAC-fault SIGSEGV on first callback. Cost: a 30-minute
+   crash-loop that masqueraded as "selection stopped working" (7 crash
+   reports, d9d74ef fixed).
+2. **AX reads never in the tap callback** — hand to a worker queue; set
+   `AXUIElementSetMessagingTimeout` ~0.3s; re-arm on
+   `tapDisabledByTimeout`.
+3. **TCC trust resolves through the parent bundle.** The helper, living at
    `Lexi.app/Contents/Resources/native/LexiSelectionHelper.app`, CAN create
    session event taps — probe at startup logs `EVENTTAP probe: ok`
    (`probeEventTapAccess` in SelectionToolbarHelper.swift). The
-   "must re-grant accessibility" fear was wrong. This unblocks the whole
-   remaining migration.
-2. **Swift CGEventTapLocation** has no `.cgSessionTap` in the current SDK —
+   "must re-grant accessibility" fear was wrong.
+4. **Swift CGEventTapLocation** has no `.cgSessionTap` in the current SDK —
    use `CGEventTapLocation(rawValue: 1)`.
-3. **`CGEventTapEnable`** is replaced by `CGEvent.tapEnable(tap:enable:)`.
-4. **Theme payload serde** must be `rename_all = "camelCase"` (Swift
+5. **`CGEventTapEnable`** is replaced by `CGEvent.tapEnable(tap:enable:)`.
+6. **Theme payload serde** must be `rename_all = "camelCase"` (Swift
    Decodable silently nils snake_case optionals — cost a session).
-5. **Watchdog + QUITTING flag**: helper Quit posts `quit-lexi`; Rust sets
+7. **Watchdog + QUITTING flag**: helper Quit posts `quit-lexi`; Rust sets
    `QUITTING` so the watchdog never resurrects the helper mid-shutdown.
 
 ## Migrated (commits 18a9864 → 0f3008a)
