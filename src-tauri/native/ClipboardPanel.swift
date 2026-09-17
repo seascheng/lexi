@@ -474,9 +474,13 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     private func layoutChrome(height: CGFloat) {
         layoutChipsRow()
         scrollActiveChipVisible()
+        // Symmetric breathing room: 6pt from the chips pill's bottom edge to
+        // the first row, and 6pt from the last row to the footer label
+        // (footerY + 5). The viewport therefore equals the row total exactly
+        // — no phantom slack, no clipping at the last capsule.
         let listY = 46 + PanelDesign.pillHeight + 4 + 6
-        let listHeight = height - listY - 24
-        scrollView.frame = NSRect(x: 0, y: listY + 4, width: Self.panelWidth, height: listHeight - 8)
+        scrollView.frame = NSRect(x: 0, y: listY, width: Self.panelWidth, height: height - listY - 25)
+        let listHeight = height - listY - 25
         // Empty state floats in the MIDDLE of the content area, not pinned
         // under the chips.
         emptyLabel.frame = NSRect(
@@ -494,7 +498,10 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     /// ceiling than the launcher — multi-line previews need the room).
     private var panelHeight: CGFloat {
         let listHeight = min(rows.reduce(0.0) { $0 + rowHeight(for: $1) }, Self.maxListHeight)
-        let chrome = 46 + PanelDesign.pillHeight + 4 + 6 + 24 + 10 // search + chips + gap + footer + pad
+        // search(46) + chips(24+4) + gap(6) + list(Σ) + footer zone(25 =
+        // 6pt list gap + footer label) — matches layoutChrome exactly, so
+        // the viewport equals the row total and nothing scrolls short lists.
+        let chrome = 46 + PanelDesign.pillHeight + 4 + 6 + 25
         return min(max(chrome + max(listHeight, Self.singleLineHeight * 3), 200), 560)
     }
 
