@@ -93,10 +93,9 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         panel.hasShadow = true
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let (background, content, _) = makePanelBackground(
             frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 240),
-            cornerRadius: 14
+            cornerRadius: 22
         )
         panel.contentView = background
         glassContent = content
@@ -210,12 +209,11 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     }
 
     private func styleChrome() {
-        // Contrast scrim: raw NSGlassEffectView washes out on dark
-        // wallpapers — a theme-tinted veil under the content keeps every
-        // label legible (Raycast/Spotlight use the same trick).
+        // Contrast scrim (TinyCast values): dark 40% black / light 55%
+        // white, painted between the vibrancy material and the content.
         glassContent.layer?.backgroundColor = (cardTheme.isDark
-            ? NSColor.black.withAlphaComponent(0.30)
-            : NSColor.white.withAlphaComponent(0.42)).cgColor
+            ? NSColor.black.withAlphaComponent(0.40)
+            : NSColor.white.withAlphaComponent(0.55)).cgColor
         emptyLabel.textColor = cardTheme.tertiaryText
         syncTabButtons()
     }

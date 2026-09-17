@@ -112,23 +112,27 @@ func makePanelBackground(
     cornerRadius: CGFloat
 ) -> (background: NSView, content: NSView, isGlass: Bool) {
     if #available(macOS 26.0, *) {
-        let glass = NSGlassEffectView(frame: frame)
-        glass.autoresizingMask = [.width, .height]
-        glass.cornerRadius = cornerRadius
-        // Key-window focus ring: when the panel becomes key, AppKit paints
-        // the system focus stroke around the glass's RECTANGULAR frame — a
-        // square outline visible outside the rounded glass. Noise on a
-        // floating utility surface: rings off, and clip the layer to the
-        // same radius so any system edge follows the arc, not the frame.
-        glass.focusRingType = .none
-        glass.wantsLayer = true
-        glass.layer?.cornerRadius = cornerRadius
-        glass.layer?.masksToBounds = true
-        let content = NSView(frame: glass.bounds)
+        // TinyCast's proven recipe: on macOS 26+ the system renders
+        // NSVisualEffectView materials AS Liquid Glass, with its own
+        // contrast adaptation. A raw NSGlassEffectView is a nearly clear
+        // sheet that washes out on dark wallpapers (the original complaint);
+        // .hudWindow + the theme scrim painted on `content` (between the
+        // material and the content, exactly TinyCast's layer order) keeps
+        // every panel legible on any background.
+        let vibrancy = NSVisualEffectView(frame: frame)
+        vibrancy.autoresizingMask = [.width, .height]
+        vibrancy.material = .hudWindow
+        vibrancy.blendingMode = .behindWindow
+        vibrancy.state = .active
+        vibrancy.wantsLayer = true
+        vibrancy.layer?.cornerRadius = cornerRadius
+        vibrancy.layer?.masksToBounds = true
+        let content = NSView(frame: vibrancy.bounds)
         content.autoresizingMask = [.width, .height]
+        content.wantsLayer = true
         content.focusRingType = .none
-        glass.contentView = content
-        return (glass, content, true)
+        vibrancy.addSubview(content)
+        return (vibrancy, content, true)
     }
     let vibrancy = NSVisualEffectView(frame: frame)
     vibrancy.autoresizingMask = [.width, .height]
@@ -2846,8 +2850,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         // Contrast scrim: raw glass washes out on dark wallpapers — a
         // theme-tinted veil under the content keeps panels legible anywhere.
         let scrim = (theme == .dark
-            ? NSColor.black.withAlphaComponent(0.30)
-            : NSColor.white.withAlphaComponent(0.42)).cgColor
+            ? NSColor.black.withAlphaComponent(0.40)
+            : NSColor.white.withAlphaComponent(0.55)).cgColor
         container.layer?.borderColor = (theme == .dark
             ? NSColor.white.withAlphaComponent(0.22)
             : NSColor.black.withAlphaComponent(0.20)).cgColor
