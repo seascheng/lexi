@@ -358,7 +358,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         chipsContent.frame = NSRect(
             x: 0, y: 0,
             width: max(x, chipsScrollView.contentSize.width),
-            height: PanelDesign.pillHeight + 8
+            height: PanelDesign.pillHeight + 4 // == viewport: no vertical scroll
         )
         scrollActiveChipVisible()
     }
@@ -761,14 +761,31 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             let cell = reuse(ClipCell.self, row: row)
             cell.configureNote(
                 note: note, theme: cardTheme, height: rowHeight(for: rows[row]),
-                sourceIcon: Self.noteGlyph)
+                sourceIcon: tagColoredNoteGlyph())
             return cell
         }
     }
 
-    /// Shared note glyph for note rows (lucide notebook-pen).
+    /// Fallback note glyph (lucide notebook-pen, neutral grey).
     static let noteGlyph: NSImage? = lucideImage(
         for: "notebook-pen", title: "note", color: .systemGray)
+
+    private var noteIconCache: [String: NSImage] = [:]
+
+    /// Note rows wear their category's dot color — the glyph matches the
+    /// active tab chip. Cached per (tag, theme); clipboard tab rows never
+    /// use this path.
+    private func tagColoredNoteGlyph() -> NSImage? {
+        guard case .tag(let name) = tab else { return Self.noteGlyph }
+        let key = "\(name)-\(cardTheme.isDark)"
+        if let cached = noteIconCache[key] { return cached }
+        guard let image = lucideImage(
+            for: "notebook-pen", title: name,
+            color: tagColor(for: name, dark: cardTheme.isDark)
+        ) else { return Self.noteGlyph }
+        noteIconCache[key] = image
+        return image
+    }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         let view = tableView.makeView(
@@ -964,8 +981,11 @@ final class ChipPillView: NSView {
         applyTheme(theme)
     }
 
+    private var isAddStyle = false
+
     /// The ＋ button chip: centered plus glyph, no dot.
     func configureAdd(onActivate: @escaping () -> Void) {
+        isAddStyle = true
         self.onActivate = onActivate
         chipColor = .clear
         if !didLayout {
@@ -996,9 +1016,15 @@ final class ChipPillView: NSView {
 
     override func layout() {
         super.layout()
-        // Label fills everything right of the dot; the chip-row flow sizes
-        // the chip with slack (fittingSize +40) so the text never clips.
-        label.frame = NSRect(x: 24, y: 4, width: bounds.width - 32, height: 16)
+        if isAddStyle {
+            // Centered plus across the full chip — the dot-side formula
+            // computes a ZERO width at the 32pt add chip (invisible ＋).
+            label.frame = NSRect(x: 0, y: 4, width: bounds.width, height: 16)
+        } else {
+            // Label fills everything right of the dot; the chip-row flow
+            // sizes the chip with slack (fittingSize +40) so text never clips.
+            label.frame = NSRect(x: 24, y: 4, width: bounds.width - 32, height: 16)
+        }
     }
 
     override func updateTrackingAreas() {
