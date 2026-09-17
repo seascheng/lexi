@@ -136,9 +136,12 @@ final class ShortcutMonitor {
 
     private func installTap() {
         let callback: CGEventTapCallBack = { _, type, event, userInfo in
-            guard let monitor = userInfo?.assumingMemoryBound(to: ShortcutMonitor.self).pointee else {
-                return Unmanaged.passRetained(event)
-            }
+            // `toOpaque()` yields the instance's OWN address — recover the
+            // reference with fromOpaque/takeUnretainedValue. Reading it via
+            // `.pointee` reinterprets the object header (isa + refcount)
+            // as a reference: a garbage pointer that crashed on first use.
+            guard let userInfo else { return Unmanaged.passRetained(event) }
+            let monitor = Unmanaged<ShortcutMonitor>.fromOpaque(userInfo).takeUnretainedValue()
             return monitor.handle(type: type, event: event)
         }
         let mask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)

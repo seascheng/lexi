@@ -43,14 +43,16 @@ final class SelectionPipeline {
 
     private func installTap() {
         let callback: CGEventTapCallBack = { _, type, event, userInfo in
-            guard let pipeline = userInfo?.assumingMemoryBound(to: SelectionPipeline.self).pointee else {
-                return Unmanaged.passRetained(event)
-            }
+            // Same recovery rule as ShortcutMonitor: fromOpaque + take
+            // unretained — `.pointee` on the instance's own address reads
+            // the object header as a reference (crash).
+            guard let userInfo else { return Unmanaged.passRetained(event) }
+            let pipeline = Unmanaged<SelectionPipeline>.fromOpaque(userInfo).takeUnretainedValue()
             if type == .tapDisabledByTimeout {
                 // A slow callback (AX before the worker hand-off existed)
                 // killed taps; re-arm keeps the pipeline alive.
-                if let tap = pipeline.tap {
-                    DispatchQueue.main.async { CGEvent.tapEnable(tap: tap, enable: true) }
+                DispatchQueue.main.async {
+                    CGEvent.tapEnable(tap: pipeline.tap!, enable: true)
                 }
                 return Unmanaged.passRetained(event)
             }
