@@ -39,9 +39,19 @@ final class SelectionPipeline {
         excludedApps = LexiStore.excludedToolbarApps()
     }
 
+    private let workQueue = DispatchQueue(label: "lexi.selection.ax", qos: .userInitiated)
+
     private func installTap() {
         let callback: CGEventTapCallBack = { _, type, event, userInfo in
             guard let pipeline = userInfo?.assumingMemoryBound(to: SelectionPipeline.self).pointee else {
+                return Unmanaged.passRetained(event)
+            }
+            if type == .tapDisabledByTimeout {
+                // A slow callback (AX before the worker hand-off existed)
+                // killed taps; re-arm keeps the pipeline alive.
+                if let tap = pipeline.tap {
+                    DispatchQueue.main.async { CGEvent.tapEnable(tap: tap, enable: true) }
+                }
                 return Unmanaged.passRetained(event)
             }
             pipeline.observe(type: type, event: event)
@@ -49,7 +59,7 @@ final class SelectionPipeline {
         }
         let mask = (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.leftMouseUp.rawValue)
         guard let machPort = CGEvent.tapCreate(
-            tap: CGEventTapLocation(rawValue: 1) ?? .cghidEventTap,
+            tap: CGEventTapLocation(rawValue: 1) ?? .cghidEventTap, // kCGSessionEventTap
             place: .headInsertEventTap,
             options: .listenOnly, // passive: clicks always pass through
             eventsOfInterest: CGEventMask(mask),
@@ -71,7 +81,13 @@ final class SelectionPipeline {
         case .leftMouseDown:
             downLocation = event.location
         case .leftMouseUp:
-            handleMouseUp(up: event.location)
+            // Never read AX inside the tap callback: remote apps can take
+            // the full messaging timeout, which both freezes this run loop
+            // and gets the tap killed by the system. Hand off to a worker.
+            let up = event.location
+            workQueue.async { [weak self] in
+                self?.handleMouseUp(up: up)
+            }
         default:
             break
         }
@@ -80,32 +96,42 @@ final class SelectionPipeline {
     private func handleMouseUp(up upLocation: CGPoint) {
         guard enabled else { return }
         // Drag detection: a moved mouse is a drag/scroll gesture, not a
-        // selection click.
+        // selection click. (Layer-1 rule: click selections only; Rust's
+        // richer drag logic migrates in Layer 2.)
         if let down = downLocation {
             let dx = upLocation.x - down.x, dy = upLocation.y - down.y
-            guard dx * dx + dy * dy < 64 else { return } // 8pt
+            if dx * dx + dy * dy >= 64 {
+                FileLog.write("SEL1 skip: drag dx=\(Int(dx)) dy=\(Int(dy))")
+                return
+            }
         }
 
         // Cocoa coords (bottom-left origin) for panel placement.
         let maxY = NSScreen.screens.map(\.frame.maxY).max() ?? upLocation.y
         let cocoa = NSPoint(x: upLocation.x, y: maxY - upLocation.y)
         for frame in ownFrames() where frame.contains(cocoa) {
+            FileLog.write("SEL1 skip: own frame at \(Int(cocoa.x)),\(Int(cocoa.y))")
             return
         }
 
         // Excluded apps (bundle ids, e.g. Finder).
-        if let bundle = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-           excludedApps.contains(bundle) {
+        let frontBundle = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"
+        if excludedApps.contains(frontBundle) {
+            FileLog.write("SEL1 skip: excluded app \(frontBundle)")
             return
         }
 
         let text = Self.readSelectedText()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty else {
+            FileLog.write("SEL1 skip: no AX text (front=\(frontBundle))")
+            return
+        }
 
         // The screen containing the cursor converts CG (top-left) to Cocoa
         // (bottom-left) coordinates for the panel placement path.
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(cocoa) }) else { return }
         let cocoaPoint = NSPoint(x: upLocation.x, y: screen.frame.maxY - upLocation.y)
+        FileLog.write("SEL1 fire: len=\(text.count) front=\(frontBundle)")
         DispatchQueue.main.async { [weak self] in
             self?.onSelection?(text, cocoaPoint)
         }
@@ -120,6 +146,10 @@ final class SelectionPipeline {
         guard AXUIElementCopyAttributeValue(
             system, kAXFocusedUIElementAttribute as CFString, &focused
         ) == .success, let element = focused else { return nil }
+
+        // Remote apps get a short leash: the default 6s timeout would stall
+        // the worker queue on a hung app.
+        AXUIElementSetMessagingTimeout(element as! AXUIElement, 0.3)
 
         // Core Foundation objects are auto-managed in Swift — no CFRelease.
         var value: CFTypeRef?
