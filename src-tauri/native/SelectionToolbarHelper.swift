@@ -1086,7 +1086,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         probeEventTapAccess()
         shortcutMonitor = ShortcutMonitor(
             onLauncher: { [weak self] in self?.launcherController.show() },
-            onClipboard: { [weak self] in self?.clipboardController.show() }
+            onClipboard: { [weak self] in self?.showClipboardPanel() }
         )
         // Clipboard capture: own store + 0.5s poller, started once the TCP
         // server is up so suspend/resume posts can flow both ways.
@@ -1136,6 +1136,22 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             return nil
         }
         return arguments[index + 1]
+    }
+
+    /// The clipboard shortcut's local path: refresh the notes snapshot from
+    /// the shared DB (the tag tabs read it) and present the panel. This
+    /// replaces Rust's show_clipboard (send_card_notes + /clipboard-show).
+    func showClipboardPanel() {
+        let rows = LexiStore.notes(limit: 50)
+        var tags = Set<String>()
+        for note in rows { tags.formUnion(note.tags) }
+        handleCardNotes(CardNotesPayload(
+            notes: rows.map {
+                CardNotesPayload.Note(id: $0.id, name: $0.name, tags: $0.tags, content: $0.content)
+            },
+            allTags: tags.sorted()
+        ))
+        clipboardController.show()
     }
 
     private func terminateOlderHelperInstances() {
@@ -4296,15 +4312,27 @@ private final class NoteRowView: NSTableRowView {
     }
 }
 
-private struct CardNotesPayload: Decodable {
+struct CardNotesPayload: Decodable {
     var allTags: [String]?
     struct Note: Decodable {
         let id: Int64?
         let name: String
         let tags: [String]?
         let content: String
+
+        init(id: Int64? = nil, name: String, tags: [String]? = nil, content: String) {
+            self.id = id
+            self.name = name
+            self.tags = tags
+            self.content = content
+        }
     }
     let notes: [Note]
+
+    init(notes: [Note], allTags: [String]? = nil) {
+        self.notes = notes
+        self.allTags = allTags
+    }
 }
 
 private struct CardReviewPayload: Decodable {

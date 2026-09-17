@@ -1124,15 +1124,40 @@ enum ClipboardPaster {
     /// accepting a keystroke (tinycast activationDelay).
     private static let activationDelay: TimeInterval = 0.08
 
+    /// LaunchServices activation — `NSRunningApplication.activate()` is
+    /// silently ignored for background (.accessory) callers on macOS 14+
+    /// (same bug the launcher fixed in de2910d): the paste then landed in
+    /// whatever held key focus (the result card's input bar). The paste is
+    /// posted from the activation completion — a fixed delay raced the
+    /// async LS roundtrip.
+    private static func activateThenPaste(_ app: NSRunningApplication?) {
+        guard let app else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay) {
+                postCommandV()
+            }
+            return
+        }
+        var config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        guard let bundleURL = app.bundleURL else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay) {
+                postCommandV()
+            }
+            return
+        }
+        NSWorkspace.shared.openApplication(at: bundleURL, configuration: config) { _, _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay) {
+                postCommandV()
+            }
+        }
+    }
+
     @discardableResult
     static func paste(
         _ item: ClipboardItem, store: ClipboardStore, previousApp: NSRunningApplication?
     ) -> Bool {
         guard write(item, store: store) else { return false }
-        previousApp?.activate()
-        DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay) {
-            postCommandV()
-        }
+        activateThenPaste(previousApp)
         return true
     }
 
@@ -1146,12 +1171,10 @@ enum ClipboardPaster {
         pb.clearContents()
         pb.declareTypes([.string, ClipboardMonitor.internalType], owner: nil)
         pb.setString(text, forType: .string)
-        previousApp?.activate()
-        DispatchQueue.main.asyncAfter(deadline: .now() + activationDelay) {
-            postCommandV()
-        }
+        activateThenPaste(previousApp)
         return true
     }
+
 
     /// Flavor sets by kind — a file carries BOTH `public.file-url` (file
     /// takers receive the file) and `.string` with the PATH (text fields and
