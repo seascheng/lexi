@@ -491,6 +491,10 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     }
 
     private func activateApp(_ item: RunningAppItem) {
+        // macOS 14+: a background accessory process's activate() is silently
+        // ignored — step THIS process to the front first, then the target
+        // app's activation lands (the standard launcher recipe).
+        NSApp.activate(ignoringOtherApps: true)
         if #available(macOS 14.0, *) {
             _ = item.app.activate()
         } else {
@@ -598,7 +602,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
                 theme: cardTheme,
                 showsEditor: editorAppURL != nil,
                 missing: false,
-                iconInsteadOfDot: true
+                leadingIcon: "folder"
             ) { [weak self] action in
                 guard let self else { return }
                 switch action {
@@ -630,7 +634,8 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
                 item: FolderItem(path: item.path, name: URL(fileURLWithPath: item.path).lastPathComponent, tag: ""),
                 theme: cardTheme,
                 showsEditor: editorAppURL != nil,
-                missing: !FileManager.default.fileExists(atPath: item.path)
+                missing: !FileManager.default.fileExists(atPath: item.path),
+                leadingIcon: "clock"
             ) { [weak self] action in
                 guard let self else { return }
                 switch action {
@@ -724,7 +729,7 @@ final class LauncherFolderCell: NSView {
         theme: CardTheme,
         showsEditor: Bool,
         missing: Bool,
-        iconInsteadOfDot: Bool = false,
+        leadingIcon: String? = nil,
         _ handler: @escaping (Action) -> Void
     ) {
         onAction = handler
@@ -766,10 +771,10 @@ final class LauncherFolderCell: NSView {
         nameLabel.frame = NSRect(x: 30, y: 9, width: nameWidth, height: 15)
         let pathX = 30 + nameWidth + 12
         pathLabel.frame = NSRect(x: pathX, y: 10, width: max(440 - pathX, 40), height: 13)
-        if iconInsteadOfDot {
+        if let leadingIcon {
             dot.isHidden = true
             folderIcon.isHidden = false
-            folderIcon.image = lucideImage(for: "folder", title: item.name, color: theme.secondaryText)
+            folderIcon.image = lucideImage(for: leadingIcon, title: item.name, color: theme.secondaryText)
         } else {
             dot.layer?.backgroundColor = item.tag.isEmpty
                 ? NSColor.clear.cgColor
