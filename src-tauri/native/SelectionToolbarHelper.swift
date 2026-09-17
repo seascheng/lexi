@@ -186,26 +186,34 @@ func makePanelBackground(
 ) -> (background: NSView, content: NSView, isGlass: Bool) {
     let cornerRadius = surface.cornerRadius
     if #available(macOS 26.0, *) {
-        let vibrancy = NSVisualEffectView(frame: frame)
+        // The glass material is composited by the WINDOW SERVER and ignores
+        // cornerRadius set on the vibrancy view's own layer — the square
+        // backdrop behind rounded corners. A real composited mask (what
+        // SwiftUI clipShape does under TinyCast) is required: a clipping
+        // superview whose layer rounds AND clips the vibrancy child.
+        let clip = NSView(frame: frame)
+        clip.autoresizingMask = [.width, .height]
+        clip.wantsLayer = true
+        clip.layer?.cornerRadius = cornerRadius
+        clip.layer?.masksToBounds = true
+        let vibrancy = NSVisualEffectView(frame: clip.bounds)
         vibrancy.autoresizingMask = [.width, .height]
         vibrancy.material = .hudWindow
         PanelStyle.register(vibrancy)
         vibrancy.blendingMode = .behindWindow
         vibrancy.state = .active
-        vibrancy.wantsLayer = true
-        vibrancy.layer?.cornerRadius = cornerRadius
-        vibrancy.layer?.masksToBounds = true
-        let content = NSView(frame: vibrancy.bounds)
+        clip.addSubview(vibrancy)
+        let content = NSView(frame: clip.bounds)
         content.autoresizingMask = [.width, .height]
         content.wantsLayer = true
         content.focusRingType = .none
-        vibrancy.addSubview(content)
-        return (vibrancy, content, true)
+        clip.addSubview(content)
+        return (clip, content, true)
     }
-    let vibrancy = NSVisualEffectView(frame: frame)
-    vibrancy.autoresizingMask = [.width, .height]
     // PopClip-style frosted bar: the material adapts to whatever is behind
     // it; the accent stroke keeps the edge legible over any background.
+    let vibrancy = NSVisualEffectView(frame: frame)
+    vibrancy.autoresizingMask = [.width, .height]
     vibrancy.material = .menu
     vibrancy.blendingMode = .behindWindow
     vibrancy.state = .active

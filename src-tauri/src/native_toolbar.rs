@@ -265,12 +265,22 @@ static CARD_AUTO_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::Atomic
 static LAST_THEME: std::sync::LazyLock<Mutex<String>> =
     std::sync::LazyLock::new(|| Mutex::new("dark".to_string()));
 
+/// Panel style (blur/opacity) from the last frontend push. Helper restarts
+/// wipe the helper's live PanelStyle state — without this cache every
+/// watchdog re-push reverted the user's Appearance settings.
+static LAST_PANEL_STYLE: std::sync::LazyLock<Mutex<(Option<u8>, Option<String>)>> =
+    std::sync::LazyLock::new(|| Mutex::new((None, None)));
+
 fn push_theme_to_helper(toolbar_port: u16) {
     let theme = LAST_THEME
         .lock()
         .map(|t| t.clone())
         .unwrap_or_else(|_| "dark".to_string());
-    let Ok(body) = serde_json::to_string(&ToolbarThemePayload { theme, panel_opacity: None, panel_blur: None }) else {
+    let (panel_opacity, panel_blur) = LAST_PANEL_STYLE
+        .lock()
+        .map(|style| style.clone())
+        .unwrap_or((None, None));
+    let Ok(body) = serde_json::to_string(&ToolbarThemePayload { theme, panel_opacity, panel_blur }) else {
         return;
     };
     for attempt in 0..5 {
@@ -1036,6 +1046,9 @@ pub fn set_native_toolbar_theme(
     let theme = if theme == "light" { "light" } else { "dark" };
     if let Ok(mut cached) = LAST_THEME.lock() {
         *cached = theme.to_string();
+    }
+    if let Ok(mut style) = LAST_PANEL_STYLE.lock() {
+        *style = (panel_opacity, panel_blur.clone());
     }
     let port = TOOLBAR_PORT
         .get_or_init(|| Mutex::new(None))
