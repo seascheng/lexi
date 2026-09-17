@@ -119,16 +119,52 @@ enum PanelStyle {
         }
     }
 
-    /// Theme-tinted veil between the glass material and the content
-    /// (TinyCast `panelScrim`).
-    static func scrim(dark: Bool) -> NSColor {
-        dark
-            ? NSColor.black.withAlphaComponent(0.40)
-            : NSColor.white.withAlphaComponent(0.55)
+    /// Frost level (Settings → Appearance). Native vibrancy has no
+    /// continuous blur radius — the material IS the blur knob.
+    enum Blur: String {
+        case clear, frosted, solid
+
+        var material: NSVisualEffectView.Material {
+            switch self {
+            case .clear: return .hudWindow
+            case .frosted: return .sheet
+            case .solid: return .sidebar
+            }
+        }
     }
 
-    /// Control-surface stroke (chips, inputs). The PANEL edge itself is the
-    /// glass's own highlight — panels carry no painted border on macOS 26+.
+    /// Live, user-configurable surface state pushed over /theme.
+    /// `opacity` is the scrim alpha for the dark theme (default 0.40);
+    /// light scales it ×1.375 to preserve the shipped look.
+    static var opacity: CGFloat = 0.40
+    static var blur: Blur = .clear
+
+    /// Every live surface material view (weak) — blur changes retune them
+    /// without rebuilding panels.
+    private static var materialViews: [WeakMaterialView] = []
+    private struct WeakMaterialView { weak var view: NSVisualEffectView? }
+
+    static func register(_ view: NSVisualEffectView) {
+        materialViews.append(WeakMaterialView(view: view))
+        view.material = blur.material
+    }
+
+    static func update(opacity newOpacity: CGFloat?, blur newBlur: Blur?) {
+        if let newOpacity { opacity = newOpacity }
+        if let newBlur { blur = newBlur }
+        materialViews.removeAll { $0.view == nil }
+        materialViews.forEach { $0.view?.material = blur.material }
+    }
+
+    /// Theme-tinted veil between the glass material and the content
+    /// (TinyCast `panelScrim`), at the user's opacity.
+    static func scrim(dark: Bool) -> NSColor {
+        let base = min(max(opacity, 0.10), 0.90)
+        let alpha = dark ? base : min(base * 1.375, 0.95)
+        return dark
+            ? NSColor.black.withAlphaComponent(alpha)
+            : NSColor.white.withAlphaComponent(alpha)
+    }
     static func controlBorder(dark: Bool) -> NSColor {
         dark
             ? NSColor.white.withAlphaComponent(0.12)
@@ -153,6 +189,7 @@ func makePanelBackground(
         let vibrancy = NSVisualEffectView(frame: frame)
         vibrancy.autoresizingMask = [.width, .height]
         vibrancy.material = .hudWindow
+        PanelStyle.register(vibrancy)
         vibrancy.blendingMode = .behindWindow
         vibrancy.state = .active
         vibrancy.wantsLayer = true
@@ -2728,6 +2765,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
            let bodyData = body.data(using: .utf8),
            let payload = try? JSONDecoder().decode(ThemePayload.self, from: bodyData) {
             DispatchQueue.main.async {
+                PanelStyle.update(
+                    opacity: payload.panelOpacity.map { CGFloat($0 / 100.0) },
+                    blur: payload.panelBlur.flatMap(PanelStyle.Blur.init(rawValue:))
+                )
                 self.applyTheme(payload.theme)
             }
             return
@@ -4452,9 +4493,6 @@ extension SelectionToolbarApp: NSTextViewDelegate {
     }
 }
 
-private struct ThemePayload: Decodable {
-    let theme: String
-}
 
 
 private struct NotesShowPayload: Decodable {
@@ -4545,5 +4583,11 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
             pasteboard.setString(displayedNotes[selected].content, forType: .string)
         }
     }
+}
+
+private struct ThemePayload: Decodable {
+    let theme: String
+    var panelOpacity: Double?
+    var panelBlur: String?
 }
 

@@ -470,6 +470,8 @@ function seedWords(): WordEntry[] {
 function parseSettingValue(key: string, value: string) {
   if (key === "toolbarEnabled") return value === "true";
   if (key === "windowOpacity") return parseWindowOpacity(value);
+  if (key === "panelOpacity") return parsePanelOpacity(value);
+  if (key === "panelBlur") return value === "frosted" || value === "solid" ? value : DEFAULT_SETTINGS.panelBlur;
   if (key === "excludedToolbarApps") {
     try { return JSON.parse(value); } catch { return []; }
   }
@@ -513,6 +515,13 @@ function parseWindowOpacity(value: string) {
   if (!Number.isFinite(parsed)) return DEFAULT_SETTINGS.windowOpacity;
   return Math.min(100, Math.max(0, Math.round(parsed)));
 }
+
+function parsePanelOpacity(value: string) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_SETTINGS.panelOpacity;
+  return Math.min(90, Math.max(10, Math.round(parsed)));
+}
+
 
 function parseWindowPosition(value: string | null | undefined): WindowPosition | null {
   if (!value) return null;

@@ -1,6 +1,6 @@
 import { Sun, Moon, Check, Palette, PanelTop, Cog, Sparkles, Info } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import type { AccentColor, AppSettings, BackgroundStyle, DockMode } from "../types";
+import type { AccentColor, AppSettings, BackgroundStyle, DockMode, PanelBlur } from "../types";
 import { applyAppearanceSettings, normalizedOpacity } from "../lib/appearance";
 import { saveSettings } from "../lib/database";
 import { errorMessage } from "../lib/errors";
@@ -205,6 +205,30 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
                     style={{ "--slider-fill": `${opacity}%` } as CSSProperties}
                     type="range"
                     value={opacity}
+                  />
+                </Field>
+                <FieldDivider />
+                <Field label="Panel blur" inline hint="Frost level of the native panels.">
+                  <Select
+                    onChange={(event) => setDraft({ ...draft, panelBlur: event.target.value as PanelBlur })}
+                    value={draft.panelBlur}
+                  >
+                    <option value="clear">Clear</option>
+                    <option value="frosted">Frosted</option>
+                    <option value="solid">Solid</option>
+                  </Select>
+                </Field>
+                <FieldDivider />
+                <Field label="Panel opacity" inline hint={`${draft.panelOpacity}%`}>
+                  <input
+                    className="lexi-slider"
+                    max={90}
+                    min={10}
+                    onChange={(event) => setDraft({ ...draft, panelOpacity: Number(event.target.value) })}
+                    step={5}
+                    style={{ "--slider-fill": `${((draft.panelOpacity - 10) / 80) * 100}%` } as CSSProperties}
+                    type="range"
+                    value={draft.panelOpacity}
                   />
                 </Field>
               </SettingsCard>

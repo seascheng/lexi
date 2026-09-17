@@ -157,6 +157,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   accentColor: "default",
   customAccentColor: "#3b82f6",
   windowOpacity: 100,
+  panelOpacity: 40,
+  panelBlur: "clear",
   backgroundStyle: "macos_glass_clear",
   dockMode: "dock_and_menu_bar",
   toolbarEnabled: true,

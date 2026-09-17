@@ -62,7 +62,11 @@ function MainWindow() {
       }
     });
     if (isTauriRuntime()) {
-      void invoke("set_native_toolbar_theme", { theme: settings.theme }).catch(
+      void invoke("set_native_toolbar_theme", {
+        theme: settings.theme,
+        panelOpacity: settings.panelOpacity,
+        panelBlur: settings.panelBlur,
+      }).catch(
         (error) => {
           console.warn("Failed to sync native toolbar theme", error);
         },

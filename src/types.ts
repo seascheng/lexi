@@ -2,6 +2,7 @@ export type AppTheme = "dark" | "light";
 export type AccentColor = "default" | "blue" | "green" | "red" | "orange" | "purple" | "custom";
 export type DockMode = "dock_and_menu_bar" | "menu_bar_only";
 export type BackgroundStyle = "solid" | "transparent" | "macos_glass_clear";
+export type PanelBlur = "clear" | "frosted" | "solid";
 export type WordStatus = "new" | "learning" | "mastered";
 export type ReviewRating = "again" | "hard" | "good" | "easy";
 export type AiFeatureKind = "translation" | "custom";
@@ -42,6 +43,8 @@ export interface AppSettings {
   accentColor: AccentColor;
   customAccentColor: string;
   windowOpacity: number;
+  panelOpacity: number;
+  panelBlur: PanelBlur;
   backgroundStyle: BackgroundStyle;
   dockMode: DockMode;
   toolbarEnabled: boolean;

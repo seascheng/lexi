@@ -270,7 +270,7 @@ fn push_theme_to_helper(toolbar_port: u16) {
         .lock()
         .map(|t| t.clone())
         .unwrap_or_else(|_| "dark".to_string());
-    let Ok(body) = serde_json::to_string(&ToolbarThemePayload { theme }) else {
+    let Ok(body) = serde_json::to_string(&ToolbarThemePayload { theme, panel_opacity: None, panel_blur: None }) else {
         return;
     };
     for attempt in 0..5 {
@@ -933,6 +933,10 @@ struct ToolbarShowPayload {
 #[derive(Serialize)]
 struct ToolbarThemePayload {
     theme: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    panel_opacity: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    panel_blur: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -1024,7 +1028,11 @@ fn read_toolbar_enabled_from_sqlite(path: &Path) -> Option<bool> {
 }
 
 #[tauri::command]
-pub fn set_native_toolbar_theme(theme: String) -> Result<(), String> {
+pub fn set_native_toolbar_theme(
+    theme: String,
+    panel_opacity: Option<u8>,
+    panel_blur: Option<String>,
+) -> Result<(), String> {
     let theme = if theme == "light" { "light" } else { "dark" };
     if let Ok(mut cached) = LAST_THEME.lock() {
         *cached = theme.to_string();
@@ -1037,6 +1045,8 @@ pub fn set_native_toolbar_theme(theme: String) -> Result<(), String> {
         .ok_or_else(|| "native toolbar port is not ready".to_string())?;
     let body = serde_json::to_string(&ToolbarThemePayload {
         theme: theme.to_string(),
+        panel_opacity,
+        panel_blur,
     })
     .map_err(|error| format!("Could not serialize toolbar theme: {error}"))?;
 
