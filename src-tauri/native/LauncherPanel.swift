@@ -475,27 +475,43 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     private func buildAppRows() -> [Row] {
         let filter = filterText
         let own = ProcessInfo.processInfo.processIdentifier
+        let helperBundleId = Bundle.main.bundleIdentifier
+        // .regular = Dock apps, .accessory = menu-bar apps the user runs
+        // (剪贴板/翻译工具等). .prohibited (system agents) stay excluded.
         var apps = NSWorkspace.shared.runningApplications.filter { app in
-            app.activationPolicy == .regular
+            (app.activationPolicy == .regular || app.activationPolicy == .accessory)
                 && app.bundleIdentifier != nil
+                && app.bundleIdentifier != helperBundleId
                 && app.processIdentifier != own
                 && (filter.isEmpty
                     || (app.localizedName ?? "").lowercased().contains(filter))
         }
         let front = apps.first { $0.isActive }
         apps.removeAll { $0 == front }
-        apps.sort { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+        // Frontmost first, then Dock apps, then menu-bar accessories; each
+        // group alphabetical.
+        apps.sort {
+            if $0.activationPolicy != $1.activationPolicy {
+                return $0.activationPolicy == .regular
+            }
+            return ($0.localizedName ?? "").lowercased() < ($1.localizedName ?? "").lowercased()
+        }
         if let front { apps.insert(front, at: 0) }
         return apps.map { RunningAppItem(app: $0, name: $0.localizedName ?? $0.bundleIdentifier ?? "?") }
             .map { Row.app($0) }
     }
 
     private func activateApp(_ item: RunningAppItem) {
-        // macOS 14+: a background accessory process's activate() is silently
-        // ignored — step THIS process to the front first, then the target
-        // app's activation lands (the standard launcher recipe).
+        // LaunchServices activation (the `open -a` path) fronts an already-
+        // running app reliably; NSRunningApplication.activate() alone is
+        // silently ignored on macOS 14+ for background callers — WeChat was
+        // the repro. bundleURL fallback covers odd app bundles.
         NSApp.activate(ignoringOtherApps: true)
-        if #available(macOS 14.0, *) {
+        if let url = item.app.bundleURL {
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in }
+        } else if #available(macOS 14.0, *) {
             _ = item.app.activate()
         } else {
             _ = item.app.activate(options: [.activateIgnoringOtherApps])
