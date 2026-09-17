@@ -2142,7 +2142,20 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         if id == "notes" {
             postAction(action: "panel-notes", text: "-")
         } else if id == "review" {
-            postAction(action: "panel-review", text: "-")
+            loadReviewWord()
+        }
+    }
+
+    /// Card review tab: fetch the next due word locally (Rust no longer
+    /// round-trips the queue or the SM-2 grade).
+    private func loadReviewWord() {
+        if let next = LexiStore.nextReviewWord() {
+            handleCardReview(CardReviewPayload(word: .init(
+                id: next.id, word: next.word, translation: next.translation,
+                pos: next.pos, entryType: next.entryType
+            )))
+        } else {
+            handleCardReview(CardReviewPayload(word: nil))
         }
     }
 
@@ -2289,11 +2302,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     @objc private func gradeClicked(_ sender: NSButton) {
         let ratings = ["again", "hard", "good", "easy"]
-        let payload: [String: Any] = ["id": reviewCurrentWordId, "rating": ratings[sender.tag]]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let body = String(data: data, encoding: .utf8) else { return }
+        guard reviewCurrentWordId != 0 else { return }
         reviewGradeButtons.forEach { $0.isEnabled = false; $0.alphaValue = 0.4 }
-        postAction(action: "review-grade", text: body)
+        LexiStore.applyReviewGrade(id: reviewCurrentWordId, rating: ratings[sender.tag])
+        loadReviewWord()
     }
 
     func handleResultEvent(_ payload: ResultEventPayload) {

@@ -171,3 +171,166 @@ extension LexiStore {
         sqlite3_step(statement)
     }
 }
+
+struct LexiWord: Identifiable, Hashable {
+    let id: Int64
+    let word: String
+    let translation: String
+    let pos: String
+    let definition: String
+    let example: String
+    let status: String
+    let entryType: String
+    let note: String
+    let reviewCount: Int
+    let nextReview: String?
+}
+
+extension LexiStore {
+    /// Paged, searched word list. Empty search + nil status = whole table.
+    static func words(search: String, status: String?, offset: Int, limit: Int) -> [LexiWord] {
+        guard let db = open() else { return [] }
+        defer { sqlite3_close(db) }
+
+        var clauses: [String] = []
+        var bindings: [String] = []
+        let trimmed = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            clauses.append("(word LIKE ?1 OR translation LIKE ?1)")
+            bindings.append("%\(trimmed)%")
+        }
+        if let status, !status.isEmpty {
+            clauses.append("status = ?\(bindings.count + 1)")
+            bindings.append(status)
+        }
+        let whereSQL = clauses.isEmpty ? "" : "WHERE " + clauses.joined(separator: " AND ")
+        let sql = "SELECT id, word, translation, IFNULL(pos,''), IFNULL(definition,''), IFNULL(example,''), status, IFNULL(entry_type,'word'), IFNULL(note,''), review_count, strftime('%Y-%m-%d', next_review) FROM words \(whereSQL) ORDER BY created_at DESC, id DESC LIMIT \(limit) OFFSET \(offset);"
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(statement) }
+        for (index, value) in bindings.enumerated() {
+            sqlite3_bind_text(statement, Int32(index + 1), value, -1, SQLITE_TRANSIENT)
+        }
+
+        var rows: [LexiWord] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            func text(_ i: Int32) -> String {
+                guard let cString = sqlite3_column_text(statement, i) else { return "" }
+                return String(cString: cString)
+            }
+            let nextReview: String?
+            if sqlite3_column_type(statement, 10) == SQLITE_NULL {
+                nextReview = nil
+            } else {
+                nextReview = text(10)
+            }
+            rows.append(LexiWord(
+                id: sqlite3_column_int64(statement, 0),
+                word: text(1), translation: text(2), pos: text(3),
+                definition: text(4), example: text(5), status: text(6),
+                entryType: text(7), note: text(8),
+                reviewCount: Int(sqlite3_column_int(statement, 9)),
+                nextReview: nextReview
+            ))
+        }
+        return rows
+    }
+
+    /// Row counts per status — the filter chips and the review badge.
+    static func wordCounts() -> [String: Int] {
+        guard let db = open() else { return [:] }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT status, COUNT(*) FROM words GROUP BY status;", -1, &statement, nil) == SQLITE_OK else { return [:] }
+        defer { sqlite3_finalize(statement) }
+        var counts: [String: Int] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let cString = sqlite3_column_text(statement, 0) else { continue }
+            counts[String(cString: cString)] = Int(sqlite3_column_int(statement, 1))
+        }
+        return counts
+    }
+
+    /// Words due for review (the card Review tab's queue rule).
+    static func nextReviewWord() -> LexiWord? {
+        guard let db = open() else { return nil }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "SELECT id, word, translation, IFNULL(pos,''), IFNULL(definition,''), IFNULL(example,''), status, IFNULL(entry_type,'word'), IFNULL(note,''), review_count, strftime('%Y-%m-%d', next_review) FROM words WHERE status != 'mastered' AND (next_review IS NULL OR next_review <= date('now')) ORDER BY RANDOM() LIMIT 1;",
+            -1, &statement, nil
+        ) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        func text(_ i: Int32) -> String {
+            guard let cString = sqlite3_column_text(statement, i) else { return "" }
+            return String(cString: cString)
+        }
+        let nextReview: String? = sqlite3_column_type(statement, 10) == SQLITE_NULL ? nil : text(10)
+        return LexiWord(
+            id: sqlite3_column_int64(statement, 0),
+            word: text(1), translation: text(2), pos: text(3),
+            definition: text(4), example: text(5), status: text(6),
+            entryType: text(7), note: text(8),
+            reviewCount: Int(sqlite3_column_int(statement, 9)),
+            nextReview: nextReview
+        )
+    }
+
+    /// How many words the review queue holds right now.
+    static func dueReviewCount() -> Int {
+        guard let db = open() else { return 0 }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "SELECT COUNT(*) FROM words WHERE status != 'mastered' AND (next_review IS NULL OR next_review <= date('now'));",
+            -1, &statement, nil
+        ) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int(statement, 0))
+    }
+
+    /// Apply an SM-2 schedule and persist it (idempotent per word state).
+    static func applyReviewGrade(id: Int64, rating: String) {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "SELECT review_count, ease_factor, interval FROM words WHERE id = ?1;", -1, &statement, nil
+ ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, id)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return }
+        let count = Int(sqlite3_column_int(statement, 0))
+        let ease = sqlite3_column_double(statement, 1)
+        let interval = Int(sqlite3_column_int(statement, 2))
+
+        let next = SM2.schedule(rating: rating, ease: ease, interval: interval, count: count)
+        var update: OpaquePointer?
+        let sql = "UPDATE words SET status = ?, review_count = ?, next_review = ?, ease_factor = ?, interval = ? WHERE id = ?;"
+        guard sqlite3_prepare_v2(db, sql, -1, &update, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(update) }
+        sqlite3_bind_text(update, 1, next.status, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(update, 2, Int32(next.reviewCount))
+        sqlite3_bind_text(update, 3, next.nextReview, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(update, 4, next.easeFactor)
+        sqlite3_bind_int(update, 5, Int32(next.interval))
+        sqlite3_bind_int64(update, 6, id)
+        sqlite3_step(update)
+    }
+
+    static func deleteWord(id: Int64) {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM words WHERE id = ?1;", -1, &statement, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, id)
+        sqlite3_step(statement)
+    }
+}
