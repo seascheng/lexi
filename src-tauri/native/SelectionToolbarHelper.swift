@@ -3028,6 +3028,31 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             return
         }
 
+        if request.hasPrefix("POST /debug-shot") {
+            // /debug-shot?tab=vocabulary — navigate, settle, snapshot to /tmp.
+            let tabName = request
+                .components(separatedBy: " ")[1]
+                .components(separatedBy: "?tab=").last?
+                .components(separatedBy: " ").first?
+                .components(separatedBy: "&").first ?? "general"
+            let tab = SettingsTab.allCases.first { $0.name == tabName } ?? .general
+            DispatchQueue.main.async {
+                self.showSettingsWindow(tab: tab)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    MainActor.assumeIsolated {
+                        guard let png = self.settingsWindowController?.snapshotPNG() else {
+                            FileLog.write("SHOT fail: no window")
+                            return
+                        }
+                        let path = "/tmp/lexi-settings-\(tab.name).png"
+                        try? png.write(to: URL(fileURLWithPath: path))
+                        FileLog.write("SHOT saved path=\(path) bytes=\(png.count)")
+                    }
+                }
+            }
+            return
+        }
+
         if request.hasPrefix("GET /debug-state ") || request.hasPrefix("POST /debug-state ") {
             DispatchQueue.main.async {
                 let runs = self.cardRuns.map { "\($0.id)|\($0.status)|len=\($0.text.count)" }.joined(separator: "; ")

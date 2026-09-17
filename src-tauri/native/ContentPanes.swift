@@ -17,6 +17,10 @@ final class NotebookModel {
 
     private var all: [LexiNote] = []
 
+    /// Eager first load — the hosting structure does not reliably
+    /// deliver onAppear (same rationale as VocabularyModel.init).
+    init() { reload() }
+
     func reload() {
         all = LexiStore.notes()
         var tags = Set<String>()
@@ -47,25 +51,27 @@ struct NotebookPane: View {
     @State private var model = NotebookModel()
 
     var body: some View {
-        Group {
-            if model.allTags.isEmpty && model.displayed.isEmpty {
-                ContentUnavailableView(
-                    "No notes",
-                    systemImage: "notebook-pen",
-                    description: Text("Use the toolbar's Note action — selections land here with their tag.")
-                )
-            } else {
-                HSplitView {
-                    noteList
-                        .frame(minWidth: 260, idealWidth: 320)
-                    noteDetail
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 0) {
+            filterBar
+            Group {
+                if model.allTags.isEmpty && model.displayed.isEmpty {
+                    ContentUnavailableView(
+                        "No notes",
+                        systemImage: "notebook-pen",
+                        description: Text("Use the toolbar's Note action — selections land here with their tag.")
+                    )
+                } else {
+                    HStack(spacing: 0) {
+                        noteList
+                            .frame(width: 280)
+                        Divider()
+                        noteDetail
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .safeAreaInset(edge: .top, spacing: 0) { filterBar }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { model.reload() }
     }
 
     private var filterBar: some View {
@@ -297,6 +303,7 @@ struct ConfigsPane: View {
 // MARK: - Feature editor sheet
 
 struct FeatureEditor: View {
+    @Environment(\.dismiss) private var dismiss
     @State private var draft: LexiFeatureRow
     let onSave: (LexiFeatureRow) -> Void
     let onDelete: (LexiFeatureRow) -> Void
@@ -311,25 +318,14 @@ struct FeatureEditor: View {
         VStack(spacing: 0) {
             Form {
                 Section("Feature") {
-                    LabeledContent("Name") {
-                        TextField("Translate", text: $draft.name)
+                    TextField("Name", text: $draft.name)
+                    Picker("Output", selection: $draft.outputMode) {
+                        Text("Plain text").tag("plain_text")
+                        Text("Translation JSON").tag("translation_json")
                     }
-                    LabeledContent("Output") {
-                        Picker("", selection: $draft.outputMode) {
-                            Text("Plain text").tag("plain_text")
-                            Text("Translation JSON").tag("translation_json")
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 260)
-                    }
-                    LabeledContent("Icon") {
-                        TextField("wand", text: $draft.icon)
-                            .frame(width: 120)
-                    }
-                    LabeledContent("Target language") {
-                        TextField("Chinese", text: $draft.targetLanguage)
-                            .frame(width: 200)
-                    }
+                    .pickerStyle(.menu)
+                    TextField("Icon (Lucide name)", text: $draft.icon)
+                    TextField("Target language", text: $draft.targetLanguage)
                 }
                 Section {
                     TextEditor(text: $draft.promptTemplate)
@@ -342,7 +338,7 @@ struct FeatureEditor: View {
                 } footer: {
                     Text("{{text}} is the selection; {{targetLanguage}} the language above.")
                 }
-                Section {
+                Section("Behavior") {
                     Toggle("Enabled", isOn: $draft.enabled)
                     Toggle("Auto-save single words to vocabulary", isOn: $draft.autoSave)
                     Toggle("Deep thinking mode (slower first token)", isOn: $draft.thinking)
@@ -354,15 +350,16 @@ struct FeatureEditor: View {
                 if !draft.isBuiltin {
                     Button("Delete", role: .destructive) {
                         onDelete(draft)
+                        dismiss()
                     }
                 }
                 Spacer()
                 Button("Cancel") {
-                    NSApp.keyWindow?.endEditing(for: nil)
-                    NSApp.keyWindow?.close()
+                    dismiss()
                 }
                 Button("Save") {
                     onSave(draft)
+                    dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
             }

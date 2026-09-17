@@ -20,11 +20,17 @@ final class VocabularyModel {
 
     var canLoadMore: Bool { rows.count < total }
 
+    /// Eager: the pane's hosting structure (NSHostingView inside a split
+    /// item) does not reliably deliver onAppear, so the first load must
+    /// not depend on view lifecycle callbacks.
+    init() { reload() }
+
     func reload() {
         offset = 0
         counts = LexiStore.wordCounts()
         total = counts.values.reduce(0, +)
         rows = LexiStore.words(search: search, status: statusFilter, offset: 0, limit: pageSize)
+        FileLog.write("VOCAB reload total=\(total) rows=\(rows.count)")
     }
 
     func loadMore() {
@@ -52,52 +58,52 @@ struct VocabularyPane: View {
     @State private var selectedWord: LexiWord?
 
     var body: some View {
-        Group {
-            if model.total == 0 {
-                ContentUnavailableView(
-                    "No words yet",
-                    systemImage: "book",
-                    description: Text("Select a word anywhere and run Translate — single words save automatically.")
-                )
-            } else {
-                Table(model.rows) {
-                    TableColumn("Word") { row in
-                        Text(row.word).fontWeight(.medium)
-                    }
-                    TableColumn("Translation") { row in
-                        Text(row.translation).lineLimit(1)
-                    }
-                    TableColumn("Type") { row in
-                        Text(row.entryType.capitalized).foregroundStyle(.secondary)
-                    }
-                    TableColumn("Status") { row in
-                        Text(row.status.capitalized)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background((row.status == "mastered" ? Color.green : Color.orange).opacity(0.18), in: Capsule())
-                    }
-                    TableColumn("Reviews") { row in
-                        Text("\(row.reviewCount)").monospacedDigit()
-                    }
-                    TableColumn("Next") { row in
-                        Text(row.nextReview ?? "now").foregroundStyle(.secondary)
-                    }
-                }
-                .overlay(alignment: .bottom) {
-                    if model.canLoadMore {
-                        Button("Load more (\(model.rows.count)/\(model.filteredTotal))") {
-                            model.loadMore()
+        VStack(spacing: 0) {
+            filterBar
+            Group {
+                if model.total == 0 {
+                    ContentUnavailableView(
+                        "No words yet",
+                        systemImage: "book",
+                        description: Text("Select a word anywhere and run Translate — single words save automatically.")
+                    )
+                } else {
+                    Table(model.rows) {
+                        TableColumn("Word") { row in
+                            Text(row.word).fontWeight(.medium)
                         }
-                        .controlSize(.small)
-                        .padding(.bottom, 8)
+                        TableColumn("Translation") { row in
+                            Text(row.translation).lineLimit(1)
+                        }
+                        TableColumn("Type") { row in
+                            Text(row.entryType.capitalized).foregroundStyle(.secondary)
+                        }
+                        TableColumn("Status") { row in
+                            Text(row.status.capitalized)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background((row.status == "mastered" ? Color.green : Color.orange).opacity(0.18), in: Capsule())
+                        }
+                        TableColumn("Reviews") { row in
+                            Text("\(row.reviewCount)").monospacedDigit()
+                        }
+                        TableColumn("Next") { row in
+                            Text(row.nextReview ?? "now").foregroundStyle(.secondary)
+                        }
+                    }
+                    .overlay(alignment: .bottom) {
+                        if model.canLoadMore {
+                            Button("Load more (\(model.rows.count)/\(model.filteredTotal))") {
+                                model.loadMore()
+                            }
+                            .controlSize(.small)
+                            .padding(.bottom, 8)
+                        }
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            filterBar
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contextMenu(forSelectionType: LexiWord.self) { ids in
             if let selected = ids.first, let word = model.rows.first(where: { $0 == selected }) {
                 Button("Delete “\(word.word)”", role: .destructive) {
@@ -142,8 +148,6 @@ struct VocabularyPane: View {
     }
 }
 
-// MARK: - Review
-
 @MainActor
 @Observable
 final class ReviewModel {
@@ -151,10 +155,15 @@ final class ReviewModel {
     var revealed = false
     var dueCount = 0
 
+    /// Eager first load — same hosting-structure rationale as
+    /// VocabularyModel.init.
+    init() { next() }
+
     func next() {
         current = LexiStore.nextReviewWord()
         revealed = false
         dueCount = LexiStore.dueReviewCount()
+        FileLog.write("REVIEW next word=\(current?.word ?? "nil") due=\(dueCount)")
     }
 
     func grade(_ rating: String) {

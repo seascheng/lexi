@@ -79,6 +79,24 @@ enum SettingsTab: CaseIterable, Identifiable {
 
     var id: Self { self }
 
+    /// Lowercase route name — the /debug-shot tab parameter.
+    var name: String {
+        switch self {
+        case .general: "general"
+        case .appearance: "appearance"
+        case .ai: "ai"
+        case .shortcuts: "shortcuts"
+        case .vocabulary: "vocabulary"
+        case .review: "review"
+        case .notebook: "notebook"
+        case .configs: "configs"
+        case .toolbar: "toolbar"
+        case .card: "card"
+        case .clipboard: "clipboard"
+        case .launcher: "launcher"
+        }
+    }
+
     var title: String {
         switch self {
         case .general: "General"
@@ -381,6 +399,17 @@ final class LexiSettingsWindowController: NSObject, NSWindowDelegate {
         LexiActivationPolicy.enter()
         window.makeKeyAndOrderFront(nil)
         return true
+    }
+
+    /// Renders the window's content view to PNG data — own-window capture
+    /// needs no screen-recording permission (used by /debug-shot for
+    /// layout verification on this headless-debugging setup).
+    func snapshotPNG() -> Data? {
+        guard let content = window?.contentView else { return nil }
+        let rect = content.bounds
+        guard let rep = content.bitmapImageRepForCachingDisplay(in: rect) else { return nil }
+        content.cacheDisplay(in: rect, to: rep)
+        return rep.representation(using: .png, properties: [:])
     }
 
     // MARK: - NSWindowDelegate
