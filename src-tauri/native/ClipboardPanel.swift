@@ -743,11 +743,10 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         reload()
     }
 
-    /// Wired by the app controller: called BEFORE the paste-through, so the
-    /// result card can be dismissed too — the activation step would
-    /// otherwise pull it (the helper's other key panel) to the front and
-    /// the synthesized ⌘V would land in its input bar.
-    var onPasteThrough: (() -> Void)?
+    /// Each panel is independent: paste-through closes THIS panel only.
+    /// The card/toolbar/launcher manage their own visibility. macOS's
+    /// NSPanel focus handling (nonactivatingPanel + windowDidResignKey)
+    /// handles cross-panel dismissal naturally.
 
     private func pasteSelected() {
         FileLog.write("PASTE enter tab=\(tab)")
@@ -768,11 +767,8 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 
     private func pasteClipboardSelection() {
         guard let store, let item = selectedItem else { return }
-        // Our own surfaces go away FIRST: NSApp.activate (the launcher
-        // recipe inside ClipboardPaster) brings the helper's key panel
-        // forward — with the card gone, nothing of ours can steal focus.
+        // Close this panel; the target app activation + ⌘V handle the rest.
         hide(notify: true)
-        onPasteThrough?()
         if !ClipboardPaster.paste(item, store: store, previousApp: previousApp),
            item.kind == .file {
             // A vanished file is reported, never silently swallowed and never
@@ -784,7 +780,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     private func pasteNoteSelection() {
         guard let note = selectedNote else { return }
         hide(notify: true)
-        onPasteThrough?()
         ClipboardPaster.pasteString(note.content, previousApp: previousApp)
     }
 

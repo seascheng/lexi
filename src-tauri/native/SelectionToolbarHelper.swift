@@ -987,14 +987,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         controller.onAction = { [weak self] action, text in
             self?.postAction(action: action, text: text)
         }
-        // Paste-through dismisses the card too: NSApp.activate would pull
-        // the helper's other key panel forward and the ⌘V would land in
-        // its input bar instead of the target app.
-        controller.onPasteThrough = { [weak self] in
-            // Every surface of ours retires — nothing can surface-jump
-            // while the target app takes focus (PanelCoordinator policy).
-            self?.panels.dismissAll()
-        }
         return controller
     }()
     private var notesContainer: NSView!
@@ -1122,25 +1114,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         selectionPipeline?.start()
     }
 
-    /// The single presentation gate for every panel.
-    private lazy var panels: PanelCoordinator = {
-        let coordinator = PanelCoordinator()
-        coordinator.hideToolbar = { [weak self] in
-            self?.hidePanel(force: true)
-        }
-        coordinator.hideLauncher = { [weak self] in
-            self?.launcherController.hide(notify: false)
-        }
-        coordinator.hideClipboard = { [weak self] in
-            self?.clipboardController.hide(notify: false)
-        }
-        coordinator.hideCard = { [weak self] in
-            guard let self, self.resultPanel.isVisible else { return }
-            self.resultPanel.orderOut(nil)
-            self.postAction(action: "card-hidden", text: "-")
-        }
-        return coordinator
-    }()
+    /// Audit trail for which surface the user last interacted with.
+    /// Panels are independent — no hide callbacks, no cross-panel policy.
+    private lazy var panels: PanelCoordinator = PanelCoordinator()
 
     /// Global keyboard shortcuts (launcher + clipboard), in-process.
     private var shortcutMonitor: ShortcutMonitor?
@@ -1182,9 +1158,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             },
             allTags: tags.sorted()
         )
-        handleCardNotes(payload)
-        // The clipboard panel's tag tabs read the same snapshot — the
-        // route forwards it; the local path must too (missed in c596fea).
         clipboardController.updateNotes(
             notes: payload.notes.map {
                 ClipboardNote(
