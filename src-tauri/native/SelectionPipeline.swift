@@ -46,7 +46,10 @@ final class SelectionPipeline {
     private var lastCopied: (text: String, at: Date)?
 
     func noteCopyCommand() {
-        workQueue.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+        // NSPasteboard is main-thread-only (Apple docs). The delay + read
+        // both hop to main; the work queue exists solely to keep the tap
+        // callback itself from blocking.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self else { return }
             let count = NSPasteboard.general.changeCount
             guard count > self.pasteboardBaseline else {

@@ -521,6 +521,92 @@ extension LexiStore {
     }
 }
 
+// MARK: - Actions table (normalized toolbar_tools)
+
+extension LexiStore {
+    /// Create the normalized actions table if absent and seed it from the
+    /// JSON blob (once). Dual-write keeps the blob alive for Rust readers
+    /// until the cutover deletes them.
+    static func migrateActionsTable() {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+
+        sqlite3_exec(db, """
+            CREATE TABLE IF NOT EXISTS actions (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                icon TEXT NOT NULL DEFAULT 'wand',
+                toolbar_enabled INTEGER NOT NULL DEFAULT 1,
+                toolbar_order INTEGER NOT NULL DEFAULT 100,
+                panel_enabled INTEGER NOT NULL DEFAULT 1,
+                panel_order INTEGER NOT NULL DEFAULT 100,
+                config TEXT NOT NULL DEFAULT '{}'
+            );
+            """, nil, nil, nil)
+
+        // Seed from the blob only when the table is empty.
+        var count: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM actions;", -1, &count, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(count) }
+        guard sqlite3_step(count) == SQLITE_ROW, sqlite3_column_int(count, 0) == 0 else { return }
+
+        for entry in toolbarTools() {
+            var insert: OpaquePointer?
+            guard sqlite3_prepare_v2(db, """
+                INSERT OR REPLACE INTO actions (id, name, icon, toolbar_enabled, toolbar_order, panel_enabled, panel_order, config)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
+                """, -1, &insert, nil) == SQLITE_OK else { continue }
+            defer { sqlite3_finalize(insert) }
+            if let configData = try? JSONSerialization.data(withJSONObject: entry.config),
+               let configJson = String(data: configData, encoding: .utf8) {
+                sqlite3_bind_text(insert, 1, entry.id, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(insert, 2, entry.name, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(insert, 3, entry.icon, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int(insert, 4, entry.enabled ? 1 : 0)
+                sqlite3_bind_int(insert, 5, Int32(entry.sortOrder))
+                sqlite3_bind_int(insert, 6, entry.panelEnabled ? 1 : 0)
+                sqlite3_bind_int(insert, 7, Int32(entry.panelSortOrder))
+                sqlite3_bind_text(insert, 8, configJson, -1, SQLITE_TRANSIENT)
+                sqlite3_step(insert)
+            }
+        }
+        FileLog.write("ACTIONS table seeded from blob")
+    }
+
+    /// Dual-write: the normalized table AND the legacy blob (for Rust).
+    static func saveAction(_ entry: LexiToolEntry) {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, """
+            INSERT OR REPLACE INTO actions (id, name, icon, toolbar_enabled, toolbar_order, panel_enabled, panel_order, config)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
+            """, -1, &statement, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+
+        if let configData = try? JSONSerialization.data(withJSONObject: entry.config),
+           let configJson = String(data: configData, encoding: .utf8) {
+            sqlite3_bind_text(statement, 1, entry.id, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 2, entry.name, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 3, entry.icon, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int(statement, 4, entry.enabled ? 1 : 0)
+            sqlite3_bind_int(statement, 5, Int32(entry.sortOrder))
+            sqlite3_bind_int(statement, 6, entry.panelEnabled ? 1 : 0)
+            sqlite3_bind_int(statement, 7, Int32(entry.panelSortOrder))
+            sqlite3_bind_text(statement, 8, configJson, -1, SQLITE_TRANSIENT)
+            sqlite3_step(statement)
+        }
+        // Also update the blob for Rust readers.
+        var tools = toolbarTools()
+        if let index = tools.firstIndex(where: { $0.id == entry.id }) {
+            tools[index] = entry
+        } else {
+            tools.append(entry)
+        }
+        saveToolbarTools(tools)
+    }
+}
+
 /// One entry of the shared action registry (`toolbar_tools` blob): the
 /// toolbar scope and the card's Actions-tab scope each read their columns.
 struct LexiToolEntry: Codable, Identifiable, Hashable {
@@ -550,6 +636,10 @@ extension LexiStore {
         guard let data = try? JSONEncoder().encode(entries),
               let raw = String(data: data, encoding: .utf8) else { return }
         setSetting("toolbar_tools", raw)
+        // Dual-write: also update the normalized actions table.
+        for entry in entries {
+            saveAction(entry)
+        }
     }
 
     /// App bundle ids where the selection toolbar stays hidden.
