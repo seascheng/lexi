@@ -759,6 +759,13 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         }
     }
 
+    /// Headless repro for the paste-through investigation: same path as
+    /// the panel's Enter, minus real key events.
+    func debugPasteSelected() {
+        tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        pasteSelected()
+    }
+
     private func pasteClipboardSelection() {
         guard let store, let item = selectedItem else { return }
         // Our own surfaces go away FIRST: NSApp.activate (the launcher

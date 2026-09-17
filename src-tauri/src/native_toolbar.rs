@@ -3142,6 +3142,14 @@ fn dispatch_toolbar_action(
         return Ok(());
     }
 
+    // Clipboard panel dismissal report — informational only (the Rust side
+    // has no clipboard panel state). MUST be in this table: unknown action
+    // names fall through to show_result_card, which opened the action
+    // panel with feature id "clipboard-hidden" on every paste-through.
+    if action.action == "clipboard-hidden" {
+        return Ok(());
+    }
+
     // Native settings window persisted shortcuts / toolbar toggle; the
     // event-tap statics re-read the database so changes apply immediately.
     if action.action == "reload-native-settings" {

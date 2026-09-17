@@ -2941,6 +2941,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             return
         }
 
+        if request.hasPrefix("POST /debug-paste-test ") {
+            DispatchQueue.main.async {
+                FileLog.write("PASTE test: route-driven pasteSelected")
+                self.clipboardController.debugPasteSelected()
+            }
+            return
+        }
+
         if request.hasPrefix("POST /clipboard-hide ") {
             DispatchQueue.main.async {
                 self.clipboardController.hide(notify: false)
