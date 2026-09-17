@@ -349,11 +349,16 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             chip.frame = NSRect(x: x, y: 4, width: max(chip.fittingSize.width, 40), height: PanelDesign.pillHeight)
             x = chip.frame.maxX + 6
         }
-        addChip.frame = NSRect(x: x, y: 4, width: 32, height: PanelDesign.pillHeight)
-        x = addChip.frame.maxX + 6
-        tagInputView.frame = NSRect(x: x, y: 4, width: tagInputView.fittingSize.width, height: PanelDesign.pillHeight)
         if tagInputVisible {
+            // The input takes the ＋'s slot IN PLACE — one normal chip-width
+            // step, same 6pt gap as every other chip.
+            tagInputView.frame = NSRect(x: x, y: 4, width: tagInputView.fittingSize.width, height: PanelDesign.pillHeight)
+            addChip.frame = tagInputView.frame
             x = tagInputView.frame.maxX + 6
+        } else {
+            addChip.frame = NSRect(x: x, y: 4, width: 32, height: PanelDesign.pillHeight)
+            tagInputView.frame = addChip.frame
+            x = addChip.frame.maxX + 6
         }
         chipsContent.frame = NSRect(
             x: 0, y: 0,
