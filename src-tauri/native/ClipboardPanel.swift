@@ -31,7 +31,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     private static let twoLineHeight: CGFloat = 50
     private static let headerHeight: CGFloat = 28
     private static let maxListHeight: CGFloat = 11 * ClipboardPanelController.twoLineHeight
-    private static let chromeHeight: CGFloat = 146 // search 12+26+8 + chips 24+8 + footer 24 + pads
     private static let side: CGFloat = PanelDesign.sideInset
 
     /// The note tag that absorbs untagged notes — seeded by migration 008.
@@ -65,8 +64,8 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     /// Which chip is active. `.clipboard` shows the history; `.tag(name)`
     /// shows that category's notes.
     private var tab: Tab = .clipboard
-    /// ⊕ flow: the search field temporarily collects the new category name.
-    private var creatingTag = false
+    /// Inline "new category" input at the end of the chip row.
+    private let tagInputView = ChipInputView()
 
     /// The app that was frontmost when the panel opened — the paste target.
     private var previousApp: NSRunningApplication?
@@ -177,7 +176,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         }
         previousApp = NSWorkspace.shared.frontmostApplication
         searchField.stringValue = ""
-        endTagCreation()
         tab = .clipboard
         syncChips()
         reload()
@@ -202,6 +200,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             : NSAppearance(named: .vibrantLight)
         styleChrome()
         for chip in chipViews { chip.view.applyTheme(cardTheme) }
+        tagInputView.applyTheme(cardTheme)
         tableView.reloadData()
     }
 
@@ -216,6 +215,9 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         searchField.wantsLayer = true
         searchField.delegate = self
         root.addSubview(searchField)
+
+        tagInputView.setup(theme: cardTheme, delegate: self)
+        root.addSubview(tagInputView)
 
         rebuildChips()
 
@@ -278,19 +280,14 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             add(.tag(tag), view)
         }
 
-        let addChip = ChipPillView(frame: NSRect(x: 0, y: 46, width: 32, height: PanelDesign.pillHeight))
-        addChip.configureAdd { [weak self] in
-            self?.beginTagCreation()
-        }
-        add(.add, addChip)
-
+        // The ⊕ affordance is the inline input chip placed after the tabs
+        // (see layoutChrome) — not a tab itself.
         syncChips()
     }
 
     private func selectTab(_ tab: Tab) {
         guard self.tab != tab else { return }
         self.tab = tab
-        endTagCreation()
         searchField.stringValue = ""
         syncChips()
         reload()
@@ -320,20 +317,57 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         footerRight.textColor = cardTheme.tertiaryText
     }
 
-    private func layoutChrome(height: CGFloat) {
-        var x = Self.side
-        for (kind, chip) in chipViews {
-            let width: CGFloat = kind == .add ? 32 : max(chip.fittingSize.width + 26, 56)
-            guard x + width <= Self.panelWidth - Self.side else {
-                chip.isHidden = true // overflow tags stay reachable by search
-                continue
+    /// Chip-row block height for the CURRENT tag set — layoutChrome measures
+    /// it; panelHeight consumes it. Search(46) + chips + 6 + list + footer.
+    private var chipsBlockHeight: CGFloat = PanelDesign.pillHeight + 6
+
+    /// Flows the tab chips + inline input into up to two lines (greedy):
+    /// line width is the panel minus side insets, 6pt gaps. The input always
+    /// lands on the last occupied line; chips that no longer fit stay hidden
+    /// (their notes remain reachable by search).
+    private func layoutChips() {
+        let maxWidth = Self.panelWidth - Self.side * 2
+        var lines: [[NSView]] = [[]]
+        var x: CGFloat = 0
+
+        func place(_ chip: NSView) {
+            let width = chip.fittingSize.width
+            if x > 0, x + width > maxWidth, lines.count < 2 {
+                lines.append([])
+                x = 0
+            }
+            if x + width > maxWidth {
+                chip.isHidden = true
+                return
             }
             chip.isHidden = false
-            chip.frame = NSRect(x: x, y: 46, width: width, height: PanelDesign.pillHeight)
-            x = chip.frame.maxX + 6
+            lines[lines.count - 1].append(chip)
+            x += width + 6
         }
-        scrollView.frame = NSRect(x: 0, y: 78, width: Self.panelWidth, height: height - Self.chromeHeight)
-        emptyLabel.frame = NSRect(x: Self.side, y: 78, width: Self.panelWidth - Self.side * 2, height: 40)
+
+        for (kind, chip) in chipViews {
+            chip.frame = NSRect(x: 0, y: 46, width: chip.fittingSize.width, height: PanelDesign.pillHeight)
+            place(chip)
+        }
+        tagInputView.frame = NSRect(x: 0, y: 46, width: tagInputView.fittingSize.width, height: PanelDesign.pillHeight)
+        place(tagInputView)
+
+        for (lineIndex, line) in lines.enumerated() {
+            var lineX = Self.side
+            for chip in line {
+                chip.frame.origin.x = lineX
+                chip.frame.origin.y = 46 + CGFloat(lineIndex) * (PanelDesign.pillHeight + 6)
+                lineX = chip.frame.maxX + 6
+            }
+        }
+        chipsBlockHeight = CGFloat(lines.count) * (PanelDesign.pillHeight + 6) - 6
+    }
+
+    private func layoutChrome(height: CGFloat) {
+        layoutChips()
+        let listY = 46 + chipsBlockHeight + 6
+        scrollView.frame = NSRect(x: 0, y: listY, width: Self.panelWidth, height: height - listY - 24)
+        emptyLabel.frame = NSRect(x: Self.side, y: listY, width: Self.panelWidth - Self.side * 2, height: 40)
         let footerY = height - 24
         footerLeft.frame = NSRect(x: 16, y: footerY + 5, width: 240, height: 14)
         footerRight.frame = NSRect(x: Self.panelWidth - 266, y: footerY + 5, width: 250, height: 14)
@@ -343,7 +377,8 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     /// ceiling than the launcher — multi-line previews need the room).
     private var panelHeight: CGFloat {
         let listHeight = min(rows.reduce(0.0) { $0 + rowHeight(for: $1) }, Self.maxListHeight)
-        return min(max(Self.chromeHeight + max(listHeight, Self.singleLineHeight * 3), 200), 560)
+        let chrome = 46 + chipsBlockHeight + 6 + 24 + 10 // search + chips + gap + footer + pad
+        return min(max(chrome + max(listHeight, Self.singleLineHeight * 3), 200), 560)
     }
 
     private func rowHeight(for row: Row) -> CGFloat {
@@ -542,28 +577,13 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         pasteSelected()
     }
 
-    // MARK: tag creation (⊕ chip)
+    // MARK: tag creation (inline input at the end of the chip row)
 
-    private func beginTagCreation() {
-        creatingTag = true
-        searchField.placeholderString = "输入新分类名，回车创建（Esc 取消）"
-        searchField.stringValue = ""
-        panel.makeFirstResponder(searchField)
-    }
-
-    private func endTagCreation() {
-        creatingTag = false
-        searchField.placeholderString = "输入关键词搜索"
-    }
-
-    private func commitTagCreation() {
-        let name = searchField.stringValue.trimmingCharacters(in: .whitespaces)
-        endTagCreation()
-        searchField.stringValue = ""
-        guard !name.isEmpty else {
-            reload()
-            return
-        }
+    /// Enter in the inline input: create the category and switch to it.
+    private func commitTagInput() {
+        let name = tagInputView.stringValue.trimmingCharacters(in: .whitespaces)
+        tagInputView.stringValue = ""
+        guard !name.isEmpty else { return }
         // Rust inserts into tags (INSERT OR IGNORE) and re-pushes the notes
         // snapshot; the new chip appears with that feed. Switch optimistically
         // so the panel is already on the fresh, empty category.
@@ -571,7 +591,10 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         syncChips()
         onAction?("note-tag-create", name)
         reload()
+        panel.makeFirstResponder(tagInputField)
     }
+
+    private var tagInputField: NSTextField { tagInputView.field }
 
     // MARK: keyboard
 
@@ -607,41 +630,33 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         }
     }
 
-    // NSSearchFieldDelegate — arrows/Enter/Tab/Esc/⌫ while the search field
-    // holds first responder.
+    // NSTextFieldDelegate — the search field and the inline tag input share
+    // this delegate; route by sender.
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        let isTagInput = control === tagInputField
         switch commandSelector {
         case NSSelectorFromString("moveUp:"):
-            moveVertical(-1)
-            return true
+            if !isTagInput {
+                moveVertical(-1)
+                return true
+            }
+            return false
         case NSSelectorFromString("moveDown:"):
-            moveVertical(1)
-            return true
+            if !isTagInput {
+                moveVertical(1)
+                return true
+            }
+            return false
         case NSSelectorFromString("insertNewline:"):
-            if creatingTag {
-                commitTagCreation()
-            } else {
-                pasteSelected()
+            if isTagInput {
+                commitTagInput()
+                return true
             }
+            pasteSelected()
             return true
-        case NSSelectorFromString("insertTab:"):
-            if !creatingTag {
-                cycleTabs(1)
-                return true
-            }
-            return false
-        case NSSelectorFromString("deleteBackward:"):
-            if creatingTag { return false }
-            if tab == .clipboard, searchField.stringValue.isEmpty {
-                deleteSelected()
-                return true
-            }
-            return false
         case NSSelectorFromString("cancelOperation:"):
-            if creatingTag {
-                endTagCreation()
-                searchField.stringValue = ""
-                reload()
+            if isTagInput {
+                tagInputView.stringValue = ""
                 return true
             }
             if !searchField.stringValue.isEmpty {
@@ -651,14 +666,23 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
                 hide(notify: true)
             }
             return true
+        case NSSelectorFromString("deleteBackward:"):
+            if !isTagInput, tab == .clipboard, searchField.stringValue.isEmpty {
+                deleteSelected()
+                return true
+            }
+            return false
         default:
+            // Arrows/Tab stay with the field that holds focus (arrows move
+            // the caret inside the input; Tab exits it).
             return false
         }
     }
 
-    // NSSearchFieldDelegate — live filter (suppressed during ⊕ input mode).
+    // NSTextFieldDelegate — search drives the list; the tag input is inert
+    // until Enter (commitTagInput).
     func controlTextDidChange(_ obj: Notification) {
-        guard obj.object as? NSSearchField === searchField, !creatingTag else { return }
+        guard (obj.object as? NSTextField) !== tagInputField else { return }
         reload()
     }
 
@@ -855,9 +879,10 @@ enum ClipboardPaster {
     }
 }
 
-/// Filter chip: colored dot + label, selectedFill capsule when active —
-/// the launcher tab-pill grammar with hapigo's dots. The ⊕ variant hides the
-/// dot and shows a plus glyph instead of a title.
+/// Filter chip: colored dot + label in a capsule. Rest state carries a
+/// hairline border (chips read as pills on the glass, launcher folder-chip
+/// grammar); active = selectedFill, hover = hoverFill. Width is measured
+/// from the label — `fittingSize` drives the chip-row flow layout.
 final class ChipPillView: NSView {
     private let dot = NSView()
     private let label = NSTextField(labelWithString: "")
@@ -870,6 +895,13 @@ final class ChipPillView: NSView {
     private var didLayout = false
 
     override var isFlipped: Bool { true }
+
+    /// Dot(7) + 4 gap + label + 10 right pad, clamped so one long tag can't
+    /// hog the row (title truncates).
+    override var fittingSize: NSSize {
+        NSSize(width: min(label.intrinsicContentSize.width + 34, 128),
+               height: PanelDesign.pillHeight)
+    }
 
     func configure(title: String, color: NSColor, onActivate: @escaping () -> Void) {
         self.onActivate = onActivate
@@ -886,30 +918,11 @@ final class ChipPillView: NSView {
 
             label.font = .systemFont(ofSize: 12, weight: .medium)
             label.lineBreakMode = .byTruncatingTail
-            label.frame = NSRect(x: 24, y: 4, width: 80, height: 16)
+            label.cell?.usesSingleLineMode = true
             addSubview(label)
         }
         dot.isHidden = false
         label.stringValue = title
-        label.frame = NSRect(x: 24, y: 4, width: 80, height: 16)
-        applyTheme(theme)
-    }
-
-    /// The ⊕ create-category chip: plus glyph instead of dot+title.
-    func configureAdd(onActivate: @escaping () -> Void) {
-        self.onActivate = onActivate
-        if !didLayout {
-            didLayout = true
-            wantsLayer = true
-            layer?.cornerRadius = PanelDesign.pillCornerRadius
-
-            label.font = .systemFont(ofSize: 13, weight: .medium)
-            label.alignment = .center
-            addSubview(label)
-        }
-        dot.isHidden = true
-        label.stringValue = "＋"
-        label.frame = NSRect(x: 0, y: 3, width: 32, height: 18)
         applyTheme(theme)
     }
 
@@ -922,6 +935,13 @@ final class ChipPillView: NSView {
     func setSelected(_ selected: Bool) {
         self.selected = selected
         applyBackground()
+    }
+
+    override func layout() {
+        super.layout()
+        // Label fills everything right of the dot; truncation happens at the
+        // frame edge set by the chip-row flow.
+        label.frame = NSRect(x: 24, y: 4, width: bounds.width - 34, height: 16)
     }
 
     override func updateTrackingAreas() {
@@ -953,13 +973,79 @@ final class ChipPillView: NSView {
         layer?.backgroundColor = selected
             ? theme.selectedFill.cgColor
             : (hovering ? theme.hoverFill.cgColor : NSColor.clear.cgColor)
-        layer?.borderWidth = selected ? 0 : 0.5
+        layer?.borderWidth = 0.5
         layer?.borderColor = theme.isDark
-            ? NSColor.white.withAlphaComponent(0.10).cgColor
-            : NSColor.black.withAlphaComponent(0.08).cgColor
+            ? NSColor.white.withAlphaComponent(0.14).cgColor
+            : NSColor.black.withAlphaComponent(0.10).cgColor
         dot.layer?.backgroundColor = chipColor.cgColor
     }
 }
+
+/// The always-visible inline input at the end of the chip row: type a new
+/// category name, Enter creates it (controller owns the delegate). Styled as
+/// a pill so it reads as the last tab.
+final class ChipInputView: NSView {
+    let field = NSTextField()
+    private let plus = NSTextField(labelWithString: "+")
+    private var theme: CardTheme = .dark
+    private var didLayout = false
+
+    override var isFlipped: Bool { true }
+
+    override var fittingSize: NSSize {
+        NSSize(width: 104, height: PanelDesign.pillHeight)
+    }
+
+    var stringValue: String {
+        get { field.stringValue }
+        set { field.stringValue = newValue }
+    }
+
+    func setup(theme: CardTheme, delegate: NSTextFieldDelegate) {
+        self.theme = theme
+        if !didLayout {
+            didLayout = true
+            wantsLayer = true
+            layer?.cornerRadius = PanelDesign.pillCornerRadius
+
+            plus.font = .systemFont(ofSize: 12, weight: .medium)
+            plus.frame = NSRect(x: 8, y: 4, width: 10, height: 16)
+            addSubview(plus)
+
+            field.font = .systemFont(ofSize: 12)
+            field.isBordered = false
+            field.isEditable = true
+            field.isSelectable = true
+            field.drawsBackground = false
+            field.focusRingType = .none
+            field.placeholderString = "新分类"
+            field.delegate = delegate
+            field.frame = NSRect(x: 22, y: 4, width: 76, height: 16)
+            addSubview(field)
+        }
+        applyTheme(theme)
+    }
+
+    func applyTheme(_ theme: CardTheme) {
+        self.theme = theme
+        plus.textColor = theme.tertiaryText
+        field.textColor = theme.foreground
+        applyBackground()
+    }
+
+    private func applyBackground() {
+        wantsLayer = true
+        layer?.cornerRadius = PanelDesign.pillCornerRadius
+        layer?.backgroundColor = theme.isDark
+            ? NSColor.white.withAlphaComponent(0.06).cgColor
+            : NSColor.white.withAlphaComponent(0.30).cgColor
+        layer?.borderWidth = 0.5
+        layer?.borderColor = theme.isDark
+            ? NSColor.white.withAlphaComponent(0.14).cgColor
+            : NSColor.black.withAlphaComponent(0.10).cgColor
+    }
+}
+
 
 /// Section header row (「置顶」).
 final class ClipboardHeaderCell: NSView {
