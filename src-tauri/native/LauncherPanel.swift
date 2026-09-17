@@ -23,6 +23,9 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
 
     private let panel: KeyablePanel
     private let root: FlippedView
+    /// The makePanelBackground content view — scrimmed on theme changes so
+    /// the glass keeps text contrast on dark wallpapers.
+    private let glassContent: NSView
     private let searchField = NSSearchField()
     private let foldersTabButton = NSButton()
     private let appsTabButton = NSButton()
@@ -96,6 +99,8 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
             cornerRadius: 14
         )
         panel.contentView = background
+        glassContent = content
+        glassContent.wantsLayer = true
         root = FlippedView(frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 240))
         content.addSubview(root)
         super.init()
@@ -205,9 +210,12 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     }
 
     private func styleChrome() {
-        // NSSearchField draws its own themed rounded chrome; painting the
-        // backing layer (previous attempt) showed a SQUARE gray box behind
-        // it. Its colors now come from the panel's vibrant appearance.
+        // Contrast scrim: raw NSGlassEffectView washes out on dark
+        // wallpapers — a theme-tinted veil under the content keeps every
+        // label legible (Raycast/Spotlight use the same trick).
+        glassContent.layer?.backgroundColor = (cardTheme.isDark
+            ? NSColor.black.withAlphaComponent(0.30)
+            : NSColor.white.withAlphaComponent(0.42)).cgColor
         emptyLabel.textColor = cardTheme.tertiaryText
         syncTabButtons()
     }
@@ -733,6 +741,15 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     func controlTextDidChange(_ obj: Notification) {
         guard obj.object as? NSSearchField === searchField else { return }
         reload()
+    }
+    /// Chip lines self-highlight from `selectedChip`; a full-row table
+    /// selection on click is visual noise (and headers aren't selectable).
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        guard row < rows.count else { return false }
+        switch rows[row] {
+        case .chipLine, .header: return false
+        case .app: return true
+        }
     }
 
     // MARK: NSTableViewDataSource / Delegate

@@ -2776,9 +2776,15 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         panel.appearance = theme == .dark
             ? NSAppearance(named: .vibrantDark)
             : NSAppearance(named: .vibrantLight)
+        // Contrast scrim: raw glass washes out on dark wallpapers — a
+        // theme-tinted veil under the content keeps panels legible anywhere.
+        let scrim = (theme == .dark
+            ? NSColor.black.withAlphaComponent(0.30)
+            : NSColor.white.withAlphaComponent(0.42)).cgColor
         container.layer?.borderColor = (theme == .dark
             ? NSColor.white.withAlphaComponent(0.22)
             : NSColor.black.withAlphaComponent(0.20)).cgColor
+        container.layer?.backgroundColor = scrim
         dragHandle.theme = theme
         buttons.forEach { $0.theme = theme }
         // The result card follows the same theme: appearance, hairlines, and
@@ -2792,6 +2798,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 ? NSColor.white.withAlphaComponent(0.22)
                 : NSColor.black.withAlphaComponent(0.20)).cgColor
             resultContainer.layer?.borderColor = hairline
+            resultContainer.layer?.backgroundColor = scrim
+            notesContainer.layer?.backgroundColor = scrim
             // chips: force a rebuild (the diff skips identical id/status/active)
             runChipViews.forEach { $0.removeFromSuperview() }
             runChipViews.removeAll()
