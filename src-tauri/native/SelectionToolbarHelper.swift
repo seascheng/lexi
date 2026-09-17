@@ -1083,6 +1083,11 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         installMouseMonitors()
         installStatusItem()
         startDisplayServer()
+        probeEventTapAccess()
+        shortcutMonitor = ShortcutMonitor(
+            onLauncher: { [weak self] in self?.launcherController.show() },
+            onClipboard: { [weak self] in self?.clipboardController.show() }
+        )
         // Clipboard capture: own store + 0.5s poller, started once the TCP
         // server is up so suspend/resume posts can flow both ways.
         if let store = ClipboardStore.open() {
@@ -1092,6 +1097,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             FileLog.write("CLIP store unavailable — capture disabled")
         }
     }
+
+    /// Global keyboard shortcuts (launcher + clipboard), in-process.
+    private var shortcutMonitor: ShortcutMonitor?
 
     private static func argumentValue(_ name: String) -> String? {
         let arguments = CommandLine.arguments
@@ -1148,8 +1156,29 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             self?.panel.performDrag(with: event)
         }
         container.addSubview(dragHandle)
-        applyTheme(theme.rawValue)
         applyActions(actions)
+    }
+
+    /// Cutover probe: can THIS process host the global event tap? TCC grants
+    /// accessibility per bundle — the answer decides whether the keyboard +
+    /// selection pipeline can migrate from Rust now or must wait for the
+    /// permission re-grant at app cutover. Log-only; nothing is installed.
+    private func probeEventTapAccess() {
+        let mask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
+        let tap = CGEvent.tapCreate(
+            tap: CGEventTapLocation(rawValue: 1) ?? .cghidEventTap, // kCGSessionEventTap
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: CGEventMask(mask),
+            callback: { _, _, _, _ in nil },
+            userInfo: nil
+        )
+        if let tap {
+            log("EVENTTAP probe: ok — helper may host the global tap")
+            CFMachPortInvalidate(tap)
+        } else {
+            log("EVENTTAP probe: DENIED — helper lacks accessibility trust")
+        }
     }
 
     // MARK: - Status item
@@ -2925,6 +2954,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             return
         }
 
+
         if request.hasPrefix("POST /card-notes "),
            let body = request.components(separatedBy: "\r\n\r\n").last,
            let bodyData = body.data(using: .utf8),
@@ -3029,6 +3059,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                     }
                 }
                 controller.onNativeSettingsReload = { [weak self] in
+                    self?.shortcutMonitor?.reload()
                     self?.postAction(action: "reload-native-settings", text: "")
                 }
                 controller.show(tab: tab)

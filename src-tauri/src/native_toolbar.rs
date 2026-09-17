@@ -1725,19 +1725,6 @@ fn handle_system_event(
                 trigger_popup_with_selection(&app);
             });
         }
-        CGEventType::KeyDown if crate::launcher::is_launcher_hotkey(event) => {
-            log_native("launcher shortcut key detected");
-            thread::spawn(crate::launcher::show_launcher);
-        }
-        CGEventType::KeyDown if crate::clipboard::is_clipboard_hotkey(event) => {
-            // The ONLY swallowing arm in this tap: Option+V types "√", and the
-            // paste target must never receive it. Everything else keeps
-            // passing through (CallbackResult::Keep below).
-            log_native("clipboard shortcut key detected");
-            let app = app.clone();
-            thread::spawn(move || crate::clipboard::show_clipboard(&app));
-            return CallbackResult::Drop;
-        }
         CGEventType::KeyDown if is_copy_command(event) => {
             // User pressed Cmd+C. Record what they copied (fresh for 5s) —
             // the browser fallback when AX/web-area can't read the selection.
@@ -1966,8 +1953,8 @@ pub(crate) fn detect_double_press(last_press: &Mutex<Option<Instant>>) -> bool {
     }
 }
 
-/// Handle modifier state changes for double-modifier shortcuts
-/// (popup's Ctrl+Ctrl; launcher's own detection is delegated).
+/// Handle modifier state changes for the popup's double-modifier shortcut.
+/// (Ctrl+Ctrl etc.; launcher/clipboard detection moved to the helper.)
 fn handle_flags_changed(app: &tauri::AppHandle, event: &CGEvent) {
     if let ShortcutMode::DoubleModifier { key_code } = current_popup_shortcut() {
         let pressed = modifier_flag(key_code)
@@ -1982,10 +1969,9 @@ fn handle_flags_changed(app: &tauri::AppHandle, event: &CGEvent) {
         }
     }
 
-    // Launcher owns its double-modifier detection + trigger (top-level isolation).
-    crate::launcher::handle_flags_changed(app, event);
-    // Clipboard owns its double-modifier detection (Alt+Alt preset path).
-    crate::clipboard::handle_flags_changed(app, event);
+    // Launcher/clipboard shortcuts live on the helper's own event tap now
+    // (ShortcutMonitor.swift); the popup double-modifier stays here because
+    // it still needs the Rust AX selection reader.
 }
 
 /// Show popup and read selected text — shared by KeyDown and FlagsChanged shortcut handlers.
