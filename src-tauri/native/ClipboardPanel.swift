@@ -276,19 +276,17 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         }
     }
 
-    /// Estimated wrapped-line count for a 452pt column. Width, not character
-    /// count: a CJK glyph is ~13pt at 13pt type, a latin char ~6.5pt — the
-    /// old chars/68 heuristic put a 45-char Chinese paragraph on ONE 32pt row
-    /// that the wrapping label then spilled out of. Sampled on the first 600
-    /// characters and extrapolated (user rule: at most TWO preview lines).
+    /// Measured wrapped-line count for a 452pt column: lay the text out in a
+    /// throwaway wrapping label and count line heights. The char-width
+    /// heuristic (latin 6.5pt / CJK 13pt) misjudged percent-encoded URLs and
+    /// dense CJK, which is how rows came out one-line-tall with two-line
+    /// content. User rule: at most TWO preview lines.
     static func previewLineCount(for text: String) -> Int {
-        let sample = text.prefix(600)
-        var width: CGFloat = 0
-        for scalar in sample.unicodeScalars {
-            width += scalar.value >= 0x2E80 ? 13 : 6.5
-        }
-        let totalWidth = width * (CGFloat(text.count) / CGFloat(max(sample.count, 1)))
-        return max(1, min(2, Int(ceil(totalWidth / 452))))
+        let measuring = NSTextField(wrappingLabelWithString: text)
+        measuring.font = .systemFont(ofSize: 13)
+        let bounds = NSRect(x: 0, y: 0, width: 452, height: 10_000)
+        let needed = measuring.cell!.cellSize(forBounds: bounds).height
+        return max(1, min(2, Int(ceil(needed / 16))))
     }
 
     private func placePanel() {
@@ -734,12 +732,14 @@ final class ClipCell: NSView {
             for view in [iconView, thumbnailView, nameLabel, pathLabel, previewLabel] {
                 addSubview(view)
             }
-            // wraps=true + truncating tail: word-wrap up to
-            // maximumNumberOfLines, then … on the last visible line. Without
-            // wraps the truncating mode means ONE line only (the "tall row,
-            // single line" bug).
+            // ORDER MATTERS: on NSTextField, setting lineBreakMode to a
+            // truncating mode (e.g. .byTruncatingTail) silently resets
+            // cell.wraps to false — which renders exactly ONE line no matter
+            // the row height. Word-wrap + maximumNumberOfLines(2) gives the
+            // two-line preview with an automatic trailing … from TextKit.
+            previewLabel.lineBreakMode = .byWordWrapping
             previewLabel.cell?.wraps = true
-            previewLabel.lineBreakMode = .byTruncatingTail
+            previewLabel.maximumNumberOfLines = 2
         }
         let iconSize = ClipboardMonitor.iconDisplaySize
         iconView.frame = NSRect(x: 14, y: (height - iconSize) / 2, width: iconSize, height: iconSize)
