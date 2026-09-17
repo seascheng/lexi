@@ -222,9 +222,8 @@ extension SelectionToolbarApp {
 
 // MARK: - Builtin tools
 
-/// Local executions for the toolbar/card builtin tools — parity with the
-/// Rust execute_tool bodies. Handoff stays on Rust (needs activation +
-/// text injection; disabled by default).
+/// Local executions for the toolbar/card builtin tools — full parity with
+/// the Rust execute_tool bodies.
 enum LexiTools {
     static func copy(text: String) {
         let pasteboard = NSPasteboard.general
@@ -255,6 +254,27 @@ enum LexiTools {
     static func note(text: String) {
         LexiStore.insertNote(content: text)
         FileLog.write("TOOL note saved len=\(text.count)")
+    }
+
+    /// Hand the selection to a target app: activate it, then paste through
+    /// the pasteboard (Rust do_handoff parity — the ClipboardPaster recipe
+    /// covers activation + ⌘V + focus return).
+    static func handoff(text: String) {
+        let targetApp = LexiStore.toolbarToolConfig(id: "handoff")["targetApp"] ?? "ChatGPT"
+        guard !targetApp.isEmpty else {
+            FileLog.write("TOOL handoff: no target app configured")
+            return
+        }
+        guard let running = NSWorkspace.shared.runningApplications.first(where: {
+            $0.localizedName == targetApp && $0.isActive
+        }) ?? NSWorkspace.shared.runningApplications.first(where: {
+            $0.localizedName?.lowercased() == targetApp.lowercased()
+        }) else {
+            FileLog.write("TOOL handoff: app \(targetApp) not running")
+            return
+        }
+        ClipboardPaster.pasteString(text, previousApp: running)
+        FileLog.write("TOOL handoff target=\(targetApp) len=\(text.count)")
     }
 }
 

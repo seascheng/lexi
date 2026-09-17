@@ -516,6 +516,83 @@ extension LexiStore {
 }
 
 extension LexiStore {
+    /// Card notes-tab rename (Rust note-rename handler parity).
+    static func updateNoteName(id: Int64, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "UPDATE notes SET name = ?1 WHERE id = ?2;", -1, &statement, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, trimmed, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int64(statement, 2, id)
+        sqlite3_step(statement)
+    }
+
+    /// Card notes-tab tag switch; empty name clears the tag. One visible
+    /// tag per note — replace, never add (Rust note-tag handler parity).
+    static func setNoteTag(id: Int64, tag: String) {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+        let escapedTag = tag.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "'", with: "''")
+        if escapedTag.isEmpty {
+            sqlite3_exec(db, "DELETE FROM note_tags WHERE note_id = \(id);", nil, nil, nil)
+            return
+        }
+        sqlite3_exec(db, "INSERT OR IGNORE INTO tags (name) VALUES ('\(escapedTag)');", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM note_tags WHERE note_id = \(id);", nil, nil, nil)
+        sqlite3_exec(db, """
+            INSERT INTO note_tags (note_id, tag_id)
+            SELECT \(id), id FROM tags WHERE name = '\(escapedTag)';
+            """, nil, nil, nil)
+    }
+
+    /// Clipboard panel's ⊕ chip: create a tag row (Rust note-tag-create).
+    static func createTag(name: String) {
+        let escaped = name.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "'", with: "''")
+        guard !escaped.isEmpty, let db = open() else { return }
+        defer { sqlite3_close(db) }
+        sqlite3_exec(db, "INSERT OR IGNORE INTO tags(name) VALUES('\(escaped)');", nil, nil, nil)
+    }
+
+    /// Clipboard panel's "移动到分类": save a clip as a note in a category
+    /// (Rust note-create parity; the panel deletes its own clip afterwards).
+    static func insertNote(name: String, content: String, tag: String) {
+        let escapedName = name.replacingOccurrences(of: "'", with: "''")
+        let escapedContent = content.replacingOccurrences(of: "'", with: "''")
+        let escapedTag = tag.replacingOccurrences(of: "'", with: "''")
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+        sqlite3_exec(
+            db,
+            "INSERT INTO notes (name, content) VALUES('\(escapedName)', '\(escapedContent)');",
+            nil, nil, nil
+        )
+        guard !escapedTag.isEmpty else { return }
+        sqlite3_exec(db, """
+            INSERT INTO note_tags (note_id, tag_id)
+            SELECT (SELECT id FROM notes ORDER BY id DESC LIMIT 1), id
+            FROM tags WHERE name = '\(escapedTag)';
+            """, nil, nil, nil)
+    }
+
+    /// Clipboard panel's drag-to-reorder: each tag name gets its chip-row
+    /// index as sort_order (Rust note-tag-reorder parity).
+    static func reorderTags(_ names: [String]) {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+        for (index, name) in names.enumerated() {
+            let escaped = name.replacingOccurrences(of: "'", with: "''")
+            sqlite3_exec(db, "UPDATE tags SET sort_order = \(index) WHERE name = '\(escaped)';", nil, nil, nil)
+        }
+    }
+}
+
+extension LexiStore {
     /// Custom panel tabs (enabled, DB order) — merged with the built-ins
     /// by the caller (panel_config_items parity).
     static func customPanels() -> [(id: String, name: String, icon: String)] {
@@ -538,6 +615,140 @@ extension LexiStore {
             rows.append((text(0), text(1), text(2)))
         }
         return rows
+    }
+}
+
+// MARK: - Schema (fresh-install parity with migrations 001-013)
+
+extension LexiStore {
+    /// Idempotent schema + seed. Folded final shape of the original 13 SQL
+    /// migrations; on an existing DB every statement is a no-op. Runs once
+    /// at helper startup.
+    static func ensureSchema() {
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first?.appendingPathComponent("com.lexi.app", isDirectory: true)
+        if let appSupport {
+            try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
+        }
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+
+        sqlite3_exec(db, """
+            CREATE TABLE IF NOT EXISTS words (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              word TEXT NOT NULL,
+              translation TEXT NOT NULL,
+              pos TEXT,
+              definition TEXT,
+              example TEXT,
+              status TEXT NOT NULL DEFAULT 'new',
+              created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              review_count INTEGER NOT NULL DEFAULT 0,
+              next_review DATETIME,
+              ease_factor REAL NOT NULL DEFAULT 2.5,
+              interval INTEGER NOT NULL DEFAULT 0,
+              entry_type TEXT NOT NULL DEFAULT 'word',
+              source_text TEXT,
+              note TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_words_status ON words(status);
+            CREATE INDEX IF NOT EXISTS idx_words_next_review ON words(next_review);
+            CREATE INDEX IF NOT EXISTS idx_words_word_translation ON words(word, translation);
+            CREATE TABLE IF NOT EXISTS settings (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS ai_features (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              prompt_template TEXT NOT NULL,
+              output_mode TEXT NOT NULL,
+              enabled INTEGER NOT NULL DEFAULT 1,
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              auto_save_to_vocabulary INTEGER NOT NULL DEFAULT 0,
+              target_language TEXT,
+              created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              review_interval_seconds INTEGER NOT NULL DEFAULT 30,
+              speech_enabled INTEGER NOT NULL DEFAULT 0,
+              icon TEXT NOT NULL DEFAULT 'wand',
+              is_builtin INTEGER NOT NULL DEFAULT 0,
+              thinking INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_features_enabled_sort ON ai_features(enabled, sort_order);
+            CREATE TABLE IF NOT EXISTS panels (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              icon TEXT NOT NULL DEFAULT 'wand',
+              enabled INTEGER NOT NULL DEFAULT 1,
+              sort_order INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS tags (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL UNIQUE,
+              sort_order INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS notes (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT,
+              content TEXT NOT NULL,
+              created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS note_tags (
+              note_id INTEGER NOT NULL,
+              tag_id INTEGER NOT NULL,
+              PRIMARY KEY (note_id, tag_id),
+              FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
+              FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at);
+            CREATE INDEX IF NOT EXISTS idx_note_tags_tag_id ON note_tags(tag_id);
+            INSERT OR IGNORE INTO tags (name) VALUES ('Tmp');
+            INSERT OR IGNORE INTO panels (id, name, icon, enabled, sort_order) VALUES
+              ('translate', 'Actions', 'file-text', 1, 0),
+              ('review', 'Review', 'book-open', 1, 1);
+            INSERT OR IGNORE INTO actions (id, name, icon, toolbar_enabled, toolbar_order, panel_enabled, panel_order, config) VALUES
+              ('copy', 'Copy', 'copy', 1, 100, 1, 100, '{}'),
+              ('search', 'Search', 'search', 1, 110, 1, 110, '{"engine":"google"}'),
+              ('read', 'Read', 'volume', 1, 120, 1, 120, '{"engine":"system"}'),
+              ('note', 'Note', 'notebook-pen', 1, 130, 1, 130, '{}'),
+              ('handoff', 'Handoff', 'send', 0, 140, 1, 140, '{"targetApp":"ChatGPT"}');
+            """, nil, nil, nil)
+        migrateActionsTable()
+        seedBuiltinFeatures(db: db)
+    }
+
+    /// Fresh-install seeds for the four builtin AI features (INSERT OR
+    /// IGNORE: existing rows are never touched).
+    private static func seedBuiltinFeatures(db: OpaquePointer?) {
+        let seeds: [(String, String, String, Int, String, String)] = [
+            ("translation", "Translate", "translation", 0, "languages",
+             "You are a concise bilingual (English ↔ Chinese) dictionary.\nTranslate the selected text and return Markdown only.\n\nInput:\n<<<TEXT>>>\n{{text}}\n<<<END>>>\n\n1. If the input is an English word:\n- Translate it into Chinese\n- If helpful, analyze it using prefix/suffix\n- Provide English example sentences for common usage\n\n2. If the input is a sentence:\n- Translate it into Chinese\n- Analyze its sentence structure\n- Identify common English patterns in it\n- If helpful, use additional English examples to explain the pattern\n\nOutput:\n- Return as a Markdown bullet list\n- Keep it multi-line\n- Do not add extra sections or labels beyond the above"),
+            ("extract", "Extract", "custom", 10, "highlighter",
+             "Analyze text as ONE learning point.Use Chinese.\n\n<<<TEXT>>>\n{{text}}\n<<<END>>>\n\nClassify: word / phrase / sentence\n\n- word/phrase: meaning + usage\n- sentence: meaning + structure + pattern\n\nGive 1 example. Keep concise.\n\nReturn Markdown:\n\n### Learning point\n- **Type:**\n- **Meaning:**\n- **Usage:**\n- **Example:**\n- **Note:**"),
+            ("rewrite", "Rewrite", "custom", 40, "wand",
+             "Rewrite sentences into idiomatic English and flag issues.Use Chinese.\n\n<<<TEXT>>>\n{{text}}\n<<<END>>>\n\nFor each sentence:\n- rewrite naturally\n- list unidiomatic parts\n- brief reason\n\nReturn Markdown list:\n\n- Improved: ...\n- Issues:\n  - ...\n- Explanation:\n  - ..."),
+            ("ai", "AI", "custom", 50, "sparkles",
+             "Answer the user's question about the following text. Use Chinese.\n\n<<<TEXT>>>\n{{text}}\n<<<END>>>"),
+        ]
+        for (id, name, kind, order, icon, prompt) in seeds {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                "INSERT OR IGNORE INTO ai_features (id, name, kind, prompt_template, output_mode, enabled, sort_order, auto_save_to_vocabulary, target_language, speech_enabled, icon, is_builtin, thinking, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'plain_text', 1, ?5, 0, 'Chinese', 0, ?6, 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);",
+                -1, &statement, nil
+            ) == SQLITE_OK else { continue }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_text(statement, 1, id, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 2, name, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 3, kind, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 4, prompt, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int(statement, 5, Int32(order))
+            sqlite3_bind_text(statement, 6, icon, -1, SQLITE_TRANSIENT)
+            sqlite3_step(statement)
+        }
     }
 }
 

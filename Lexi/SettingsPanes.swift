@@ -1,4 +1,5 @@
 import Observation
+import ServiceManagement
 import SwiftUI
 
 // ---------------------------------------------------------------------------
@@ -141,6 +142,32 @@ struct GeneralSettingsPane: View {
                 .toggleStyle(.switch)
             } header: {
                 Text("Selection")
+            }
+            Section {
+                Toggle(isOn: Binding(
+                    get: { SMAppService.mainApp.status == .enabled },
+                    set: { enabled in
+                        do {
+                            if enabled {
+                                try SMAppService.mainApp.register()
+                            } else {
+                                try SMAppService.mainApp.unregister()
+                            }
+                        } catch {
+                            FileLog.write("SMAppService error: \(error.localizedDescription)")
+                        }
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Launch at login")
+                        Text("Start Lexi automatically when you log in.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+            } header: {
+                Text("Startup")
             }
             Section {
                 LabeledContent("Version") {

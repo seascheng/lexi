@@ -238,8 +238,6 @@ enum FileLog {
         }
     }
 }
-private let IPC_HOST = "127.0.0.1"
-private let ACTION_PORT: UInt16 = 43876  // legacy fallback; real port comes from --action-port
 
 private let toolbarHandleWidth: CGFloat = 16
 private let toolbarSegmentWidth: CGFloat = 30
@@ -970,7 +968,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private lazy var launcherController: LauncherPanelController = {
         let controller = LauncherPanelController()
         controller.onHidden = { [weak self] in
-            self?.postAction(action: "launcher-hidden", text: "-")
+            self?.panels.dismissed(.launcher)
         }
         controller.onOpenSettings = { [weak self] in
             // The coordinator retires the launcher (and any other overlay).
@@ -982,10 +980,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private lazy var clipboardController: ClipboardPanelController = {
         let controller = ClipboardPanelController()
         controller.onHidden = { [weak self] in
-            self?.postAction(action: "clipboard-hidden", text: "-")
+            self?.panels.dismissed(.clipboard)
         }
         controller.onAction = { [weak self] action, text in
-            self?.postAction(action: action, text: text)
+            self?.handleAction(action: action, text: text)
         }
         return controller
     }()
@@ -1042,6 +1040,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var reviewWordLabel: NSTextField!
     private var reviewAnswerLabel: NSTextField!
     private var cardPinned = false
+    /// The app that was frontmost when the card/toolbar opened — the target
+    /// for note-insert's paste-at-caret and handoff-style flows.
+    private var sourceApp: NSRunningApplication?
     private var reviewRevealButton: NSButton!
     private var reviewGradeButtons: [NSButton] = []
     private var reviewEmptyLabel: NSTextField!
@@ -1058,22 +1059,20 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var entryButtons: [NSButton] = []
     private var listener: NWListener?
     private let listenerQueue = DispatchQueue(label: "lexi.toolbar.display")
-    private let connectionQueue = DispatchQueue(label: "lexi.toolbar.connection")
     /// Native settings window (full-Swift migration, phase 1). Created on
     /// first show; the app controller itself is nonisolated, so every touch
     /// hops through `MainActor.assumeIsolated` on the main queue.
     private var settingsWindowController: LexiSettingsWindowController?
-    private let actionPort: String
     private let toolbarPort: UInt16
 
     override init() {
-        actionPort = SelectionToolbarApp.argumentValue("--action-port") ?? "43876"
         toolbarPort = UInt16(SelectionToolbarApp.argumentValue("--toolbar-port") ?? "") ?? 43877
         super.init()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        log("helper started bundle=\(Bundle.main.bundleIdentifier ?? "none") toolbarPort=\(toolbarPort) actionPort=\(actionPort)")
+        log("helper started bundle=\(Bundle.main.bundleIdentifier ?? "none") toolbarPort=\(toolbarPort)")
+        LexiStore.ensureSchema()
         NSApp.setActivationPolicy(.accessory)
         installEditMenu()
         terminateOlderHelperInstances()
@@ -1145,19 +1144,25 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         return arguments[index + 1]
     }
 
-    /// The clipboard shortcut's local path: refresh the notes snapshot from
-    /// the shared DB (the tag tabs read it) and present the panel through
-    /// the coordinator gate (retires toolbar/launcher first).
-    func showClipboardPanel() {
+    /// Fresh notes snapshot from the DB — the card Notes tab and the
+    /// clipboard panel's tag tabs both render from it.
+    static func cardNotesPayload() -> CardNotesPayload {
         let rows = LexiStore.notes(limit: 50)
         var tags = Set<String>()
         for note in rows { tags.formUnion(note.tags) }
-        let payload = CardNotesPayload(
+        return CardNotesPayload(
             notes: rows.map {
                 CardNotesPayload.Note(id: $0.id, name: $0.name, tags: $0.tags, content: $0.content)
             },
             allTags: tags.sorted()
         )
+    }
+
+    /// The clipboard shortcut's local path: refresh the notes snapshot from
+    /// the shared DB (the tag tabs read it) and present the panel through
+    /// the coordinator gate (retires toolbar/launcher first).
+    func showClipboardPanel() {
+        let payload = Self.cardNotesPayload()
         clipboardController.updateNotes(
             notes: payload.notes.map {
                 ClipboardNote(
@@ -1337,12 +1342,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     @objc private func statusQuitClicked() {
-        postAction(action: "quit-lexi", text: "-")
-        // Rust exits and takes the app down; the fallback covers a hung
-        // parent so Quit never dead-ends.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            NSApp.terminate(nil)
-        }
+        NSApp.terminate(nil)
     }
     private func installMouseMonitors() {
         let downMask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
@@ -1400,7 +1400,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         guard resultPanel?.isVisible == true, !cardPinned else { return }
         resultPanel.orderOut(nil)
         clearAllRuns(quietly: true)
-        postAction(action: "card-hidden", text: "-")
     }
 
     private func dismissalDistance(for location: NSPoint) -> CGFloat {
@@ -1563,7 +1562,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     @objc private func notesInputTapped() {
         hideNotesPanel(notifyLexi: true)
-        postAction(action: "card-input-mode", text: "-")
     }
 
     private func clampedNotesOrigin(width: CGFloat, height: CGFloat) -> NSPoint {
@@ -1576,6 +1574,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
         return origin
     }
+
     private func makeNotesRow(index: Int, note: NotesShowPayload.Note) -> (view: NSView, label: NSTextField) {
         let row = NSView(frame: NSRect(x: 0, y: 0, width: notesPanelWidth, height: notesRowHeight))
         row.wantsLayer = true
@@ -1597,7 +1596,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     @objc private func noteRowClicked(_ sender: NSClickGestureRecognizer) {
         guard let id = sender.view?.identifier?.rawValue,
               let index = Int(id.dropFirst("note-".count)) else { return }
-        postAction(action: "notes-click", text: String(index))
+        selectNoteRow(index, scroll: true)
     }
 
     private func selectNoteRow(_ index: Int, scroll: Bool) {
@@ -1896,7 +1895,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         inputTextView.isAutomaticDashSubstitutionEnabled = false
         inputTextView.delegate = self
         inputTextView.onBecameFocus = { [weak self] in
-            self?.postAction(action: "card-key", text: "1")
             self?.setInputFocused(true)
         }
         inputTextView.onLostFocus = { [weak self] in
@@ -1939,9 +1937,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             let row = self.notesTableView.selectedRow
             guard row >= 0, row < self.displayedNotes.count,
                   let id = self.displayedNotes[row].id else { return }
-            self.postAction(action: "notes-click", text: String(id))
+            ClipboardPaster.pasteString(self.displayedNotes[row].content, previousApp: self.sourceApp)
         }
-        notesTableView.headerView = nil
         notesTableView.rowHeight = 40
         notesTableView.intercellSpacing = .zero
         notesTableView.style = .fullWidth
@@ -2068,9 +2065,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     func showResultCard(_ payload: ResultShowPayload) {
+        sourceApp = NSWorkspace.shared.frontmostApplication
         FileLog.write("CARD open=api runId=\(payload.runId ?? "-") feature=\(payload.featureId ?? "-") input=\(payload.inputText?.prefix(24) ?? "-")")
-        // Every card presentation retires the transient overlays — the
-        // card's actions replace them (PanelCoordinator policy).
         panels.present(.card)
         // buttons, the input bar): the card presents and the AI stream
         // starts locally from the shared DB.
@@ -2334,7 +2330,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
         guard notify else { return }
         if id == "notes" {
-            postAction(action: "panel-notes", text: "-")
+            reloadCardNotes()
         } else if id == "review" {
             loadReviewWord()
         }
@@ -2374,19 +2370,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     /// Mouse click on a row: select it (selectionDidChange copies the
     /// content) and arm the card for Enter. Injection happens on Enter only.
     @objc private func notesTableClicked(_ sender: NSTableView) {
-        FileLog.write("SEL clicked row=\(sender.clickedRow)")
-        postAction(action: "card-key", text: "1")
+        setInputFocused(false)
     }
 
     @objc private func noteInsertClicked(_ sender: NSButton) {
         guard let content = sender.identifier?.rawValue, !content.isEmpty else { return }
-        postAction(action: "note-insert", text: content)
+        ClipboardPaster.pasteString(content, previousApp: sourceApp)
         resultPanel.orderOut(nil)
-        postAction(action: "card-hidden", text: "-")
     }
-
-    // MARK: - Tag dropdown (in-card, goty language)
-    // The system NSMenu misplaces itself on a nonactivating panel - the tag
     // picker is an in-card dropdown layer instead: same material, opens at
     // the pill, click-outside/Esc closes, picking posts note-tag.
 
@@ -2407,11 +2398,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             theme: cardTheme,
             onPick: { [weak self] name in
                 self?.closeTagDropdown()
-                self?.postAction(action: "note-tag", text: "\(noteId)|\(name ?? "")")
+                self?.handleAction(action: "note-tag", text: "\(noteId)|\(name ?? "")")
             }
         )
         let pillRect = anchor.convert(anchor.bounds, to: host)
-        dropdown.sizeToFit(width: dropdown.naturalWidth)
         var origin = NSPoint(x: min(pillRect.minX, host.bounds.width - dropdown.frame.width - 8), y: pillRect.minY - dropdown.frame.height - 4)
         if origin.y < 8 {
             origin.y = pillRect.maxY + 4
@@ -2449,19 +2439,19 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     private func noteDeleteClickedId(_ id: Int64) {
-        postAction(action: "note-delete", text: String(id))
+        handleAction(action: "note-delete", text: String(id))
     }
 
     private func noteRenamed(id: Int64, name: String) {
         let payload: [String: Any] = ["id": id, "name": name]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let body = String(data: data, encoding: .utf8) else { return }
-        postAction(action: "note-rename", text: body)
+        handleAction(action: "note-rename", text: body)
     }
 
     @objc private func noteDeleteClicked(_ sender: NSButton) {
         guard let id = sender.identifier?.rawValue else { return }
-        postAction(action: "note-delete", text: id)
+        handleAction(action: "note-delete", text: id)
     }
 
     private func handleCardReview(_ payload: CardReviewPayload) {
@@ -2646,7 +2636,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         rebuildRunTabs()
         renderActiveRun()
         layoutResultCard()
-        postAction(action: "card-cleared", text: "-")
     }
 
     /// Single unified layout pass: measures content, positions every strip,
@@ -3092,16 +3081,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             DispatchQueue.main.async {
                 guard !self.cardPinned else { return }
                 self.resultPanel.orderOut(nil)
-                self.postAction(action: "card-hidden", text: "-")
             }
             return
         }
-        if request.hasPrefix("POST /card-hide ") {
-            DispatchQueue.main.async {
-                self.resultPanel.orderOut(nil)
-                self.postAction(action: "card-hidden", text: "-")
-            }
-        }
+
 
 
         if request.hasPrefix("POST /focus-test ") {
@@ -3178,6 +3161,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         // Dual-track dedup: during selection migration both the helper's
         // tap and Rust's fire for the same selection — show once.
         guard selectionShowGate(payload.text) else { return }
+        sourceApp = NSWorkspace.shared.frontmostApplication
         let text = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let point = currentMouseLocation(fallback: payload)
         let width = toolbarWidth(for: payload.actions?.count ?? actions.count)
@@ -3214,20 +3198,11 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                     if let theme {
                         self?.applyTheme(theme)
                     }
-                    var payload: [String: Any] = [:]
-                    if let theme { payload["theme"] = theme }
-                    if let opacity { payload["panelOpacity"] = opacity }
-                    if let blur { payload["panelBlur"] = blur }
-                    if let data = try? JSONSerialization.data(withJSONObject: payload),
-                       let text = String(data: data, encoding: .utf8) {
-                        self?.postAction(action: "panel-style", text: text)
-                    }
                 }
                 controller.onNativeSettingsReload = { [weak self] in
                     self?.shortcutMonitor?.reload()
                     self?.selectionPipeline?.reload()
                     self?.refreshCardActions()
-                    self?.postAction(action: "reload-native-settings", text: "")
                 }
                 controller.show(tab: tab)
             }
@@ -3300,21 +3275,11 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private func hidePanel(force: Bool = false) {
         selectedText = ""
         panel.orderOut(nil)
-        postAction(action: "card-hidden", text: "-")
     }
 
     private func hideIfClickOutsidePanel(_ event: NSEvent) {
         let screenPoint = NSEvent.mouseLocation
         FileLog.write("DOWN point=\(screenPoint) win=\(event.window.map { "\($0)" } ?? "nil") cardFrame=\(NSStringFromRect(resultPanel.frame)) tvFrame=\(NSStringFromRect(notesTableView.frame)) tvVisible=\(NSStringFromRect(notesTableView.visibleRect))")
-
-        // Card interaction focus: a click inside the card arms the notes
-        // Enter; any click elsewhere disarms it. (Nonactivating panels can
-        // never become key windows — windowDidBecomeKey never fires.)
-        if resultPanel.isVisible {
-            let inside = event.window === resultPanel
-                || resultPanel.frame.contains(screenPoint)
-            postAction(action: "card-key", text: inside ? "1" : "0")
-        }
 
         // Native notes panel: hide + tell lexi so its tap flag never goes stale.
         if notesPanel.isVisible,
@@ -3332,7 +3297,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
            !resultPanel.frame.contains(screenPoint) {
             resultPanel.orderOut(nil)
             clearAllRuns(quietly: true)
-            postAction(action: "card-hidden", text: "-")
         }
 
         guard panel.isVisible else {
@@ -3348,9 +3312,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
 
         log("hide outside click x=\(Int(screenPoint.x)) y=\(Int(screenPoint.y))")
-        hidePanel(force: true)
     }
-
     @objc private func runToolbarAction(_ sender: NSButton) {
         guard let action = sender.identifier?.rawValue, !selectedText.isEmpty else {
             return
@@ -3366,33 +3328,82 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         } else if action == "note" {
             LexiTools.note(text: selectedText)
         } else if action == "handoff" {
-            postAction(action: action, text: selectedText)
+            LexiTools.handoff(text: selectedText)
         } else {
             runFeatureLocally(featureId: action, text: selectedText)
         }
         hidePanel(force: true)
     }
 
-    private func postAction(action: String, text: String) {
-        let payload: [String: String] = ["action": action, "text": text]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let body = String(data: data, encoding: .utf8) else { return }
-        let connection = NWConnection(
-            host: NWEndpoint.Host(IPC_HOST),
-            port: (NWEndpoint.Port(rawValue: UInt16(actionPort) ?? ACTION_PORT))!,
-            using: .tcp
-        )
-        connection.stateUpdateHandler = { state in
-            if case .ready = state {
-                let request = "POST /action HTTP/1.1\r\nHost: \(IPC_HOST)\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
-                connection.send(content: request.data(using: .utf8), completion: .contentProcessed { _ in
-                    connection.receive(minimumIncompleteLength: 1, maximumLength: 256) { _, _, _, _ in
-                        connection.cancel()
-                    }
-                })
+    /// Local handling for every former Rust round-trip action. Rust is
+    /// gone: DB writes, tool execution, and quit all happen here.
+    private func handleAction(action: String, text: String) {
+        switch action {
+        case "quit-lexi":
+            NSApp.terminate(nil)
+        case "save-vocab":
+            saveVocabAction(text)
+        case "note-delete":
+            if let id = Int64(text.trimmingCharacters(in: .whitespaces)) {
+                LexiStore.deleteNote(id: id)
+                reloadCardNotes()
             }
+        case "note-tag-create":
+            LexiStore.createTag(name: text)
+            reloadCardNotes()
+        case "note-create":
+            if let data = text.data(using: .utf8),
+               let value = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+                LexiStore.insertNote(
+                    name: value["name"] ?? "", content: value["content"] ?? "",
+                    tag: value["tag"] ?? ""
+                )
+                reloadCardNotes()
+            }
+        case "note-tag-reorder":
+            if let data = text.data(using: .utf8),
+               let names = try? JSONSerialization.jsonObject(with: data) as? [String] {
+                LexiStore.reorderTags(names)
+                reloadCardNotes()
+            }
+        case "note-insert":
+            ClipboardPaster.pasteString(text, previousApp: sourceApp)
+        case "handoff":
+            LexiTools.handoff(text: text)
+        default:
+            FileLog.write("ACTION dropped \(action) (no local handler)")
         }
-        connection.start(queue: connectionQueue)
+    }
+
+    private func splitTagPayload(_ text: String) -> (Int64, String)? {
+        let parts = text.components(separatedBy: "|")
+        guard parts.count == 2, let id = Int64(parts[0].trimmingCharacters(in: .whitespaces)) else {
+            return nil
+        }
+        return (id, parts[1])
+    }
+
+    /// Save button on the card: persist the run's translation JSON with the
+    /// entry type the user picked (Rust save_vocab_action parity).
+    private func saveVocabAction(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let word = payload["word"] as? String,
+              !word.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return
+        }
+        let field = { (key: String) -> String in payload[key] as? String ?? "" }
+        let entryType = field("entryType").isEmpty ? "word" : field("entryType")
+        LexiStore.insertWord(
+            word: word, translation: field("translation"), pos: field("pos"),
+            definition: field("definition"), example: field("example"),
+            entryType: entryType, sourceText: field("sourceText")
+        )
+    }
+
+    /// Refresh the card's notes tab from the DB after a local write.
+    private func reloadCardNotes() {
+        handleCardNotes(Self.cardNotesPayload())
     }
 
     private func log(_ message: String) {
@@ -3478,9 +3489,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     private func hideNotesPanel(notifyLexi: Bool) {
         notesPanel.orderOut(nil)
-        if notifyLexi {
-            postAction(action: "notes-hidden", text: "-")
-        }
     }
 
     private func rebuildRunTabs() {
@@ -3641,10 +3649,16 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             rebuildInputButtons()
             return
         }
-        let payload = ["kind": kind, "id": id, "text": text]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let body = String(data: data, encoding: .utf8) else { return }
-        postAction(action: "card-input", text: body)
+        switch id {
+        case "copy": LexiTools.copy(text: text)
+        case "search": LexiTools.search(text: text)
+        case "read", "speak": LexiSpeech.shared.speak(text: text)
+        case "note": LexiTools.note(text: text)
+        case "handoff": LexiTools.handoff(text: text)
+        default: break
+        }
+        inputTextView.string = ""
+        layoutResultCard()
     }
 
     @objc private func copyResultClicked() {
@@ -3669,12 +3683,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             "example": jsonStringField(json, "example") ?? "",
             "entryType": run.entryType,
         ]
-        if payload["translation"]?.isEmpty == true {
-            payload["translation"] = String(run.text.prefix(200))
-        }
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let body = String(data: data, encoding: .utf8) else { return }
-        postAction(action: "save-vocab", text: body)
+        handleAction(action: "save-vocab", text: body)
         run.saved = true
         updateEntryTypeTags()
         updateSaveButton()
@@ -3687,7 +3698,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
         if cardRuns.isEmpty {
             resultPanel.orderOut(nil)
-            postAction(action: "card-cleared", text: "-")
             return
         }
         rebuildRunTabs()
