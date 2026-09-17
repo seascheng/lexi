@@ -37,6 +37,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
 
     enum Row {
         case header(String)
+        case favorite(FolderItem)
         case folder(FolderItem)
         case recent(RecentItem)
         case app(RunningAppItem)
@@ -266,9 +267,44 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         }
     }
 
+    /// Canonical home subfolders pinned to the top of the Folders tab
+    /// (user-requested ordering: Favorites → Recent → tag groups). Displayed
+    /// with the system-localized name (桌面/下载/…); only folders that
+    /// actually exist are listed.
+    private static let favoriteFolderNames = ["Desktop", "Documents", "Downloads", "Movies", "Pictures"]
+
     private func buildFolderRows() -> [Row] {
         let filter = filterText
         var out: [Row] = []
+
+        let favorites = Self.favoriteFolderNames.compactMap { name -> FolderItem? in
+            let url = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(name)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { return nil }
+            let localizedName = (try? url.resourceValues(forKeys: [.localizedNameKey]))?.localizedName ?? name
+            guard filter.isEmpty
+                || localizedName.lowercased().contains(filter)
+                || name.lowercased().contains(filter)
+                || url.path.lowercased().contains(filter)
+            else { return nil }
+            return FolderItem(path: url.path, name: localizedName, tag: "")
+        }
+        if !favorites.isEmpty {
+            out.append(.header("Favorites"))
+            out += favorites.map { .favorite($0) }
+        }
+
+        let recentMatches = recents.filter { item in
+            filter.isEmpty
+                || item.path.lowercased().contains(filter)
+                || URL(fileURLWithPath: item.path).lastPathComponent.lowercased().contains(filter)
+        }
+        if !recentMatches.isEmpty {
+            out.append(.header("Recent"))
+            out += recentMatches.map { .recent($0) }
+        }
+
         let matching = taggedFolders.filter { item in
             filter.isEmpty
                 || item.name.lowercased().contains(filter)
@@ -280,15 +316,6 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
             out += grouped[tag]!
                 .sorted { $0.name.lowercased() < $1.name.lowercased() }
                 .map { .folder($0) }
-        }
-        let recentMatches = recents.filter { item in
-            filter.isEmpty
-                || item.path.lowercased().contains(filter)
-                || URL(fileURLWithPath: item.path).lastPathComponent.lowercased().contains(filter)
-        }
-        if !recentMatches.isEmpty {
-            out.append(.header("Recent"))
-            out += recentMatches.map { .recent($0) }
         }
         return out
     }
@@ -475,6 +502,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     private func activateRow(_ index: Int) {
         guard index >= 0, index < rows.count else { return }
         switch rows[index] {
+        case .favorite(let item): openPath(item.path, target: .finder)
         case .folder(let item): openPath(item.path, target: .finder)
         case .recent(let item): openPath(item.path, target: .finder)
         case .app(let item): activateApp(item)
@@ -556,12 +584,29 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         switch rows[row] {
         case .header(let title):
             let cell = reuse(LauncherHeaderCell.self, row: row)
-            // Tag groups wear their tag color (matches the row dots);
-            // "Recent" stays a quiet secondary.
-            let color = title == "Recent"
+            // Tag groups wear their tag color (matches the row dots); the
+            // two fixed sections (Favorites/Recent) stay a quiet secondary.
+            let color = ["Favorites", "Recent"].contains(title)
                 ? cardTheme.secondaryText
                 : tagColor(for: title, dark: cardTheme.isDark)
             cell.configure(title: title, color: color)
+            return cell
+        case .favorite(let item):
+            let cell = reuse(LauncherFolderCell.self, row: row)
+            cell.configure(
+                item: item,
+                theme: cardTheme,
+                showsEditor: editorAppURL != nil,
+                missing: false,
+                iconInsteadOfDot: true
+            ) { [weak self] action in
+                guard let self else { return }
+                switch action {
+                case .row: self.openPath(item.path, target: .finder)
+                case .editor: self.openPath(item.path, target: .editor)
+                case .terminal: self.openPath(item.path, target: .terminal)
+                }
+            }
             return cell
         case .folder(let item):
             let cell = reuse(LauncherFolderCell.self, row: row)
@@ -652,6 +697,7 @@ final class LauncherFolderCell: NSView {
     enum Action { case row, editor, terminal }
 
     private let dot = NSView()
+    private let folderIcon = NSImageView()
     private let nameLabel = NSTextField(labelWithString: "")
     private let pathLabel = NSTextField(labelWithString: "")
     private let editorButton = HoverIconButton(frame: .zero)
@@ -678,6 +724,7 @@ final class LauncherFolderCell: NSView {
         theme: CardTheme,
         showsEditor: Bool,
         missing: Bool,
+        iconInsteadOfDot: Bool = false,
         _ handler: @escaping (Action) -> Void
     ) {
         onAction = handler
@@ -688,6 +735,8 @@ final class LauncherFolderCell: NSView {
             dot.layer?.cornerRadius = 3
             dot.frame = NSRect(x: 16, y: 18, width: 6, height: 6)
             addSubview(dot)
+            folderIcon.frame = NSRect(x: 13, y: 13, width: 15, height: 15)
+            addSubview(folderIcon)
 
             nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
             // Two stacked lines in a NON-flipped cell: y measured from the
@@ -711,10 +760,17 @@ final class LauncherFolderCell: NSView {
         nameLabel.stringValue = item.name
         let parent = (item.path as NSString).deletingLastPathComponent
         pathLabel.stringValue = parent.replacingOccurrences(of: NSHomeDirectory(), with: "~")
-        dot.layer?.backgroundColor = item.tag.isEmpty
-            ? NSColor.clear.cgColor
-            : tagColor(for: item.tag, dark: theme.isDark).cgColor
-        dot.isHidden = item.tag.isEmpty
+        if iconInsteadOfDot {
+            dot.isHidden = true
+            folderIcon.isHidden = false
+            folderIcon.image = lucideImage(for: "folder", title: item.name, color: theme.secondaryText)
+        } else {
+            dot.layer?.backgroundColor = item.tag.isEmpty
+                ? NSColor.clear.cgColor
+                : tagColor(for: item.tag, dark: theme.isDark).cgColor
+            dot.isHidden = item.tag.isEmpty
+            folderIcon.isHidden = true
+        }
         nameLabel.textColor = theme.foreground
         pathLabel.textColor = theme.secondaryText
 
