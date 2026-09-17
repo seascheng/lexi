@@ -307,7 +307,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         }
 
         let clipboard = ChipPillView(frame: NSRect(x: 0, y: 4, width: 64, height: PanelDesign.pillHeight))
-        clipboard.configure(title: "Clipboard", color: .systemGray) { [weak self] in
+        clipboard.configure(title: "剪贴板", color: .systemGray) { [weak self] in
             self?.selectTab(.clipboard)
         }
         clipboard.applyTheme(cardTheme)
@@ -1475,6 +1475,9 @@ final class ClipCell: NSView {
         nameLabel.isHidden = true
         pathLabel.isHidden = true
         previewLabel.isHidden = true
+        // Recycled cells carry the image branch's centered placeholder —
+        // every kind re-baselines to LEFT alignment first.
+        previewLabel.alignment = .natural
         thumbnailView.isHidden = true
 
         switch item.kind {
@@ -1538,6 +1541,7 @@ final class ClipCell: NSView {
         nameLabel.isHidden = true
         pathLabel.isHidden = true
         previewLabel.isHidden = true
+        previewLabel.alignment = .natural
         thumbnailView.isHidden = true
 
         let text = ClipboardNotePreview.text(note)
