@@ -257,8 +257,9 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
-        root.addSubview(scrollView)
-
+        // Vertical breathing room around the rows — the content area gets
+        // the same padding rhythm on all four sides.
+        scrollView.contentInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
         // Double-click pastes, same as Enter.
         tableView.target = self
         tableView.action = #selector(rowDoubleClicked)
@@ -393,8 +394,16 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         layoutChipsRow()
         scrollActiveChipVisible()
         let listY = 46 + PanelDesign.pillHeight + 4 + 6
-        scrollView.frame = NSRect(x: 0, y: listY, width: Self.panelWidth, height: height - listY - 24)
-        emptyLabel.frame = NSRect(x: Self.side, y: listY, width: Self.panelWidth - Self.side * 2, height: 40)
+        let listHeight = height - listY - 24
+        scrollView.frame = NSRect(x: 0, y: listY, width: Self.panelWidth, height: listHeight)
+        // Empty state floats in the MIDDLE of the content area, not pinned
+        // under the chips.
+        emptyLabel.frame = NSRect(
+            x: Self.side,
+            y: listY + max(0, (listHeight - 40) / 2),
+            width: Self.panelWidth - Self.side * 2,
+            height: 40
+        )
         let footerY = height - 24
         footerLeft.frame = NSRect(x: 16, y: footerY + 5, width: 240, height: 14)
         footerRight.frame = NSRect(x: Self.panelWidth - 266, y: footerY + 5, width: 250, height: 14)
