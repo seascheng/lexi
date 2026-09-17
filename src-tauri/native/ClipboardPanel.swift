@@ -328,6 +328,10 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         searchField.stringValue = ""
         syncChips()
         reload()
+        // A new tab starts reading from its first row — reload() only clamps
+        // the offset (to preserve position on same-tab refreshes).
+        scrollView.contentView.scroll(to: .zero)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     // MARK: chip drag reorder
@@ -566,6 +570,19 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             tableView.selectRowIndexes(IndexSet(integer: firstSelectable), byExtendingSelection: false)
         }
         placePanel()
+        // reloadData tiles the table against the PREVIOUS clip bounds; a
+        // few-row tab reached from a long one then shrinks the window in
+        // placePanel, stranding a taller documentView whose scroll range
+        // keeps the scroller alive. Refit to the final viewport.
+        let viewport = scrollView.contentSize
+        let total = rows.reduce(0.0) { $0 + rowHeight(for: $1) }
+        tableView.frame = NSRect(x: 0, y: 0, width: viewport.width, height: max(total, viewport.height))
+        let clip = scrollView.contentView
+        let maxOffset = max(0, tableView.frame.height - viewport.height)
+        if clip.bounds.origin.y > maxOffset {
+            clip.scroll(to: NSPoint(x: 0, y: maxOffset))
+            scrollView.reflectScrolledClipView(clip)
+        }
     }
 
     private func reloadClipboard() {
