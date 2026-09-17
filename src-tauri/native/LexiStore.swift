@@ -184,11 +184,14 @@ struct LexiWord: Identifiable, Hashable {
     let note: String
     let reviewCount: Int
     let nextReview: String?
+    let createdAt: String
 }
 
 extension LexiStore {
     /// Paged, searched word list. Empty search + nil status = whole table.
-    static func words(search: String, status: String?, offset: Int, limit: Int) -> [LexiWord] {
+    /// Optional entryType filter (all/word/phrase/pattern), parity with the
+    /// React page's client-side filter.
+    static func words(search: String, status: String?, entryType: String?, offset: Int, limit: Int) -> [LexiWord] {
         guard let db = open() else { return [] }
         defer { sqlite3_close(db) }
 
@@ -203,8 +206,12 @@ extension LexiStore {
             clauses.append("status = ?\(bindings.count + 1)")
             bindings.append(status)
         }
+        if let entryType, !entryType.isEmpty {
+            clauses.append("IFNULL(entry_type,'word') = ?\(bindings.count + 1)")
+            bindings.append(entryType)
+        }
         let whereSQL = clauses.isEmpty ? "" : "WHERE " + clauses.joined(separator: " AND ")
-        let sql = "SELECT id, word, translation, IFNULL(pos,''), IFNULL(definition,''), IFNULL(example,''), status, IFNULL(entry_type,'word'), IFNULL(note,''), review_count, strftime('%Y-%m-%d', next_review) FROM words \(whereSQL) ORDER BY created_at DESC, id DESC LIMIT \(limit) OFFSET \(offset);"
+        let sql = "SELECT id, word, translation, IFNULL(pos,''), IFNULL(definition,''), IFNULL(example,''), status, IFNULL(entry_type,'word'), IFNULL(note,''), review_count, strftime('%Y-%m-%d', next_review), strftime('%Y-%m-%d', created_at) FROM words \(whereSQL) ORDER BY created_at DESC, id DESC LIMIT \(limit) OFFSET \(offset);"
 
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
@@ -219,11 +226,8 @@ extension LexiStore {
                 guard let cString = sqlite3_column_text(statement, i) else { return "" }
                 return String(cString: cString)
             }
-            let nextReview: String?
-            if sqlite3_column_type(statement, 10) == SQLITE_NULL {
-                nextReview = nil
-            } else {
-                nextReview = text(10)
+            func optionalText(_ i: Int32) -> String? {
+                sqlite3_column_type(statement, i) == SQLITE_NULL ? nil : text(i)
             }
             rows.append(LexiWord(
                 id: sqlite3_column_int64(statement, 0),
@@ -231,7 +235,8 @@ extension LexiStore {
                 definition: text(4), example: text(5), status: text(6),
                 entryType: text(7), note: text(8),
                 reviewCount: Int(sqlite3_column_int(statement, 9)),
-                nextReview: nextReview
+                nextReview: optionalText(10),
+                createdAt: optionalText(11) ?? ""
             ))
         }
         return rows
@@ -275,7 +280,8 @@ extension LexiStore {
             definition: text(4), example: text(5), status: text(6),
             entryType: text(7), note: text(8),
             reviewCount: Int(sqlite3_column_int(statement, 9)),
-            nextReview: nextReview
+            nextReview: nextReview,
+            createdAt: ""
         )
     }
 
@@ -331,6 +337,20 @@ extension LexiStore {
         guard sqlite3_prepare_v2(db, "DELETE FROM words WHERE id = ?1;", -1, &statement, nil) == SQLITE_OK else { return }
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_int64(statement, 1, id)
+        sqlite3_step(statement)
+    }
+
+    /// The expanded row's status switcher (React updateWordStatus).
+    static func setWordStatus(id: Int64, status: String) {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "UPDATE words SET status = ?1 WHERE id = ?2;", -1, &statement, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, status, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int64(statement, 2, id)
         sqlite3_step(statement)
     }
 }

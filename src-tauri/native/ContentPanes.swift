@@ -319,24 +319,26 @@ struct FeatureEditor: View {
             Form {
                 Section("Feature") {
                     TextField("Name", text: $draft.name)
-                    Picker("Output", selection: $draft.outputMode) {
-                        Text("Plain text").tag("plain_text")
-                        Text("Translation JSON").tag("translation_json")
-                    }
-                    .pickerStyle(.menu)
                     TextField("Icon (Lucide name)", text: $draft.icon)
-                    TextField("Target language", text: $draft.targetLanguage)
                 }
-                Section {
+                Section("Prompt") {
                     TextEditor(text: $draft.promptTemplate)
                         .font(.system(.body, design: .monospaced))
                         .frame(minHeight: 180)
                         .scrollContentBackground(.hidden)
                         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
-                } header: {
-                    Text("Prompt")
-                } footer: {
-                    Text("{{text}} is the selection; {{targetLanguage}} the language above.")
+                    Text("Use {{text}} for the selected text.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Section {
+                    HStack {
+                        Text("Output")
+                        Spacer()
+                        Text(draft.outputMode == "translation_json" ? "structured translation JSON" : "plain text")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.system(size: 12))
                 }
                 Section("Behavior") {
                     Toggle("Enabled", isOn: $draft.enabled)

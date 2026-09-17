@@ -50,6 +50,7 @@ final class SettingsNavigationState {
 
     func select(_ tab: SettingsTab) {
         guard tab != self.tab else { return }
+        FileLog.write("NAV select \(tab.name) was=\(self.tab.name) cb=\(onHistoryChange != nil)")
         history.append(self.tab)
         future.removeAll()
         self.tab = tab
@@ -242,6 +243,7 @@ private final class SettingsToolbar: NSObject, NSToolbarDelegate {
         window?.title = navigation.tab.title
         backButton.isEnabled = navigation.canGoBack
         forwardButton.isEnabled = navigation.canGoForward
+        FileLog.write("TITLE sync tab=\(navigation.tab.title) title=\(window?.title ?? "nil")")
     }
 
     /// Directional symbols so the pair mirrors in RTL.
@@ -288,8 +290,15 @@ struct LexiSidebarList: View {
             ForEach(SettingsSection.allCases) { section in
                 Section(section.title) {
                     ForEach(section.tabs) { tab in
-                        Label(tab.title, systemImage: tab.systemImage)
-                            .tag(tab)
+                        HStack(spacing: 7) {
+                            Image(systemName: tab.systemImage)
+                                .font(.system(size: 12, weight: .regular))
+                                .frame(width: 16)
+                                .foregroundStyle(.tint)
+                            Text(tab.title)
+                                .font(.system(size: 13))
+                        }
+                        .tag(tab)
                     }
                 }
             }
@@ -360,6 +369,11 @@ final class LexiSettingsWindowController: NSObject, NSWindowDelegate {
     private let contentSize = CGSize(width: 760, height: 540)
     private var window: NSWindow?
     private var navigation: SettingsNavigationState?
+    /// NSWindow does NOT retain its toolbar delegate — without this strong
+    /// reference the toolbar deallocates right after makeWindow returns,
+    /// and its history-sync closure (weak self) becomes a silent no-op
+    /// (stale window titles, dead back/forward buttons).
+    private var toolbar: SettingsToolbar?
     let model = LexiSettingsModel()
 
     /// Wired by the app controller: applies a style change in-process and
@@ -457,6 +471,7 @@ final class LexiSettingsWindowController: NSObject, NSWindowDelegate {
 
         let toolbar = SettingsToolbar(navigation: navigation)
         toolbar.install(in: window)
+        self.toolbar = toolbar
 
         window.setFrameAutosaveName("LexiSettingsWindow")
         if !window.setFrameUsingName("LexiSettingsWindow") {
