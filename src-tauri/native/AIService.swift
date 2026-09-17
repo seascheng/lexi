@@ -44,6 +44,7 @@ extension SelectionToolbarApp {
     /// Start a feature run entirely inside the helper: read the feature row,
     /// present the card, stream, and feed events to the renderer.
     func runFeatureLocally(featureId: String, text: String) {
+        FileLog.write("CARD run=feature id=\(featureId) text=\(text.prefix(24))")
         guard let feature = LexiStore.aiFeature(id: featureId) else {
             FileLog.write("ai: unknown feature \(featureId)")
             return

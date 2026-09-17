@@ -2032,10 +2032,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     func showResultCard(_ payload: ResultShowPayload) {
+        FileLog.write("CARD open=api runId=\(payload.runId ?? "-") feature=\(payload.featureId ?? "-") input=\(payload.inputText?.prefix(24) ?? "-")")
         // Every card presentation retires the transient overlays — the
         // card's actions replace them (PanelCoordinator policy).
         panels.present(.card)
-        // Every run trigger funnels here (Rust surface events, toolbar
         // buttons, the input bar): the card presents and the AI stream
         // starts locally from the shared DB.
         var payload = payload
@@ -3541,16 +3541,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     private func submitInput(kind: String, id: String) {
+        FileLog.write("CARD submit id=\(id) kind=\(kind)")
         let text = inputTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         // Speech + builtin tools run in-process; handoff stays on Rust
         // (activation + injection, disabled by default).
         if id == "read" || id == "speak" {
             LexiSpeech.shared.speak(text: text)
-            return
-        }
-        if id == "copy" {
-            LexiTools.copy(text: text)
             return
         }
         if id == "search" {
@@ -3627,10 +3624,8 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return object[field] as? String
     }
-
     private func inferredEntryType(for word: String) -> String {
         let text = word.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.contains("...") || text.contains("{{") { return "pattern" }
         if text.hasSuffix(".") || text.hasSuffix("!") || text.hasSuffix("?") { return "pattern" }
         if text.contains(" ") { return "phrase" }
         return "word"

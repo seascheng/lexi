@@ -750,6 +750,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     var onPasteThrough: (() -> Void)?
 
     private func pasteSelected() {
+        FileLog.write("PASTE enter tab=\(tab)")
         switch tab {
         case .clipboard:
             pasteClipboardSelection()
