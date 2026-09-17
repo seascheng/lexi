@@ -1137,6 +1137,10 @@ enum ClipboardPaster {
             }
             return
         }
+        // Launcher recipe (de2910d/dd074da): a BACKGROUND app's activation
+        // requests are ignored — make ourselves the active app first, then
+        // LaunchServices honors the target activation.
+        NSApp.activate(ignoringOtherApps: true)
         var config = NSWorkspace.OpenConfiguration()
         config.activates = true
         guard let bundleURL = app.bundleURL else {

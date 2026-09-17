@@ -1148,12 +1148,22 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         let rows = LexiStore.notes(limit: 50)
         var tags = Set<String>()
         for note in rows { tags.formUnion(note.tags) }
-        handleCardNotes(CardNotesPayload(
+        let payload = CardNotesPayload(
             notes: rows.map {
                 CardNotesPayload.Note(id: $0.id, name: $0.name, tags: $0.tags, content: $0.content)
             },
             allTags: tags.sorted()
-        ))
+        )
+        handleCardNotes(payload)
+        // The clipboard panel's tag tabs read the same snapshot — the
+        // route forwards it; the local path must too (missed in c596fea).
+        clipboardController.updateNotes(
+            notes: payload.notes.map {
+                ClipboardNote(
+                    id: $0.id ?? 0, name: $0.name, content: $0.content,
+                    tags: $0.tags ?? [])
+            },
+            tags: payload.allTags ?? [])
         clipboardController.show()
     }
 
