@@ -158,7 +158,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
             button.bezelStyle = .recessed
             button.isBordered = false
             button.wantsLayer = true
-            button.layer?.cornerRadius = 7
+            button.layer?.cornerRadius = PanelDesign.pillCornerRadius
             button.target = self
             root.addSubview(button)
         }
@@ -934,7 +934,7 @@ final class FolderChipView: NSView {
         if !didLayout {
             didLayout = true
             wantsLayer = true
-            layer?.cornerRadius = 6
+            layer?.cornerRadius = PanelDesign.chipCornerRadius
 
             dot.wantsLayer = true
             dot.layer?.cornerRadius = 3
@@ -1030,8 +1030,8 @@ final class FolderChipView: NSView {
 /// content stays symmetric.
 final class LauncherRowView: NSTableRowView {
     var fillColor: NSColor = .clear
-    var insetDx: CGFloat = 8
-    var insetDy: CGFloat = 2
+    var insetDx: CGFloat = PanelDesign.rowCapsuleInsetX
+    var insetDy: CGFloat = PanelDesign.rowCapsuleInsetY
 
     override func drawSelection(in dirtyRect: NSRect) {
         guard isSelected else { return }

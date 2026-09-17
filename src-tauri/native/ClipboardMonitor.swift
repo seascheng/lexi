@@ -185,9 +185,8 @@ final class ClipboardMonitor {
 
     // MARK: source icons
 
-
-    /// Display size of source icons in panel rows.
-    static let iconDisplaySize: CGFloat = 24
+    /// Display size of source icons in panel rows (shared design token).
+    static let iconDisplaySize: CGFloat = PanelDesign.rowIconSize
     /// Rendered pixel size of the cached PNG — 4x of the display size, so
     /// the icon stays sharp on retina and downscaled gracefully elsewhere.
     private static let iconPixelSize = 96

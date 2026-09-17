@@ -54,7 +54,7 @@ fn build_native_selection_toolbar() {
             "swiftc",
             "native/SelectionToolbarHelper.swift",
             "native/LauncherPanel.swift",
-            "native/ClipboardStore.swift",
+            "native/PanelDesign.swift",
             "native/ClipboardMonitor.swift",
             "native/ClipboardPanel.swift",
             "native/main.swift",
@@ -96,7 +96,7 @@ fn build_native_selection_toolbar() {
 
     println!("cargo:rerun-if-changed=native/SelectionToolbarHelper.swift");
     println!("cargo:rerun-if-changed=native/LauncherPanel.swift");
-    println!("cargo:rerun-if-changed=native/ClipboardStore.swift");
+    println!("cargo:rerun-if-changed=native/PanelDesign.swift");
     println!("cargo:rerun-if-changed=native/ClipboardMonitor.swift");
     println!("cargo:rerun-if-changed=native/ClipboardPanel.swift");
     println!("cargo:rerun-if-changed=native/main.swift");

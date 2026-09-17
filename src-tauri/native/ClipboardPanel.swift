@@ -178,7 +178,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         root.addSubview(searchField)
 
         for chip in Self.chips {
-            let view = ChipPillView(frame: NSRect(x: 0, y: 46, width: 64, height: 24))
+            let view = ChipPillView(frame: NSRect(x: 0, y: 46, width: 64, height: PanelDesign.pillHeight))
             view.configure(title: chip.title, color: chip.color) { [weak self] in
                 guard let self, self.filter != chip.filter else { return }
                 self.filter = chip.filter
@@ -245,7 +245,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         var x = Self.side
         for chip in chipViews {
             let width = max(chip.fittingSize.width + 26, 56)
-            chip.frame = NSRect(x: x, y: 46, width: width, height: 24)
+            chip.frame = NSRect(x: x, y: 46, width: width, height: PanelDesign.pillHeight)
             x = chip.frame.maxX + 6
         }
         scrollView.frame = NSRect(x: 0, y: 78, width: Self.panelWidth, height: height - Self.chromeHeight)
@@ -509,8 +509,8 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         // Capsule 6..514 on the 520pt row — visible floating margin from the
         // panel edge, and it pads the row content (icon at 12, text ends at
         // 508) by 6pt on each side.
-        view.insetDx = 6
-        view.insetDy = 2
+        view.insetDx = PanelDesign.rowCapsuleInsetX
+        view.insetDy = PanelDesign.rowCapsuleInsetY
         return view
     }
 
@@ -632,7 +632,7 @@ final class ChipPillView: NSView {
         if !didLayout {
             didLayout = true
             wantsLayer = true
-            layer?.cornerRadius = 12
+            layer?.cornerRadius = PanelDesign.pillCornerRadius
 
             dot.wantsLayer = true
             dot.layer?.cornerRadius = 3.5
@@ -684,7 +684,7 @@ final class ChipPillView: NSView {
 
     private func applyBackground() {
         wantsLayer = true
-        layer?.cornerRadius = 12
+        layer?.cornerRadius = PanelDesign.pillCornerRadius
         layer?.backgroundColor = selected
             ? theme.selectedFill.cgColor
             : (hovering ? theme.hoverFill.cgColor : NSColor.clear.cgColor)
@@ -810,20 +810,20 @@ final class ClipCell: NSView {
         previewLabel.cell?.wraps = true
         previewLabel.maximumNumberOfLines = 2
 
-        let iconSize = ClipboardMonitor.iconDisplaySize
-        iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16).isActive = true
+        let iconSize = PanelDesign.rowIconSize
+        iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PanelDesign.rowContentLeading).isActive = true
         iconView.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
         iconView.widthAnchor.constraint(equalToConstant: iconSize).isActive = true
         iconView.heightAnchor.constraint(equalToConstant: iconSize).isActive = true
 
-        thumbnailView.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10).isActive = true
+        thumbnailView.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: PanelDesign.rowIconToText).isActive = true
         thumbnailView.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
         thumbnailView.widthAnchor.constraint(equalToConstant: 40).isActive = true
         thumbnailView.heightAnchor.constraint(equalToConstant: 40).isActive = true
 
         for label in [nameLabel, pathLabel, previewLabel] {
-            label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10).isActive = true
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16).isActive = true
+            label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: PanelDesign.rowIconToText).isActive = true
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -PanelDesign.rowContentTrailing).isActive = true
         }
         previewLabel.topAnchor.constraint(equalTo: topAnchor, constant: 7).isActive = true
         previewLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7).isActive = true
