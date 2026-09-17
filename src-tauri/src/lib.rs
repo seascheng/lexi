@@ -70,6 +70,7 @@ pub fn run() {
                     None,
                 ))?;
             }
+            native_toolbar::setup_native_toolbar(app)?;
             setup_tray(app)?;
             launcher::initialize(app);
             clipboard::initialize(app);
