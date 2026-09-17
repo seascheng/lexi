@@ -185,37 +185,67 @@ final class ClipboardMonitor {
 
     // MARK: source icons
 
+
+    /// Display size of source icons in panel rows.
+    static let iconDisplaySize: CGFloat = 24
+    /// Rendered pixel size of the cached PNG — 4x of the display size, so
+    /// the icon stays sharp on retina and downscaled gracefully elsewhere.
+    private static let iconPixelSize = 96
+
     private var iconCache: [String: NSImage] = [:]
 
-    /// PNG-cached app icon for a source bundle id, rendered once at 72×72.
-    /// Unknown bundle ids (uninstalled apps, helper processes) return nil —
-    /// the panel draws a generic glyph.
+    /// PNG-cached app icon for a source bundle id. The blur before came from
+    /// snapshotting NSWorkspace's icon at 36pt via tiffRepresentation — the
+    /// bitmap that exists there is 32px, which a 2x display then upscales.
+    /// Rendered now into a real 96px bitmap; NSWorkspace's multi-representation
+    /// image downsamples from its 128px rep, so the result is crisp.
     func cachedIcon(forBundleID bundleID: String?) -> NSImage? {
         guard let bundleID, !bundleID.isEmpty else { return nil }
         if let cached = iconCache[bundleID] { return cached }
 
         let fileManager = FileManager.default
-        if let iconsDir,
-           fileManager.fileExists(atPath: iconsDir.appendingPathComponent(bundleID + ".png").path),
-           let image = NSImage(contentsOf: iconsDir.appendingPathComponent(bundleID + ".png"))
-        {
+        let cachePath = iconsDir?.appendingPathComponent(bundleID + ".png")
+        if let cachePath, fileManager.fileExists(atPath: cachePath.path),
+           let image = Self.displayImage(fromPNG: NSImage(contentsOf: cachePath)) {
             iconCache[bundleID] = image
             return image
         }
 
-        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            return nil
-        }
-        let icon = NSWorkspace.shared.icon(forFile: appURL.path)
-        icon.size = NSSize(width: 36, height: 36)
-        guard let tiff = icon.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:])
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
+              let png = Self.renderedIconPNG(forAppAt: appURL)
         else { return nil }
         if let iconsDir {
             try? png.write(to: iconsDir.appendingPathComponent(bundleID + ".png"), options: .atomic)
         }
-        iconCache[bundleID] = icon
-        return icon
+        guard let image = Self.displayImage(fromPNG: NSImage(data: png)) else { return nil }
+        iconCache[bundleID] = image
+        return image
+    }
+
+    /// Draws the app icon into a plain 96px bitmap (not a tiff snapshot of
+    /// whatever representation came back) and encodes it as PNG.
+    private static func renderedIconPNG(forAppAt appURL: URL) -> Data? {
+        let icon = NSWorkspace.shared.icon(forFile: appURL.path)
+        let pixels = iconPixelSize
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .calibratedRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        icon.draw(
+            in: NSRect(x: 0, y: 0, width: pixels, height: pixels),
+            from: .zero, operation: .sourceOver, fraction: 1
+        )
+        NSGraphicsContext.restoreGraphicsState()
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    /// Wraps a cached PNG as a display image sized `iconDisplaySize` points.
+    private static func displayImage(fromPNG png: NSImage?) -> NSImage? {
+        guard let png else { return nil }
+        png.size = NSSize(width: iconDisplaySize, height: iconDisplaySize)
+        return png
     }
 }

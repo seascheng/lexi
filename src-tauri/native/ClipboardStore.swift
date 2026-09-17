@@ -76,10 +76,18 @@ struct ClipboardItem: Equatable {
 
     var filePath: String? { kind == .file ? text : nil }
 
-    /// Preview text for list rows (image rows have none).
+    /// Preview text for list rows and in-memory matching. Text previews
+    /// collapse runs of whitespace (hard newlines, tabs, indent runs) into
+    /// single spaces — the row wraps naturally instead of showing blank
+    /// gaps. File previews keep the raw path, which must stay copyable.
     var previewText: String? {
         switch kind {
-        case .text, .file: return text
+        case .text:
+            guard let text, !text.isEmpty else { return nil }
+            let collapsed = text.replacingOccurrences(
+                of: "\\s+", with: " ", options: .regularExpression)
+            return collapsed.isEmpty ? nil : collapsed
+        case .file: return text
         case .image: return nil
         }
     }

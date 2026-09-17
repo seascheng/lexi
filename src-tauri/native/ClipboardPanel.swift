@@ -32,7 +32,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     /// semantics are tinycast's exclusive ClipboardFilter.
     private static let chips: [(title: String, color: NSColor, filter: ClipboardFilter)] = [
         ("全部", NSColor.systemGray, .all),
-        ("固定", NSColor.systemPink, .pinned),
+        ("置顶", NSColor.systemPink, .pinned),
         ("文本", NSColor.systemBlue, .text),
         ("链接", NSColor.systemGreen, .link),
         ("文件", NSColor.systemOrange, .file),
@@ -46,7 +46,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
     private let emptyLabel = NSTextField(labelWithString: "")
-    private let footerLine = NSView()
     private let footerLeft = NSTextField(labelWithString: "")
     private let footerRight = NSTextField(labelWithString: "")
     private var cardTheme: CardTheme = .dark
@@ -212,8 +211,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         tableView.target = self
         tableView.action = #selector(rowDoubleClicked)
 
-        footerLine.wantsLayer = true
-        root.addSubview(footerLine)
 
         footerLeft.font = .systemFont(ofSize: 11)
         footerRight.font = .systemFont(ofSize: 11)
@@ -243,7 +240,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         emptyLabel.textColor = cardTheme.tertiaryText
         footerLeft.textColor = cardTheme.secondaryText
         footerRight.textColor = cardTheme.tertiaryText
-        footerLine.layer?.backgroundColor = cardTheme.hairline.withAlphaComponent(0.5).cgColor
     }
 
     private func layoutChrome(height: CGFloat) {
@@ -256,7 +252,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         scrollView.frame = NSRect(x: 0, y: 78, width: Self.panelWidth, height: height - Self.chromeHeight)
         emptyLabel.frame = NSRect(x: Self.side, y: 78, width: Self.panelWidth - Self.side * 2, height: 40)
         let footerY = height - 24
-        footerLine.frame = NSRect(x: 0, y: footerY, width: Self.panelWidth, height: 1)
         footerLeft.frame = NSRect(x: 16, y: footerY + 5, width: 240, height: 14)
         footerRight.frame = NSRect(x: Self.panelWidth - 266, y: footerY + 5, width: 250, height: 14)
     }
@@ -273,15 +268,28 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         case .header: return Self.headerHeight
         case .clip(let item):
             if item.kind == .file { return Self.twoLineHeight }
-            guard let text = item.text else { return Self.threeLineHeight }
-            // 68 chars ≈ one line at 13pt in a 456pt column; newlines add lines.
-            let lineCount = (text.count + 67) / 68 + text.filter { $0 == "\n" }.count
-            switch max(1, min(3, lineCount)) {
+            guard let text = item.previewText else { return Self.threeLineHeight }
+            switch Self.previewLineCount(for: text) {
             case 1: return Self.singleLineHeight
             case 2: return Self.twoLineHeight
             default: return Self.threeLineHeight
             }
         }
+    }
+
+    /// Estimated wrapped-line count for a 452pt column. Width, not character
+    /// count: a CJK glyph is ~13pt at 13pt type, a latin char ~6.5pt — the
+    /// old chars/68 heuristic put a 45-char Chinese paragraph on ONE 32pt row
+    /// that the wrapping label then spilled out of. Sampled on the first 600
+    /// characters and extrapolated (cap: three preview lines).
+    static func previewLineCount(for text: String) -> Int {
+        let sample = text.prefix(600)
+        var width: CGFloat = 0
+        for scalar in sample.unicodeScalars {
+            width += scalar.value >= 0x2E80 ? 13 : 6.5
+        }
+        let totalWidth = width * (CGFloat(text.count) / CGFloat(max(sample.count, 1)))
+        return max(1, min(3, Int(ceil(totalWidth / 452))))
     }
 
     private func placePanel() {
@@ -302,7 +310,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         guard let store else {
             rows = []
             visibleItems = []
-            tableView.reloadData()
             updateFooter()
             emptyLabel.isHidden = false
             placePanel()
@@ -315,7 +322,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         let rest = found.dropFirst(pinned.count)
         rows = []
         if !pinned.isEmpty {
-            rows.append(.header("固定"))
+            rows.append(.header("置顶"))
             rows += pinned.map { Row.clip($0) }
         }
         rows += rest.map { Row.clip($0) }
@@ -345,8 +352,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         footerNoticeUntil = nil
         let row = tableView.selectedRow
         let ordinal = row >= 0 ? row + 1 : 0
-        footerLeft.stringValue = "已选 \(ordinal) 项，总共 \(visibleItems.count) 项"
-        footerRight.stringValue = "⌘P 固定 · ⌫ 删除 · ↩ 粘贴"
+        footerRight.stringValue = "⌘P 置顶 · ⌫ 删除 · ↩ 粘贴"
     }
 
     private func showFooterNotice(_ text: String) {
@@ -508,12 +514,11 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 
     private func thumbnail(for item: ClipboardItem) -> NSImage? {
         guard item.kind == .image else { return nil }
-        if let cached = thumbnailCache[item.id] { return cached }
         guard let store, let url = store.imageURL(for: item) else {
             return nil
         }
         let image = NSImage(contentsOf: url)
-        image?.size = NSSize(width: 28, height: 28)
+        image?.size = NSSize(width: 40, height: 40)
         if let image {
             thumbnailCache[item.id] = image
         }
@@ -732,8 +737,8 @@ final class ClipCell: NSView {
             }
             previewLabel.lineBreakMode = .byTruncatingTail
         }
-        let iconY = (height - 20) / 2
-        iconView.frame = NSRect(x: 16, y: iconY, width: 20, height: 20)
+        let iconSize = ClipboardMonitor.iconDisplaySize
+        iconView.frame = NSRect(x: 14, y: (height - iconSize) / 2, width: iconSize, height: iconSize)
 
         nameLabel.isHidden = true
         pathLabel.isHidden = true
@@ -745,7 +750,7 @@ final class ClipCell: NSView {
             if height <= ClipboardPanelController.singleLineHeight + 1 {
                 nameLabel.font = .systemFont(ofSize: 13)
                 nameLabel.textColor = theme.foreground
-                nameLabel.stringValue = item.text ?? ""
+                nameLabel.stringValue = item.previewText ?? ""
                 nameLabel.lineBreakMode = .byTruncatingTail
                 nameLabel.cell?.usesSingleLineMode = true
                 nameLabel.frame = NSRect(x: 46, y: (height - 16) / 2, width: 456, height: 16)
@@ -753,7 +758,7 @@ final class ClipCell: NSView {
             } else {
                 previewLabel.font = .systemFont(ofSize: 13)
                 previewLabel.textColor = theme.foreground
-                previewLabel.stringValue = item.text ?? ""
+                previewLabel.stringValue = item.previewText ?? ""
                 previewLabel.maximumNumberOfLines = height >= ClipboardPanelController.threeLineHeight ? 3 : 2
                 previewLabel.frame = NSRect(x: 46, y: 7, width: 456, height: height - 14)
                 previewLabel.isHidden = false
@@ -777,7 +782,7 @@ final class ClipCell: NSView {
         case .image:
             if let thumbnail {
                 thumbnailView.image = thumbnail
-                thumbnailView.frame = NSRect(x: 44, y: (height - 28) / 2, width: 28, height: 28)
+                thumbnailView.frame = NSRect(x: 46, y: (height - 40) / 2, width: 40, height: 40)
                 thumbnailView.isHidden = false
             }
             // Without a decoded thumbnail yet, a quiet placeholder keeps the
