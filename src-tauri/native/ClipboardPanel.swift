@@ -20,9 +20,9 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     var onHidden: (() -> Void)?
 
     private static let panelWidth: CGFloat = 520
-    private static let singleLineHeight: CGFloat = 32
-    private static let twoLineHeight: CGFloat = 50
-    private static let threeLineHeight: CGFloat = 68
+    static let singleLineHeight: CGFloat = 32
+    static let twoLineHeight: CGFloat = 50
+    static let threeLineHeight: CGFloat = 68
     private static let headerHeight: CGFloat = 28
     private static let maxListHeight: CGFloat = 11 * ClipboardPanelController.threeLineHeight
     private static let chromeHeight: CGFloat = 146 // search 12+26+8 + chips 24+8 + footer 24 + hairline/pads
@@ -489,7 +489,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         case .clip(let item):
             let cell = reuse(ClipCell.self, row: row)
             cell.configure(
-                item: item, theme: cardTheme,
+                item: item, theme: cardTheme, height: rowHeight(for: rows[row]),
                 thumbnail: thumbnail(for: item),
                 sourceIcon: ClipboardMonitor.shared.cachedIcon(forBundleID: item.sourceBundleID))
             return cell
@@ -509,11 +509,14 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     private func thumbnail(for item: ClipboardItem) -> NSImage? {
         guard item.kind == .image else { return nil }
         if let cached = thumbnailCache[item.id] { return cached }
-        guard let store, let url = store.imageURL(for: item), let image = NSImage(contentsOf: url) else {
+        guard let store, let url = store.imageURL(for: item) else {
             return nil
         }
-        image.size = NSSize(width: 28, height: 28)
-        thumbnailCache[item.id] = image
+        let image = NSImage(contentsOf: url)
+        image?.size = NSSize(width: 28, height: 28)
+        if let image {
+            thumbnailCache[item.id] = image
+        }
         return image
     }
 
@@ -703,40 +706,35 @@ final class ClipboardHeaderCell: NSView {
     }
 }
 
-/// Clipboard row: source-app icon + preview. Text rows preview up to three
-/// lines; file rows show name over dim path; image rows show a thumbnail
-/// beside the source icon.
+/// Clipboard row: source-app icon + preview. Frames derive from the ROW
+/// height every configure — this view is NOT flipped, so a label taller than
+/// its row pushes its first line above the row where the table clips it
+/// (the "icons but no text" bug). Text rows: 1 line → single-line label;
+/// 2–3 lines → wrapping label that fills the row. File rows: name on the
+/// FIRST line (higher y in non-flipped coords), dim path under it. Image
+/// rows: thumbnail centered beside the source icon.
 final class ClipCell: NSView {
     private let iconView = NSImageView()
     private let thumbnailView = NSImageView()
     private let nameLabel = NSTextField(labelWithString: "")  // single-line text / file name
     private let pathLabel = NSTextField(labelWithString: "")  // file path (dim)
     private let previewLabel = NSTextField(wrappingLabelWithString: "")
-    private var didLayout = false
+    private var subviewsInstalled = false
 
-    func configure(item: ClipboardItem, theme: CardTheme, thumbnail: NSImage?, sourceIcon: NSImage?) {
-        if !didLayout {
-            didLayout = true
-            iconView.frame = NSRect(x: 16, y: 6, width: 20, height: 20)
-            addSubview(iconView)
-            thumbnailView.frame = NSRect(x: 44, y: 10, width: 28, height: 28)
-            addSubview(thumbnailView)
-            nameLabel.font = .systemFont(ofSize: 13)
-            nameLabel.lineBreakMode = .byTruncatingTail
-            nameLabel.cell?.usesSingleLineMode = true
-            nameLabel.frame = NSRect(x: 46, y: 8, width: 440, height: 16)
-            addSubview(nameLabel)
-            pathLabel.font = .systemFont(ofSize: 11)
-            pathLabel.lineBreakMode = .byTruncatingMiddle
-            pathLabel.cell?.usesSingleLineMode = true
-            pathLabel.frame = NSRect(x: 46, y: 26, width: 440, height: 14)
-            addSubview(pathLabel)
-            previewLabel.font = .systemFont(ofSize: 13)
-            previewLabel.maximumNumberOfLines = 3
+    func configure(
+        item: ClipboardItem, theme: CardTheme, height: CGFloat,
+        thumbnail: NSImage?, sourceIcon: NSImage?
+    ) {
+        if !subviewsInstalled {
+            subviewsInstalled = true
+            for view in [iconView, thumbnailView, nameLabel, pathLabel, previewLabel] {
+                addSubview(view)
+            }
             previewLabel.lineBreakMode = .byTruncatingTail
-            previewLabel.frame = NSRect(x: 46, y: 8, width: 456, height: 52)
-            addSubview(previewLabel)
         }
+        let iconY = (height - 20) / 2
+        iconView.frame = NSRect(x: 16, y: iconY, width: 20, height: 20)
+
         nameLabel.isHidden = true
         pathLabel.isHidden = true
         previewLabel.isHidden = true
@@ -744,27 +742,50 @@ final class ClipCell: NSView {
 
         switch item.kind {
         case .text:
-            previewLabel.stringValue = item.text ?? ""
-            previewLabel.textColor = theme.foreground
-            previewLabel.isHidden = false
+            if height <= ClipboardPanelController.singleLineHeight + 1 {
+                nameLabel.font = .systemFont(ofSize: 13)
+                nameLabel.textColor = theme.foreground
+                nameLabel.stringValue = item.text ?? ""
+                nameLabel.lineBreakMode = .byTruncatingTail
+                nameLabel.cell?.usesSingleLineMode = true
+                nameLabel.frame = NSRect(x: 46, y: (height - 16) / 2, width: 456, height: 16)
+                nameLabel.isHidden = false
+            } else {
+                previewLabel.font = .systemFont(ofSize: 13)
+                previewLabel.textColor = theme.foreground
+                previewLabel.stringValue = item.text ?? ""
+                previewLabel.maximumNumberOfLines = height >= ClipboardPanelController.threeLineHeight ? 3 : 2
+                previewLabel.frame = NSRect(x: 46, y: 7, width: 456, height: height - 14)
+                previewLabel.isHidden = false
+            }
         case .file:
             let url = URL(fileURLWithPath: item.text ?? "")
-            nameLabel.stringValue = url.lastPathComponent
             nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
             nameLabel.textColor = theme.foreground
+            nameLabel.stringValue = url.lastPathComponent
+            nameLabel.lineBreakMode = .byTruncatingTail
+            nameLabel.cell?.usesSingleLineMode = true
+            nameLabel.frame = NSRect(x: 46, y: height - 24, width: 456, height: 16)
             nameLabel.isHidden = false
-            pathLabel.stringValue = url.deletingLastPathComponent().path
+            pathLabel.font = .systemFont(ofSize: 11)
             pathLabel.textColor = theme.tertiaryText
+            pathLabel.stringValue = url.deletingLastPathComponent().path
+            pathLabel.lineBreakMode = .byTruncatingMiddle
+            pathLabel.cell?.usesSingleLineMode = true
+            pathLabel.frame = NSRect(x: 46, y: 8, width: 456, height: 14)
             pathLabel.isHidden = false
         case .image:
-            // Thumbnail rides beside the source icon; without one decoded
-            // yet, a quiet placeholder keeps the row from looking broken.
             if let thumbnail {
                 thumbnailView.image = thumbnail
+                thumbnailView.frame = NSRect(x: 44, y: (height - 28) / 2, width: 28, height: 28)
                 thumbnailView.isHidden = false
             }
-            previewLabel.stringValue = "图片"
+            // Without a decoded thumbnail yet, a quiet placeholder keeps the
+            // row from looking broken.
+            previewLabel.font = .systemFont(ofSize: 12)
             previewLabel.textColor = theme.tertiaryText
+            previewLabel.stringValue = "图片"
+            previewLabel.frame = NSRect(x: 44, y: (height - 16) / 2, width: 28, height: 16)
             previewLabel.isHidden = thumbnail != nil
         }
         iconView.image = sourceIcon
