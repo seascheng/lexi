@@ -1652,10 +1652,18 @@ final class ClipCell: NSView {
         }
         previewLabel.topAnchor.constraint(equalTo: topAnchor, constant: 7).isActive = true
         previewLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7).isActive = true
-        pathLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8).isActive = true
+        // Two-deck rows (named notes, file clips): the name and path labels
+        // are pinned, linked and height-fixed. Left to intrinsic sizes they
+        // total ~53pt in a 50pt row — the overflow is invisible under the
+        // next row's fill, but the LAST row scissor-clips at the scroll view
+        // edge ("bottom of the last cell cut off").
+        pathLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6).isActive = true
+        pathLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2).isActive = true
+        pathLabel.heightAnchor.constraint(equalToConstant: 14).isActive = true
+        nameTop = nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 6)
+        nameLabel.heightAnchor.constraint(equalToConstant: 18).isActive = true
 
         nameCenterY = nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
-        nameTop = nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8)
     }
 }
 extension ClipCell: NSTextFieldDelegate {
