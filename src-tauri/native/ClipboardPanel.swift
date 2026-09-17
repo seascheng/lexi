@@ -494,13 +494,23 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         footerRight.frame = NSRect(x: Self.panelWidth - 266, y: footerY + 5, width: 250, height: 14)
     }
 
+    /// macOS 26 NSTableView pads its rows symmetrically INSIDE the table
+    /// bounds (verified against a vanilla table: rect(ofRow:0).minY == 10
+    /// with intercell/header/insets all neutralized). Every height we compute
+    /// must therefore budget rows + 2×pad, or the last row sits below the
+    /// clip and reads as "cut off". Measured live instead of hardcoded.
+    private var tableVerticalPad: CGFloat {
+        tableView.numberOfRows > 0 ? max(0, tableView.rect(ofRow: 0).minY) : 10
+    }
+
     /// Top-anchored adaptive height: capped list, 200–560pt total (a taller
     /// ceiling than the launcher — multi-line previews need the room).
     private var panelHeight: CGFloat {
         let listHeight = min(rows.reduce(0.0) { $0 + rowHeight(for: $1) }, Self.maxListHeight)
-        // search(46) + chips(24+4) + gap(6) + list(Σ) + footer zone(25 =
-        // 6pt list gap + footer label) — matches layoutChrome exactly, so
-        // the viewport equals the row total and nothing scrolls short lists.
+            + tableVerticalPad * 2
+        // search(46) + chips(24+4) + gap(6) + list(Σ + table pad) + footer
+        // zone(25) — matches layoutChrome exactly, so the viewport equals the
+        // table's true content height and nothing scrolls short lists.
         let chrome = 46 + PanelDesign.pillHeight + 4 + 6 + 25
         return min(max(chrome + max(listHeight, Self.singleLineHeight * 3), 200), 560)
     }
@@ -582,7 +592,10 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         // placePanel, stranding a taller documentView whose scroll range
         // keeps the scroller alive. Refit to the final viewport.
         let viewport = scrollView.contentSize
-        let total = rows.reduce(0.0) { $0 + rowHeight(for: $1) }
+        // The table's own row padding is part of its content height
+        // (sizeToFit returns Σ + 2×pad) — refit with it or the scroller
+        // wakes up for exactly the padding overhang.
+        let total = rows.reduce(0.0) { $0 + rowHeight(for: $1) } + tableVerticalPad * 2
         tableView.frame = NSRect(x: 0, y: 0, width: viewport.width, height: max(total, viewport.height))
         let clip = scrollView.contentView
         let maxOffset = max(0, tableView.frame.height - viewport.height)
