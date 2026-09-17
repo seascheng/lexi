@@ -1876,7 +1876,19 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         cardRuns.first { $0.id == activeRunId } ?? cardRuns.last
     }
 
-    private func showResultCard(_ payload: ResultShowPayload) {
+    func showResultCard(_ payload: ResultShowPayload) {
+        // Every run trigger funnels here (Rust surface events, toolbar
+        // buttons, the input bar): the card presents and the AI stream
+        // starts locally from the shared DB.
+        var payload = payload
+        var feature: LexiAIFeature?
+        if let featureId = payload.featureId, !featureId.isEmpty {
+            feature = LexiStore.aiFeature(id: featureId)
+            if payload.title?.isEmpty != false, let row = feature {
+                payload.title = row.name
+                payload.icon = row.icon
+            }
+        }
         if let runId = payload.runId, !runId.isEmpty {
             let run = CardRun(
                 id: runId,
@@ -1931,6 +1943,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         applyNotesTheme()
         // WebView parity: the selected text lands in the input bar,
         // editable for a follow-up run.
+        // The run starts here for every trigger path — Rust only asks for
+        // the card; the helper owns the stream.
+        if let runId = payload.runId, !runId.isEmpty, let feature {
+            Task { [weak self] in
+                await self?.streamRun(runId: runId, feature: feature, text: payload.inputText ?? "")
+            }
+        }
     }
 
     private func handleCardActions(_ payload: CardActionsPayload) {
@@ -2270,7 +2289,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     @objc private func gradeClicked(_ sender: NSButton) {
         let ratings = ["again", "hard", "good", "easy"]
-        guard reviewCurrentWordId != 0, sender.tag < ratings.count else { return }
         let payload: [String: Any] = ["id": reviewCurrentWordId, "rating": ratings[sender.tag]]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let body = String(data: data, encoding: .utf8) else { return }
@@ -2278,7 +2296,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         postAction(action: "review-grade", text: body)
     }
 
-    private func handleResultEvent(_ payload: ResultEventPayload) {
+    func handleResultEvent(_ payload: ResultEventPayload) {
         let runId = payload.runId?.isEmpty == false ? payload.runId! : activeRunId
         guard let run = cardRuns.first(where: { $0.id == runId }) ?? activeRun else { return }
 
@@ -3097,7 +3115,16 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         guard let action = sender.identifier?.rawValue, !selectedText.isEmpty else {
             return
         }
-        postAction(action: action, text: selectedText)
+        // Phase 2: AI features and speech run in-process; the remaining
+        // built-in tools (copy/search/note/handoff) still route through
+        // Rust until Phase 3.
+        if action == "read" || action == "speak" {
+            LexiSpeech.shared.speak(text: selectedText)
+        } else if action == "copy" || action == "search" || action == "note" || action == "handoff" {
+            postAction(action: action, text: selectedText)
+        } else {
+            runFeatureLocally(featureId: action, text: selectedText)
+        }
         hidePanel(force: true)
     }
 
@@ -3332,7 +3359,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         activeRun?.entryType = types[index]
         updateEntryTypeTags()
     }
-
     @objc private func inputActionClicked(_ sender: NSButton) {
         let id = sender.identifier?.rawValue ?? ""
         let isTool = ["copy", "search", "read", "speak", "note", "handoff"].contains(id)
@@ -3342,15 +3368,23 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private func submitInput(kind: String, id: String) {
         let text = inputTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        // Phase 2: features and speech run in-process; built-in tools
+        // still route through Rust until Phase 3.
+        if id == "read" || id == "speak" {
+            LexiSpeech.shared.speak(text: text)
+            return
+        }
+        if kind == "feature" {
+            runFeatureLocally(featureId: id, text: text)
+            inputTextView.string = ""
+            layoutResultCard()
+            rebuildInputButtons()
+            return
+        }
         let payload = ["kind": kind, "id": id, "text": text]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let body = String(data: data, encoding: .utf8) else { return }
         postAction(action: "card-input", text: body)
-        if kind == "feature" {
-            inputTextView.string = ""
-            layoutResultCard()
-            rebuildInputButtons()
-        }
     }
 
     @objc private func copyResultClicked() {
@@ -3414,7 +3448,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         if text.contains(" ") { return "phrase" }
         return "word"
     }
-
+}
 
 private struct ShowPayload: Decodable {
     let text: String
@@ -3426,22 +3460,42 @@ private struct ShowPayload: Decodable {
     let actions: [ToolbarAction]?
 
 }
-private struct ResultShowPayload: Decodable {
+struct ResultShowPayload: Decodable {
     let runId: String?
     let featureId: String?
-    let title: String?
-    let icon: String?
-    let autoSave: Bool?
+    var title: String?
+    var icon: String?
+    var autoSave: Bool?
     let inputText: String?
+
+    init(runId: String? = nil, featureId: String? = nil, title: String? = nil,
+         icon: String? = nil, autoSave: Bool? = nil, inputText: String? = nil) {
+        self.runId = runId
+        self.featureId = featureId
+        self.title = title
+        self.icon = icon
+        self.autoSave = autoSave
+        self.inputText = inputText
+    }
 }
 
-private struct ResultEventPayload: Decodable {
+struct ResultEventPayload: Decodable {
     let runId: String?
     let chunk: String?
     let done: Bool
     let error: String?
     let translationJson: String?
     let saved: Bool?
+
+    init(runId: String? = nil, chunk: String? = nil, done: Bool = false,
+         error: String? = nil, translationJson: String? = nil, saved: Bool? = nil) {
+        self.runId = runId
+        self.chunk = chunk
+        self.done = done
+        self.error = error
+        self.translationJson = translationJson
+        self.saved = saved
+    }
 }
 
 private struct CardActionsPayload: Decodable {
@@ -4506,7 +4560,6 @@ private enum LightMarkdown {
     }
 }
 
-}
 
 extension SelectionToolbarApp: NSTextViewDelegate {
     func controlTextDidChange(_ obj: Notification) {

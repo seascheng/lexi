@@ -372,58 +372,10 @@ fn sqlite_query_json(app: &tauri::AppHandle, query: &str) -> Option<String> {
     }
 }
 
-/// Open the native result card and stream `feature_id`'s AI run into it.
-fn show_result_card(app: &tauri::AppHandle, text: &str, feature_id: &str) {
-    let escaped_id = feature_id.replace('\'', "''");
-    let Some(rows) = sqlite_query_json(
-        app,
-        &format!(
-            "SELECT name, prompt_template, output_mode, IFNULL(target_language,'') AS target_language, IFNULL(icon,'wand') AS icon, auto_save_to_vocabulary, IFNULL(thinking,0) AS thinking FROM ai_features WHERE id = '{escaped_id}';"
-        ),
-    ) else {
-        log_native("card: feature not found");
-        return;
-    };
-    let Some(feature) = serde_json::from_str::<serde_json::Value>(&rows)
-        .ok()
-        .and_then(|v| v.as_array().and_then(|a| a.first()).cloned())
-    else {
-        log_native("card: feature parse failed");
-        return;
-    };
-
-    let Some(settings) = sqlite_query_json(
-        app,
-        "SELECT key, value FROM settings WHERE key IN ('apiBaseUrl','apiKey','model');",
-    ) else {
-        log_native("card: settings unavailable");
-        return;
-    };
-    let mut api_base_url = String::new();
-    let mut api_key = String::new();
-    let mut model = String::new();
-    if let Ok(entries) = serde_json::from_str::<serde_json::Value>(&settings) {
-        if let Some(list) = entries.as_array() {
-            for entry in list {
-                match entry["key"].as_str().unwrap_or("") {
-                    "apiBaseUrl" => api_base_url = entry["value"].as_str().unwrap_or("").to_string(),
-                    "apiKey" => api_key = entry["value"].as_str().unwrap_or("").to_string(),
-                    "model" => model = entry["value"].as_str().unwrap_or("").to_string(),
-                    _ => {}
-                }
-            }
-        }
-    }
-    if api_base_url.is_empty() || model.is_empty() {
-        log_native("card: API settings missing");
-        return;
-    }
-
-    let title = feature["name"].as_str().unwrap_or("AI").to_string();
-    let icon = feature["icon"].as_str().unwrap_or("wand").to_string();
-    let auto_save = feature["auto_save_to_vocabulary"].as_i64().unwrap_or(0) == 1;
-    CARD_AUTO_SAVE.store(auto_save, std::sync::atomic::Ordering::Relaxed);
-
+/// Ask the helper to open the result card and run `feature_id` on `text`.
+/// Phase 2: the helper reads the feature + API config from the shared DB
+/// and streams in-process — Rust only triggers.
+fn show_result_card(_app: &tauri::AppHandle, text: &str, feature_id: &str) {
     let run_id = format!(
         "card-{}",
         std::time::SystemTime::now()
@@ -431,27 +383,10 @@ fn show_result_card(app: &tauri::AppHandle, text: &str, feature_id: &str) {
             .map(|d| d.as_millis())
             .unwrap_or(0)
     );
-    if !post_card_show(&run_id, feature_id, &title, &icon, auto_save, text) {
+    if !post_card_show(&run_id, feature_id, "", "", false, text) {
         return;
     }
-
-    let request = crate::commands::ai::AiRunRequest {
-        text: text.to_string(),
-        api_base_url,
-        api_key,
-        model,
-        prompt_template: feature["prompt_template"].as_str().unwrap_or("").to_string(),
-        output_mode: feature["output_mode"].as_str().unwrap_or("plain_text").to_string(),
-        target_language: Some(feature["target_language"].as_str().unwrap_or("").to_string())
-            .filter(|t| !t.is_empty()),
-        thinking_enabled: feature["thinking"].as_i64().unwrap_or(0) == 1,
-    };
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        if let Err(error) = crate::commands::ai::run_ai_prompt_stream(app.clone(), request, run_id).await {
-            log_native(&format!("card: stream spawn failed: {error}"));
-        }
-    });
+    log_native(&format!("card: local run triggered feature={feature_id}"));
 }
 
 /// Show the card with no runs — the manual input surface (WebView parity:

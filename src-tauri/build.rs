@@ -61,6 +61,7 @@ fn build_native_selection_toolbar() {
             "native/LexiStore.swift",
             "native/SettingsWindow.swift",
             "native/SettingsPanes.swift",
+            "native/AIService.swift",
             "native/main.swift",
             "-o",
             "native/LexiSelectionHelper.app/Contents/MacOS/LexiSelectionHelper",
@@ -68,6 +69,8 @@ fn build_native_selection_toolbar() {
             "AppKit",
             "-framework",
             "SwiftUI",
+            "-framework",
+            "AVFoundation",
             "-framework",
             "ApplicationServices",
             "-framework",
@@ -109,4 +112,5 @@ fn build_native_selection_toolbar() {
     println!("cargo:rerun-if-changed=native/ClipboardMonitor.swift");
     println!("cargo:rerun-if-changed=native/ClipboardPanel.swift");
     println!("cargo:rerun-if-changed=native/main.swift");
+    println!("cargo:rerun-if-changed=native/AIService.swift");
 }
