@@ -506,9 +506,9 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         ) as? LauncherRowView ?? LauncherRowView()
         view.identifier = NSUserInterfaceItemIdentifier("LauncherRowView")
         view.fillColor = cardTheme.selectedFill
-        // Capsule 4..516 on the 520pt row: 6pt padding around row content
-        // (icon at 10, text ends at 510) — equal on both sides.
-        view.insetDx = 4
+        // Capsule 2..518 on the 520pt row: 4pt padding around row content
+        // (icon at 6, text ends at 514) — equal on both sides.
+        view.insetDx = 2
         view.insetDy = 2
         return view
     }
@@ -746,10 +746,10 @@ final class ClipCell: NSView {
             previewLabel.maximumNumberOfLines = 2
         }
         let iconSize = ClipboardMonitor.iconDisplaySize
-        // Row rhythm: 10pt gap edge→icon, 10pt icon→text, 10pt text→edge
-        // (icon 10..34, text column 44..510 on the 520pt row). The selection
-        // capsule (insetDx 4) pads the content 6pt on each side.
-        iconView.frame = NSRect(x: 10, y: (height - iconSize) / 2, width: iconSize, height: iconSize)
+        // Row rhythm: 6pt gap edge→icon, 6pt icon→text, 6pt text→edge
+        // (icon 6..30, text column 36..514 on the 520pt row). The selection
+        // capsule (insetDx 2) pads the content 4pt on each side.
+        iconView.frame = NSRect(x: 6, y: (height - iconSize) / 2, width: iconSize, height: iconSize)
 
         nameLabel.isHidden = true
         pathLabel.isHidden = true
@@ -764,14 +764,14 @@ final class ClipCell: NSView {
                 nameLabel.stringValue = item.previewText ?? ""
                 nameLabel.lineBreakMode = .byTruncatingTail
                 nameLabel.cell?.usesSingleLineMode = true
-                nameLabel.frame = NSRect(x: 44, y: (height - 16) / 2, width: 466, height: 16)
+                nameLabel.frame = NSRect(x: 36, y: (height - 16) / 2, width: 478, height: 16)
                 nameLabel.isHidden = false
             } else {
                 previewLabel.font = .systemFont(ofSize: 13)
                 previewLabel.textColor = theme.foreground
                 previewLabel.stringValue = item.previewText ?? ""
                 previewLabel.maximumNumberOfLines = 2
-                previewLabel.frame = NSRect(x: 44, y: 7, width: 466, height: height - 14)
+                previewLabel.frame = NSRect(x: 36, y: 7, width: 478, height: height - 14)
                 previewLabel.isHidden = false
             }
         case .file:
@@ -781,19 +781,19 @@ final class ClipCell: NSView {
             nameLabel.stringValue = url.lastPathComponent
             nameLabel.lineBreakMode = .byTruncatingTail
             nameLabel.cell?.usesSingleLineMode = true
-            nameLabel.frame = NSRect(x: 44, y: height - 24, width: 466, height: 16)
+            nameLabel.frame = NSRect(x: 36, y: height - 24, width: 478, height: 16)
             nameLabel.isHidden = false
             pathLabel.font = .systemFont(ofSize: 11)
             pathLabel.textColor = theme.tertiaryText
             pathLabel.stringValue = url.deletingLastPathComponent().path
             pathLabel.lineBreakMode = .byTruncatingMiddle
             pathLabel.cell?.usesSingleLineMode = true
-            pathLabel.frame = NSRect(x: 44, y: 8, width: 466, height: 14)
+            pathLabel.frame = NSRect(x: 36, y: 8, width: 478, height: 14)
             pathLabel.isHidden = false
         case .image:
             if let thumbnail {
                 thumbnailView.image = thumbnail
-                thumbnailView.frame = NSRect(x: 44, y: (height - 40) / 2, width: 40, height: 40)
+                thumbnailView.frame = NSRect(x: 36, y: (height - 40) / 2, width: 40, height: 40)
                 thumbnailView.isHidden = false
             }
             // Without a decoded thumbnail yet, a quiet placeholder keeps the
@@ -801,7 +801,7 @@ final class ClipCell: NSView {
             previewLabel.font = .systemFont(ofSize: 12)
             previewLabel.textColor = theme.tertiaryText
             previewLabel.stringValue = "图片"
-            previewLabel.frame = NSRect(x: 44, y: (height - 16) / 2, width: 28, height: 16)
+            previewLabel.frame = NSRect(x: 36, y: (height - 16) / 2, width: 28, height: 16)
             previewLabel.isHidden = thumbnail != nil
         }
         iconView.image = sourceIcon
