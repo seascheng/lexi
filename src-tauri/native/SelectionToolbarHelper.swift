@@ -1088,6 +1088,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             onLauncher: { [weak self] in self?.launcherController.show() },
             onClipboard: { [weak self] in self?.showClipboardPanel() }
         )
+        shortcutMonitor?.onCopyCommand = { [weak self] in
+            self?.selectionPipeline?.noteCopyCommand()
+        }
         // Clipboard capture: own store + 0.5s poller, started once the TCP
         // server is up so suspend/resume posts can flow both ways.
         if let store = ClipboardStore.open() {

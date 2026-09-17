@@ -31,6 +31,7 @@ final class SelectionPipeline {
 
     func start() {
         reload()
+        pasteboardBaseline = NSPasteboard.general.changeCount
         installTap()
     }
 
@@ -38,7 +39,32 @@ final class SelectionPipeline {
         enabled = LexiStore.settingBool("toolbarEnabled", default: true)
         excludedApps = LexiStore.excludedToolbarApps()
     }
+    /// The user pressed plain Cmd+C (ShortcutMonitor hook). After the app
+    /// processes the shortcut, a changeCount bump means real copied text —
+    /// record it with 5s freshness (Rust handle_copy_for_toolbar parity).
+    private var pasteboardBaseline: Int = 0
+    private var lastCopied: (text: String, at: Date)?
 
+    func noteCopyCommand() {
+        workQueue.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self else { return }
+            let count = NSPasteboard.general.changeCount
+            guard count > self.pasteboardBaseline else {
+                FileLog.write("SEL1 copy: changeCount not bumped, skipping")
+                return
+            }
+            self.pasteboardBaseline = count
+            guard let text = NSPasteboard.general.string(forType: .string)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !text.isEmpty
+            else {
+                FileLog.write("SEL1 copy: pasteboard had no text")
+                return
+            }
+            self.lastCopied = (text, Date())
+            FileLog.write("SEL1 copy: recorded len=\(text.count)")
+        }
+    }
     private let workQueue = DispatchQueue(label: "lexi.selection.ax", qos: .userInitiated)
 
     private func installTap() {
@@ -123,7 +149,16 @@ final class SelectionPipeline {
             return
         }
 
-        let text = Self.readSelectedText()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let axText = Self.readSelectedText()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var text = axText
+        var source = "ax"
+        if text.isEmpty, let copied = lastCopied,
+           Date().timeIntervalSince(copied.at) < 5 {
+            // Browser flow: AX can't read web selections — the explicit
+            // Cmd+C (recorded by noteCopyCommand) is the text source.
+            text = copied.text
+            source = "copied"
+        }
         guard !text.isEmpty else {
             FileLog.write("SEL1 skip: no AX text (front=\(frontBundle))")
             return
@@ -133,7 +168,7 @@ final class SelectionPipeline {
         // (bottom-left) coordinates for the panel placement path.
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(cocoa) }) else { return }
         let cocoaPoint = NSPoint(x: upLocation.x, y: screen.frame.maxY - upLocation.y)
-        FileLog.write("SEL1 fire: len=\(text.count) front=\(frontBundle)")
+        FileLog.write("SEL1 fire: len=\(text.count) front=\(frontBundle) via=\(source)")
         DispatchQueue.main.async { [weak self] in
             self?.onSelection?(text, cocoaPoint)
         }

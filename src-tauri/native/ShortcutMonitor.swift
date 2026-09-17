@@ -121,6 +121,18 @@ final class ShortcutMonitor {
     private var clipboardMode: LexiShortcutMode?
     private let onLauncher: () -> Void
     private let onClipboard: () -> Void
+    /// Plain Cmd+C (no other modifiers) — the browser fallback trigger.
+    /// Wired by the app to SelectionPipeline.noteCopyCommand().
+    var onCopyCommand: (() -> Void)?
+
+    /// True for a plain Cmd+C KeyDown (port of is_copy_command).
+    private static func isCopyCommand(keyCode: UInt16, flags: CGEventFlags) -> Bool {
+        keyCode == 0x08 // kVK_ANSI_C
+            && flags.contains(.maskCommand)
+            && !flags.contains(.maskShift)
+            && !flags.contains(.maskControl)
+            && !flags.contains(.maskAlternate)
+    }
 
     init(onLauncher: @escaping () -> Void, onClipboard: @escaping () -> Void) {
         self.onLauncher = onLauncher
@@ -186,6 +198,13 @@ final class ShortcutMonitor {
             }
 
         case .keyDown:
+            // Plain Cmd+C — the browser fallback trigger (Layer 2).
+            if Self.isCopyCommand(keyCode: keyCode, flags: flags) {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onCopyCommand?()
+                }
+                return Unmanaged.passRetained(event)
+            }
             if case .keyCombo(let cmd, let shift, let ctrl, let alt, let code) = clipboardMode,
                keyCode == code,
                (!cmd || flags.contains(.maskCommand)),
