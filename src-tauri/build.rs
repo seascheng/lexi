@@ -55,6 +55,7 @@ fn build_native_selection_toolbar() {
             "native/SelectionToolbarHelper.swift",
             "native/LauncherPanel.swift",
             "native/PanelDesign.swift",
+            "native/ClipboardStore.swift",
             "native/ClipboardMonitor.swift",
             "native/ClipboardPanel.swift",
             "native/main.swift",
