@@ -22,9 +22,8 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     private static let panelWidth: CGFloat = 520
     static let singleLineHeight: CGFloat = 32
     static let twoLineHeight: CGFloat = 50
-    static let threeLineHeight: CGFloat = 68
     private static let headerHeight: CGFloat = 28
-    private static let maxListHeight: CGFloat = 11 * ClipboardPanelController.threeLineHeight
+    private static let maxListHeight: CGFloat = 11 * ClipboardPanelController.twoLineHeight
     private static let chromeHeight: CGFloat = 146 // search 12+26+8 + chips 24+8 + footer 24 + hairline/pads
     private static let side: CGFloat = 12
 
@@ -268,11 +267,11 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         case .header: return Self.headerHeight
         case .clip(let item):
             if item.kind == .file { return Self.twoLineHeight }
-            guard let text = item.previewText else { return Self.threeLineHeight }
+            guard let text = item.previewText else { return Self.twoLineHeight }
+            // User rule: wrap automatically, show at most TWO lines, then …
             switch Self.previewLineCount(for: text) {
             case 1: return Self.singleLineHeight
-            case 2: return Self.twoLineHeight
-            default: return Self.threeLineHeight
+            default: return Self.twoLineHeight
             }
         }
     }
@@ -281,7 +280,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     /// count: a CJK glyph is ~13pt at 13pt type, a latin char ~6.5pt — the
     /// old chars/68 heuristic put a 45-char Chinese paragraph on ONE 32pt row
     /// that the wrapping label then spilled out of. Sampled on the first 600
-    /// characters and extrapolated (cap: three preview lines).
+    /// characters and extrapolated (user rule: at most TWO preview lines).
     static func previewLineCount(for text: String) -> Int {
         let sample = text.prefix(600)
         var width: CGFloat = 0
@@ -289,7 +288,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             width += scalar.value >= 0x2E80 ? 13 : 6.5
         }
         let totalWidth = width * (CGFloat(text.count) / CGFloat(max(sample.count, 1)))
-        return max(1, min(3, Int(ceil(totalWidth / 452))))
+        return max(1, min(2, Int(ceil(totalWidth / 452))))
     }
 
     private func placePanel() {
@@ -735,6 +734,11 @@ final class ClipCell: NSView {
             for view in [iconView, thumbnailView, nameLabel, pathLabel, previewLabel] {
                 addSubview(view)
             }
+            // wraps=true + truncating tail: word-wrap up to
+            // maximumNumberOfLines, then … on the last visible line. Without
+            // wraps the truncating mode means ONE line only (the "tall row,
+            // single line" bug).
+            previewLabel.cell?.wraps = true
             previewLabel.lineBreakMode = .byTruncatingTail
         }
         let iconSize = ClipboardMonitor.iconDisplaySize
@@ -759,7 +763,7 @@ final class ClipCell: NSView {
                 previewLabel.font = .systemFont(ofSize: 13)
                 previewLabel.textColor = theme.foreground
                 previewLabel.stringValue = item.previewText ?? ""
-                previewLabel.maximumNumberOfLines = height >= ClipboardPanelController.threeLineHeight ? 3 : 2
+                previewLabel.maximumNumberOfLines = 2
                 previewLabel.frame = NSRect(x: 46, y: 7, width: 456, height: height - 14)
                 previewLabel.isHidden = false
             }
