@@ -225,9 +225,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         chipsScrollView.frame = NSRect(x: Self.side, y: 46, width: Self.panelWidth - Self.side * 2, height: PanelDesign.pillHeight + 4)
         chipsScrollView.drawsBackground = false
         chipsScrollView.hasVerticalScroller = false
-        chipsScrollView.hasHorizontalScroller = true
-        chipsScrollView.autohidesScrollers = true
-        chipsScrollView.scrollerStyle = .overlay
+        chipsScrollView.hasHorizontalScroller = false // gestures still scroll; no bar
         chipsScrollView.translatesAutoresizingMaskIntoConstraints = true
         chipsContent = FlippedView(frame: NSRect(x: 0, y: 0, width: chipsScrollView.contentSize.width, height: PanelDesign.pillHeight + 4))
         chipsScrollView.documentView = chipsContent
@@ -365,10 +363,18 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         scrollActiveChipVisible()
     }
 
+    /// Scrolls ONLY when the active chip is outside the visible rect — a
+    /// normal scroller never moves for targets you can already see.
     private func scrollActiveChipVisible() {
         guard let index = chipViews.firstIndex(where: { $0.kind == activeChipKind }) else { return }
-        let minX = max(0, chipViews[index].view.frame.minX - 40)
-        chipsScrollView.contentView.scroll(to: NSPoint(x: minX, y: 0))
+        let frame = chipViews[index].view.frame
+        let visible = chipsScrollView.contentView.documentVisibleRect
+        guard frame.minX < visible.minX || frame.maxX > visible.maxX else { return }
+        let target = frame.minX < visible.minX
+            ? max(0, frame.minX - 12)
+            : max(0, min(frame.maxX - visible.width + 12,
+                         chipsContent.frame.width - visible.width))
+        chipsScrollView.contentView.scroll(to: NSPoint(x: target, y: 0))
         chipsScrollView.reflectScrolledClipView(chipsScrollView.contentView)
     }
 
@@ -928,10 +934,10 @@ final class ChipPillView: NSView {
 
     override var isFlipped: Bool { true }
 
-    /// Dot(7) + 4 gap + label + 10 right pad, clamped so one long tag can't
-    /// hog the row (title truncates).
+    /// Dot(7) + gap + label + generous slack — an exact-fit width loses the
+    /// last character to sub-pixel rounding (the "Clipboar" bug).
     override var fittingSize: NSSize {
-        NSSize(width: min(label.intrinsicContentSize.width + 34, 128),
+        NSSize(width: min(label.intrinsicContentSize.width + 40, 140),
                height: PanelDesign.pillHeight)
     }
 
@@ -990,9 +996,9 @@ final class ChipPillView: NSView {
 
     override func layout() {
         super.layout()
-        // Label fills everything right of the dot; truncation happens at the
-        // frame edge set by the chip-row flow.
-        label.frame = NSRect(x: 24, y: 4, width: bounds.width - 34, height: 16)
+        // Label fills everything right of the dot; the chip-row flow sizes
+        // the chip with slack (fittingSize +40) so the text never clips.
+        label.frame = NSRect(x: 24, y: 4, width: bounds.width - 32, height: 16)
     }
 
     override func updateTrackingAreas() {
