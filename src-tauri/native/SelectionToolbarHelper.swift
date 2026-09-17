@@ -987,6 +987,14 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         controller.onAction = { [weak self] action, text in
             self?.postAction(action: action, text: text)
         }
+        // Paste-through dismisses the card too: NSApp.activate would pull
+        // the helper's other key panel forward and the ⌘V would land in
+        // its input bar instead of the target app.
+        controller.onPasteThrough = { [weak self] in
+            guard let self, self.resultPanel.isVisible else { return }
+            self.resultPanel.orderOut(nil)
+            self.postAction(action: "card-hidden", text: "-")
+        }
         return controller
     }()
     private var notesContainer: NSView!

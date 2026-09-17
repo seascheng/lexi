@@ -743,6 +743,12 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         reload()
     }
 
+    /// Wired by the app controller: called BEFORE the paste-through, so the
+    /// result card can be dismissed too — the activation step would
+    /// otherwise pull it (the helper's other key panel) to the front and
+    /// the synthesized ⌘V would land in its input bar.
+    var onPasteThrough: (() -> Void)?
+
     private func pasteSelected() {
         switch tab {
         case .clipboard:
@@ -754,9 +760,13 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 
     private func pasteClipboardSelection() {
         guard let store, let item = selectedItem else { return }
-        if ClipboardPaster.paste(item, store: store, previousApp: previousApp) {
-            hide(notify: true)
-        } else if item.kind == .file {
+        // Our own surfaces go away FIRST: NSApp.activate (the launcher
+        // recipe inside ClipboardPaster) brings the helper's key panel
+        // forward — with the card gone, nothing of ours can steal focus.
+        hide(notify: true)
+        onPasteThrough?()
+        if !ClipboardPaster.paste(item, store: store, previousApp: previousApp),
+           item.kind == .file {
             // A vanished file is reported, never silently swallowed and never
             // auto-deleted — history is a record of what happened.
             showFooterNotice("文件已不存在 — \(item.text ?? "")")
@@ -765,9 +775,9 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 
     private func pasteNoteSelection() {
         guard let note = selectedNote else { return }
-        if ClipboardPaster.pasteString(note.content, previousApp: previousApp) {
-            hide(notify: true)
-        }
+        hide(notify: true)
+        onPasteThrough?()
+        ClipboardPaster.pasteString(note.content, previousApp: previousApp)
     }
 
     @objc private func rowDoubleClicked() {
