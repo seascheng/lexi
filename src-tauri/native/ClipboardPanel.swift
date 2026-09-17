@@ -244,6 +244,10 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 
         tableView.headerView = nil
         tableView.backgroundColor = .clear
+        // Default intercellSpacing.height is 2pt — an invisible per-row tax
+        // that breaks the exact-fit height math (few-row tabs scrolled by
+        // 2×n points). Row gaps come from the capsule insets, not here.
+        tableView.intercellSpacing = .zero
         tableView.usesAutomaticRowHeights = false
         tableView.selectionHighlightStyle = .regular
         tableView.allowsEmptySelection = true
