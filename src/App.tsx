@@ -77,6 +77,11 @@ function MainWindow() {
       }).catch((error) => {
         console.warn("Failed to sync launcher shortcut", error);
       });
+      void invoke("set_clipboard_shortcut", {
+        shortcut: settings.clipboardShortcut,
+      }).catch((error) => {
+        console.warn("Failed to sync clipboard shortcut", error);
+      });
       void invoke("set_excluded_toolbar_apps", {
         apps: settings.excludedToolbarApps ?? [],
       }).catch((error) => {

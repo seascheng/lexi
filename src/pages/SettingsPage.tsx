@@ -229,6 +229,18 @@ export function SettingsPage({ settings, onSettingsChanged }: SettingsPageProps)
                     <option value="Cmd+Shift+L">Cmd+Shift+L</option>
                   </Select>
                 </Field>
+                <Field label="Show clipboard shortcut" inline hint="Opens the clipboard panel from any app.">
+                  <Select
+                    value={draft.clipboardShortcut}
+                    onChange={(event) => setDraft({ ...draft, clipboardShortcut: event.target.value })}
+                  >
+                    <option value="Alt+V">Alt+V</option>
+                    <option value="Cmd+Shift+V">Cmd+Shift+V</option>
+                    <option value="Ctrl+Shift+V">Ctrl+Shift+V</option>
+                    <option value="Alt+Alt">Double Option</option>
+                    <option value="Cmd+Cmd">Double Command</option>
+                  </Select>
+                </Field>
               </SettingsCard>
             )}
 

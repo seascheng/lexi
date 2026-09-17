@@ -52,6 +52,7 @@ export interface AppSettings {
   model: string;
   popupShortcut: string;
   launcherShortcut: string;
+  clipboardShortcut: string;
   autoStart: boolean;
 }
 
