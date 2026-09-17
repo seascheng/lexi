@@ -112,6 +112,7 @@ CREATE VIRTUAL TABLE items_fts USING fts5(text, content='items', content_rowid='
 
 Enter：
 1. `store.promote` 跳过 pinned；写 pasteboard：`clearContents` → 按 kind 声明 flavors（text: `.string`；image: `.png`；file: `.fileURL` + `.string`(路径) —— 文件双 flavor，文本框收路径、Finder 收文件）+ `internal` 标记。
+
 2. `previousApp.activate()` → 80ms → `CGEventSource(combinedSessionState)` 合成 V down/up，flags `.maskCommand`。
 3. 面板 `orderOut` + postAction `clipboard-hidden`。
 4. **不恢复原剪贴板**：被选条目成为当前剪贴板（剪贴板管理器标准语义，与 hapigo/Paste/Maccy 一致）；poller 因标记跳过，`store.promote(item)` 手动置顶。
@@ -168,3 +169,15 @@ ActionPanel/LauncherPanel/翻译/选词/笔记/复习行为零改动。
 7. 触发一次翻译注入（走 clipboard lease）→ 历史无译文垃圾行（suspend/resume 生效）。
 8. Alt+V 再按一次 → 面板关闭（toggle）。
 9. 回归：双击 Ctrl popup、双击 Shift launcher、选词 toolbar、result card、Notes 面板行为不变。
+
+## 11. Notes 并入（2026-09-17 增补，已实现）
+
+ClipboardPanel 顶部 chips 行升级为 **tab 语义**：`● Clipboard`（粘贴板历史，原功能不变）→ 每个 note 分类一个 chip（色点 = tag 哈希色）→ `＋` 新建分类。设计对齐 hapigo。
+
+- **数据管道**：复用 `/card-notes` 推送（notes + allTags 快照），helper 转发给 ClipboardPanel；Alt+V 弹出前 Rust 先 `send_card_notes()` 刷新。helper 不直读主库。
+- **未分类笔记** 归入默认分类 `Tmp`（migration 008 种子数据），保证 toolbar 快速添加的笔记有归宿。
+- **行展示**：有 name → 名称 + 灰色 content 预览两层（同文件行）；无 name → content 即行文本。
+- **Enter/双击** = 回贴 note.content 到唤起前应用（与剪贴板行同语义；带 internal 标记，不进粘贴板历史）。
+- **⊕ 创建**：搜索框进入输入模式，回车 → `note-tag-create` action → Rust `INSERT OR IGNORE INTO tags` + 重推快照；Esc 取消。
+- **编辑/删除笔记仍归 ActionPanel 与主窗口**，本面板只读 + 新建分类。
+- Forever/Clear History 经用户确认**不做**。
