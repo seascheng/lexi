@@ -12,6 +12,8 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     /// Fired whenever the panel hides itself (Esc / focus loss); the app
     /// controller wires this to its action channel ("launcher-hidden").
     var onHidden: (() -> Void)?
+    /// Gear button in the chrome: opens the native settings window.
+    var onOpenSettings: (() -> Void)?
 
     private static let panelWidth: CGFloat = 520
     private static let rowHeight: CGFloat = 32
@@ -27,6 +29,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     /// the glass keeps text contrast on dark wallpapers.
     private let glassContent: NSView
     private let searchField = NSSearchField()
+    private let settingsButton = NSButton()
     private let foldersTabButton = NSButton()
     private let appsTabButton = NSButton()
     private let scrollView = NSScrollView()
@@ -163,6 +166,15 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         }
         foldersTabButton.action = #selector(tabClicked(_:))
         appsTabButton.action = #selector(tabClicked(_:))
+
+        settingsButton.bezelStyle = .recessed
+        settingsButton.isBordered = false
+        settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
+        settingsButton.imagePosition = .imageOnly
+        settingsButton.toolTip = "Settings"
+        settingsButton.target = self
+        settingsButton.action = #selector(settingsClicked)
+        root.addSubview(settingsButton)
         foldersTabButton.tag = 0
         appsTabButton.tag = 1
 
@@ -197,6 +209,10 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         tab = sender.tag == 0 ? .folders : .apps
     }
 
+    @objc private func settingsClicked() {
+        onOpenSettings?()
+    }
+
     private func syncTabButtons() {
         foldersTabButton.layer?.backgroundColor = (tab == .folders
             ? cardTheme.selectedFill
@@ -206,6 +222,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
             : cardTheme.hoverFill).cgColor
         foldersTabButton.contentTintColor = cardTheme.foreground
         appsTabButton.contentTintColor = cardTheme.foreground
+        settingsButton.contentTintColor = cardTheme.foreground
     }
 
     private func styleChrome() {
@@ -224,6 +241,8 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
             button.frame = NSRect(x: x, y: 46, width: max(button.fittingSize.width + 20, 64), height: 24)
             x = button.frame.maxX + 6
         }
+
+        settingsButton.frame = NSRect(x: Self.panelWidth - side - 24, y: 46, width: 24, height: 24)
         scrollView.frame = NSRect(x: 0, y: 78, width: Self.panelWidth, height: height - Self.chromeHeight)
         emptyLabel.frame = NSRect(x: side, y: 78, width: Self.panelWidth - side * 2, height: 40)
     }

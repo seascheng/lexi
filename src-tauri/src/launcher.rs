@@ -42,7 +42,7 @@ fn current_launcher_shortcut() -> ShortcutMode {
 
 /// Read once from sqlite at startup — same sqlite3-CLI pattern as the popup
 /// shortcut (the frontend also pushes the live value via the command below).
-pub(crate) fn initialize(app: &tauri::App) {
+pub(crate) fn initialize(app: &tauri::AppHandle) {
     let path = app
         .path()
         .app_data_dir()

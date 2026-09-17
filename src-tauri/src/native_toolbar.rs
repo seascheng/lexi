@@ -868,7 +868,7 @@ fn current_popup_shortcut() -> ShortcutMode {
         .unwrap_or_else(|_| ShortcutMode::default_shortcut())
 }
 
-fn initialize_popup_shortcut(app: &tauri::App) {
+fn initialize_popup_shortcut(app: &tauri::AppHandle) {
     let path = app
         .path()
         .app_data_dir()
@@ -968,8 +968,8 @@ pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
     // AppHandle without threading one through every helper call site.
     let _ = CURRENT_APP.set(app.handle().clone());
     request_system_permissions();
-    initialize_toolbar_enabled(app);
-    initialize_popup_shortcut(app);
+    initialize_toolbar_enabled(app.handle());
+    initialize_popup_shortcut(app.handle());
     initialize_pasteboard_change_count();
 
     // Configure popup to appear on all Spaces and disable occlusion detection
@@ -1002,7 +1002,7 @@ pub fn setup_native_toolbar(app: &tauri::App) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn initialize_toolbar_enabled(app: &tauri::App) {
+fn initialize_toolbar_enabled(app: &tauri::AppHandle) {
     let enabled = saved_toolbar_enabled(app).unwrap_or(true);
     if let Ok(mut current) = TOOLBAR_ENABLED.get_or_init(|| Mutex::new(true)).lock() {
         *current = enabled;
@@ -1010,7 +1010,7 @@ fn initialize_toolbar_enabled(app: &tauri::App) {
     log_native(&format!("initial toolbar enabled={enabled}"));
 }
 
-fn saved_toolbar_enabled(app: &tauri::App) -> Option<bool> {
+fn saved_toolbar_enabled(app: &tauri::AppHandle) -> Option<bool> {
     let path = app
         .path()
         .app_data_dir()
@@ -3180,6 +3180,40 @@ fn dispatch_toolbar_action(
     // Launcher panel dismissal report — informational only (no state to clear).
     if action.action == "launcher-hidden" {
         log_native("launcher hidden");
+        return Ok(());
+    }
+
+    // Native settings window live-sync: the change already lives in the
+    // helper (it applied it in-process) — only the caches need updating so
+    // watchdog re-pushes preserve the user's values.
+    if action.action == "panel-style" {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&action.text) {
+            if let Some(theme) = value["theme"].as_str() {
+                if let Ok(mut cached) = LAST_THEME.lock() {
+                    *cached = theme.to_string();
+                }
+            }
+            let opacity = value["panelOpacity"].as_u64().map(|v| v as u8);
+            let blur = value["panelBlur"].as_str().map(str::to_string);
+            if opacity.is_some() || blur.is_some() {
+                if let Ok(mut style) = LAST_PANEL_STYLE.lock() {
+                    let updated = (opacity.or(style.0), blur.or(style.1.clone()));
+                    *style = updated;
+                }
+            }
+            log_native("panel style updated from native settings");
+        }
+        return Ok(());
+    }
+
+    // Native settings window persisted shortcuts / toolbar toggle; the
+    // event-tap statics re-read the database so changes apply immediately.
+    if action.action == "reload-native-settings" {
+        initialize_toolbar_enabled(app);
+        initialize_popup_shortcut(app);
+        crate::launcher::initialize(app);
+        crate::clipboard::initialize(app);
+        log_native("native settings reloaded");
         return Ok(());
     }
     // Manual input surface: open the card on AiForm + IdleState (no run).

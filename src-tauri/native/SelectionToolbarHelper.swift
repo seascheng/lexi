@@ -972,6 +972,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         controller.onHidden = { [weak self] in
             self?.postAction(action: "launcher-hidden", text: "-")
         }
+        controller.onOpenSettings = { [weak self] in
+            self?.launcherController.hide(notify: false)
+            self?.showSettingsWindow()
+        }
         return controller
     }()
 
@@ -1055,6 +1059,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     private var listener: NWListener?
     private let listenerQueue = DispatchQueue(label: "lexi.toolbar.display")
     private let connectionQueue = DispatchQueue(label: "lexi.toolbar.connection")
+    /// Native settings window (full-Swift migration, phase 1). Created on
+    /// first show; the app controller itself is nonisolated, so every touch
+    /// hops through `MainActor.assumeIsolated` on the main queue.
+    private var settingsWindowController: LexiSettingsWindowController?
     private let actionPort: String
     private let toolbarPort: UInt16
 
@@ -2781,12 +2789,19 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             }
             return
         }
+        if request.hasPrefix("POST /open-settings ") {
+            DispatchQueue.main.async {
+                self.showSettingsWindow()
+            }
+            return
+        }
 
         if request.hasPrefix("GET /debug-state ") || request.hasPrefix("POST /debug-state ") {
             DispatchQueue.main.async {
                 let runs = self.cardRuns.map { "\($0.id)|\($0.status)|len=\($0.text.count)" }.joined(separator: "; ")
                 let notesVis = NSStringFromRect(self.cardNotesClip.contentView.visibleRect)
                 let notesDoc = NSStringFromRect(self.cardNotesClip.documentView?.frame ?? .zero)
+
                 let state = "notesSel=\(self.notesTableView?.selectedRow ?? -99) notesCount=\(self.cardNotesItems.count) notesVis=\(notesVis) notesDoc=\(notesDoc) runsBar=\(NSStringFromRect(self.resultRunsBar.frame)) tabsClip=\(NSStringFromRect(self.resultTabsClip.frame)) doc=\(NSStringFromRect(self.resultTabsClip.documentView?.frame ?? .zero)) trash=\(NSStringFromRect(self.resultTrashButton.frame)) chips=\(self.runChipViews.count) activeRunId=\(self.activeRunId ?? "-") panel=\(self.activePanel) pinned=\(self.cardPinned) runs=[\(runs)] tvLen=\(self.resultTextView.textStorage?.length ?? 0) scrollHidden=\(self.resultScrollView.isHidden) scroll=\(NSStringFromRect(self.resultScrollView.frame)) tv=\(NSStringFromRect(self.resultTextView.frame)) container=\(NSStringFromRect(self.resultContainer.frame)) panelFrame=\(NSStringFromRect(self.resultPanel.frame)) input=\(NSStringFromRect(self.inputContainer.frame)) tvInset=\(self.inputTextView.textContainerInset) tvFrame=\(self.inputTextView.frame) actions=\(self.cardActions.count)"
                 self.log("STATE \(state)")
                 self.log("DEBUG \(state)")
@@ -2913,6 +2928,44 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         selectedText = text
         panel.setFrame(frame, display: true)
         panel.orderFrontRegardless()
+    }
+
+    /// Opens (or focuses) the native settings window. Style changes flow
+    /// both ways: applied in-process here, and mirrored into the Rust
+    /// caches so a helper restart preserves them.
+    func showSettingsWindow(tab: SettingsTab = .general) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                let controller: LexiSettingsWindowController
+                if let existing = self.settingsWindowController {
+                    controller = existing
+                } else {
+                    controller = LexiSettingsWindowController()
+                    self.settingsWindowController = controller
+                }
+                controller.onPanelStyleChange = { [weak self] theme, opacity, blur in
+                    PanelStyle.update(
+                        opacity: opacity.map { CGFloat($0) / 100.0 },
+                        blur: blur.flatMap(PanelStyle.Blur.init(rawValue:))
+                    )
+                    if let theme {
+                        self?.applyTheme(theme)
+                    }
+                    var payload: [String: Any] = [:]
+                    if let theme { payload["theme"] = theme }
+                    if let opacity { payload["panelOpacity"] = opacity }
+                    if let blur { payload["panelBlur"] = blur }
+                    if let data = try? JSONSerialization.data(withJSONObject: payload),
+                       let text = String(data: data, encoding: .utf8) {
+                        self?.postAction(action: "panel-style", text: text)
+                    }
+                }
+                controller.onNativeSettingsReload = { [weak self] in
+                    self?.postAction(action: "reload-native-settings", text: "")
+                }
+                controller.show(tab: tab)
+            }
+        }
     }
 
     private func applyTheme(_ themeName: String) {

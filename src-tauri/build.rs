@@ -58,11 +58,16 @@ fn build_native_selection_toolbar() {
             "native/ClipboardStore.swift",
             "native/ClipboardMonitor.swift",
             "native/ClipboardPanel.swift",
+            "native/LexiStore.swift",
+            "native/SettingsWindow.swift",
+            "native/SettingsPanes.swift",
             "native/main.swift",
             "-o",
             "native/LexiSelectionHelper.app/Contents/MacOS/LexiSelectionHelper",
             "-framework",
             "AppKit",
+            "-framework",
+            "SwiftUI",
             "-framework",
             "ApplicationServices",
             "-framework",
@@ -94,6 +99,9 @@ fn build_native_selection_toolbar() {
     if !status.success() {
         panic!("failed to codesign native selection toolbar helper");
     }
+    println!("cargo:rerun-if-changed=native/LexiStore.swift");
+    println!("cargo:rerun-if-changed=native/SettingsWindow.swift");
+    println!("cargo:rerun-if-changed=native/SettingsPanes.swift");
 
     println!("cargo:rerun-if-changed=native/SelectionToolbarHelper.swift");
     println!("cargo:rerun-if-changed=native/LauncherPanel.swift");

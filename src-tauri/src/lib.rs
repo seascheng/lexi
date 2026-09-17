@@ -72,8 +72,8 @@ pub fn run() {
             }
             native_toolbar::setup_native_toolbar(app)?;
             setup_tray(app)?;
-            launcher::initialize(app);
-            clipboard::initialize(app);
+            launcher::initialize(app.handle());
+            clipboard::initialize(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())
