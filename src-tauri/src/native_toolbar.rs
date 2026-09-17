@@ -3297,6 +3297,27 @@ fn dispatch_toolbar_action(
         }
         return send_card_notes(app);
     }
+
+    if action.action == "note-tag-reorder" {
+        // text = JSON array of tag names in their new chip-row order — the
+        // clipboard panel's drag-to-reorder. Each tag gets its index as
+        // sort_order; the re-push lands the new order everywhere.
+        if let Ok(values) = serde_json::from_str::<Vec<serde_json::Value>>(&action.text) {
+            for (index, value) in values.iter().enumerate() {
+                if let Some(name) = value.as_str() {
+                    let escaped = name.replace('\'', "''");
+                    let _ = sqlite_query_json(
+                        app,
+                        &format!(
+                            "UPDATE tags SET sort_order = {index} WHERE name = '{escaped}';"
+                        ),
+                    );
+                }
+            }
+            let _ = app.emit("lexi://notes-changed", ());
+        }
+        return send_card_notes(app);
+    }
     if action.action == "card-key" {
         return Ok(());
     }
@@ -3380,7 +3401,7 @@ pub(crate) fn send_card_notes(app: &tauri::AppHandle) -> Result<(), String> {
     // The tag picker lists every CONFIGURED tag (tags table), not just the
     // ones already bound to a note — the snapshot GROUP_CONCAT misses the
     // unbound ones.
-    let all_tags = sqlite_query_json(app, "SELECT name FROM tags ORDER BY name;")
+    let all_tags = sqlite_query_json(app, "SELECT name FROM tags ORDER BY sort_order, name;")
         .and_then(|json| serde_json::from_str::<Vec<serde_json::Value>>(&json).ok())
         .map(|values| {
             values

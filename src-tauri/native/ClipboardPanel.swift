@@ -298,6 +298,10 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             // panel is light, and the stale dark theme painted unreadable
             // white labels.
             view.applyTheme(cardTheme)
+            view.isDraggable = true
+            view.onDragBegin = { [weak self] chip, _ in self?.beginChipDrag(chip) }
+            view.onDragMove = { [weak self] chip, _ in self?.updateChipDrag(chip) }
+            view.onDragEnd = { [weak self] _ in self?.endChipDrag() }
             chipViews.append((.tag(tag), view))
             chipsContent.addSubview(view)
         }
@@ -320,6 +324,74 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         searchField.stringValue = ""
         syncChips()
         reload()
+    }
+
+    // MARK: chip drag reorder
+
+    private var dragChip: (kind: ChipKind, view: ChipPillView)?
+    private var dragGrabOffset: CGFloat = 0
+
+    /// The dragged chip follows the cursor; neighbours flow around its
+    /// live slot. The Clipboard tab stays pinned first — dragged chips can
+    /// never cross index 0.
+    private func beginChipDrag(_ chip: ChipPillView) {
+        guard let entry = chipViews.first(where: { $0.view === chip }),
+              entry.kind != .clipboard
+        else { return }
+        dragChip = entry
+        dragGrabOffset = chip.convert(NSEvent.mouseLocation, from: nil).x
+        // Raise above siblings for the whole drag.
+        chipsContent.addSubview(chip, positioned: .above, relativeTo: nil)
+    }
+
+    private func updateChipDrag(_ chip: ChipPillView) {
+        guard let dragged = dragChip, dragged.view === chip else { return }
+        let xInContent = chip.superview.map { $0.convert(NSEvent.mouseLocation, from: nil).x }
+            ?? chip.frame.origin.x
+        let contentWidth = chipsContent.frame.width
+        let rawX = xInContent - dragGrabOffset
+        // Clamp within the row: never before the Clipboard chip (index 0).
+        let minX = chipViews.first?.view.frame.maxX ?? 0
+        chip.frame.origin.x = min(max(rawX, minX), contentWidth - chip.frame.width)
+
+        // Live insertion slot by center; re-flow everyone else around it.
+        let center = chip.frame.midX
+        var others = chipViews.filter { $0.view !== chip }
+        var slot = others.count
+        for (index, entry) in others.enumerated() where entry.view.frame.midX > center {
+            slot = index
+            break
+        }
+        others.insert(dragged, at: slot)
+        // Keep Clipboard first no matter where the cursor sits.
+        if let clipboardIndex = others.firstIndex(where: {
+            if case .clipboard = $0.kind { return true }
+            return false
+        }), clipboardIndex != 0 {
+            let clipboardEntry = others.remove(at: clipboardIndex)
+            others.insert(clipboardEntry, at: 0)
+        }
+        chipViews = others
+        var x: CGFloat = 0
+        for entry in chipViews where entry.view !== chip {
+            entry.view.frame.origin.x = x
+            x = entry.view.frame.maxX + 6
+        }
+    }
+
+    private func endChipDrag() {
+        guard dragChip != nil else { return }
+        dragChip = nil
+        layoutChipsRow()
+        // Persist the new tag order (Clipboard excluded from the payload).
+        let names = chipViews.compactMap { kind, _ -> String? in
+            if case .tag(let name) = kind { return name }
+            return nil
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: names),
+              let json = String(data: data, encoding: .utf8)
+        else { return }
+        onAction?("note-tag-reorder", json)
     }
 
     private func syncChips() {
@@ -1207,7 +1279,47 @@ final class ChipPillView: NSView {
         applyBackground()
     }
 
-    override func mouseDown(with event: NSEvent) { onActivate?() }
+    // Drag-to-reorder (tag chips only): a >4pt move after mouse-down turns
+    // into a drag handled by the controller; otherwise mouse-UP activates
+    // the tab (click semantics preserved).
+    var isDraggable = false
+    var onDragBegin: ((ChipPillView, NSEvent) -> Void)?
+    var onDragMove: ((ChipPillView, NSEvent) -> Void)?
+    var onDragEnd: ((ChipPillView) -> Void)?
+    private var pressLocation: NSPoint?
+    private var isDragging = false
+
+    override func mouseDown(with event: NSEvent) {
+        pressLocation = NSEvent.mouseLocation
+        isDragging = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isDraggable, let start = pressLocation else { return }
+        let moved = hypot(
+            NSEvent.mouseLocation.x - start.x,
+            NSEvent.mouseLocation.y - start.y
+        )
+        if !isDragging, moved > 4 {
+            isDragging = true
+            onDragBegin?(self, event)
+        }
+        if isDragging {
+            onDragMove?(self, event)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer {
+            pressLocation = nil
+            isDragging = false
+        }
+        if isDragging {
+            onDragEnd?(self)
+        } else {
+            onActivate?()
+        }
+    }
 
     private func applyBackground() {
         wantsLayer = true

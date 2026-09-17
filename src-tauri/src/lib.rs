@@ -153,6 +153,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/011_feature_thinking.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 12,
+            description: "add tags sort_order for panel tab order",
+            sql: include_str!("../migrations/012_tag_order.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
