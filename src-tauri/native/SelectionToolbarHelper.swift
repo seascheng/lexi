@@ -1092,6 +1092,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         installStatusItem()
         refreshCardActions()
         LexiStore.migrateActionsTable()
+        startDisplayServer()
         shortcutMonitor = ShortcutMonitor(
             onLauncher: { [weak self] in
                 self?.panels.present(.launcher)
