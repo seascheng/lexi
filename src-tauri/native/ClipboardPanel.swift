@@ -713,44 +713,31 @@ final class ClipboardHeaderCell: NSView {
     }
 }
 
-/// Clipboard row: source-app icon + preview. Frames derive from the ROW
-/// height every configure — this view is NOT flipped, so a label taller than
-/// its row pushes its first line above the row where the table clips it
-/// (the "icons but no text" bug). Text rows: 1 line → single-line label;
-/// 2–3 lines → wrapping label that fills the row. File rows: name on the
-/// FIRST line (higher y in non-flipped coords), dim path under it. Image
-/// rows: thumbnail centered beside the source icon.
+/// Clipboard row, laid out with Auto Layout constraints (declared once, the
+/// system solves positions — no hand-computed frames to drift). Geometry:
+///
+///   icon: leading 16, 24×24, vertically centered
+///   text: leading icon+10, trailing ≤ superview-16
+///   selection capsule (insetDx 6 → 6..514): pads the content 10pt per side
+///
+/// Rows show exactly one of: single-line text (name label, centered),
+/// wrapping text (up to 2 lines, fills the row), file (name over dim path),
+/// image (40pt thumbnail; quiet placeholder while it decodes).
 final class ClipCell: NSView {
     private let iconView = NSImageView()
     private let thumbnailView = NSImageView()
     private let nameLabel = NSTextField(labelWithString: "")  // single-line text / file name
     private let pathLabel = NSTextField(labelWithString: "")  // file path (dim)
     private let previewLabel = NSTextField(wrappingLabelWithString: "")
-    private var subviewsInstalled = false
+    private var installed = false
+    private var nameCenterY: NSLayoutConstraint!
+    private var nameTop: NSLayoutConstraint!
 
     func configure(
         item: ClipboardItem, theme: CardTheme, height: CGFloat,
         thumbnail: NSImage?, sourceIcon: NSImage?
     ) {
-        if !subviewsInstalled {
-            subviewsInstalled = true
-            for view in [iconView, thumbnailView, nameLabel, pathLabel, previewLabel] {
-                addSubview(view)
-            }
-            // ORDER MATTERS: on NSTextField, setting lineBreakMode to a
-            // truncating mode (e.g. .byTruncatingTail) silently resets
-            // cell.wraps to false — which renders exactly ONE line no matter
-            // the row height. Word-wrap + maximumNumberOfLines(2) gives the
-            // two-line preview with an automatic trailing … from TextKit.
-            previewLabel.lineBreakMode = .byWordWrapping
-            previewLabel.cell?.wraps = true
-            previewLabel.maximumNumberOfLines = 2
-        }
-        let iconSize = ClipboardMonitor.iconDisplaySize
-        // Row rhythm: 12pt gaps — edge→icon, icon→text, text→edge all equal
-        // (icon 12..36, text column 48..508 on the 520pt row). The selection
-        // capsule (insetDx 6, spanning 6..514) pads the content 6pt per side.
-        iconView.frame = NSRect(x: 12, y: (height - iconSize) / 2, width: iconSize, height: iconSize)
+        installConstraints()
 
         nameLabel.isHidden = true
         pathLabel.isHidden = true
@@ -759,42 +746,42 @@ final class ClipCell: NSView {
 
         switch item.kind {
         case .text:
-            if height <= ClipboardPanelController.singleLineHeight + 1 {
+            // Single-line rows center the name label; taller rows use the
+            // wrapping preview that fills the row.
+            nameTop.isActive = false
+            nameCenterY.isActive = height <= ClipboardPanelController.singleLineHeight + 1
+            if nameCenterY.isActive {
                 nameLabel.font = .systemFont(ofSize: 13)
                 nameLabel.textColor = theme.foreground
                 nameLabel.stringValue = item.previewText ?? ""
                 nameLabel.lineBreakMode = .byTruncatingTail
                 nameLabel.cell?.usesSingleLineMode = true
-                nameLabel.frame = NSRect(x: 48, y: (height - 16) / 2, width: 460, height: 16)
                 nameLabel.isHidden = false
             } else {
                 previewLabel.font = .systemFont(ofSize: 13)
                 previewLabel.textColor = theme.foreground
                 previewLabel.stringValue = item.previewText ?? ""
-                previewLabel.maximumNumberOfLines = 2
-                previewLabel.frame = NSRect(x: 48, y: 7, width: 460, height: height - 14)
                 previewLabel.isHidden = false
             }
         case .file:
             let url = URL(fileURLWithPath: item.text ?? "")
+            nameCenterY.isActive = false
+            nameTop.isActive = true
             nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
             nameLabel.textColor = theme.foreground
             nameLabel.stringValue = url.lastPathComponent
             nameLabel.lineBreakMode = .byTruncatingTail
             nameLabel.cell?.usesSingleLineMode = true
-            nameLabel.frame = NSRect(x: 48, y: height - 24, width: 460, height: 16)
             nameLabel.isHidden = false
             pathLabel.font = .systemFont(ofSize: 11)
             pathLabel.textColor = theme.tertiaryText
             pathLabel.stringValue = url.deletingLastPathComponent().path
             pathLabel.lineBreakMode = .byTruncatingMiddle
             pathLabel.cell?.usesSingleLineMode = true
-            pathLabel.frame = NSRect(x: 48, y: 8, width: 460, height: 14)
             pathLabel.isHidden = false
         case .image:
             if let thumbnail {
                 thumbnailView.image = thumbnail
-                thumbnailView.frame = NSRect(x: 48, y: (height - 40) / 2, width: 40, height: 40)
                 thumbnailView.isHidden = false
             }
             // Without a decoded thumbnail yet, a quiet placeholder keeps the
@@ -802,9 +789,47 @@ final class ClipCell: NSView {
             previewLabel.font = .systemFont(ofSize: 12)
             previewLabel.textColor = theme.tertiaryText
             previewLabel.stringValue = "图片"
-            previewLabel.frame = NSRect(x: 48, y: (height - 16) / 2, width: 28, height: 16)
+            previewLabel.alignment = .center
             previewLabel.isHidden = thumbnail != nil
         }
         iconView.image = sourceIcon
+    }
+
+    private func installConstraints() {
+        guard !installed else { return }
+        installed = true
+        for view in [iconView, thumbnailView, nameLabel, pathLabel, previewLabel] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        // ORDER MATTERS: on NSTextField, setting lineBreakMode to a truncating
+        // mode (.byTruncatingTail) resets cell.wraps to false — ONE line only.
+        // Word wrap + maximumNumberOfLines(2) gives the two-line preview with
+        // an automatic trailing … from TextKit.
+        previewLabel.lineBreakMode = .byWordWrapping
+        previewLabel.cell?.wraps = true
+        previewLabel.maximumNumberOfLines = 2
+
+        let iconSize = ClipboardMonitor.iconDisplaySize
+        iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16).isActive = true
+        iconView.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
+        iconView.widthAnchor.constraint(equalToConstant: iconSize).isActive = true
+        iconView.heightAnchor.constraint(equalToConstant: iconSize).isActive = true
+
+        thumbnailView.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10).isActive = true
+        thumbnailView.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
+        thumbnailView.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        thumbnailView.heightAnchor.constraint(equalToConstant: 40).isActive = true
+
+        for label in [nameLabel, pathLabel, previewLabel] {
+            label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10).isActive = true
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16).isActive = true
+        }
+        previewLabel.topAnchor.constraint(equalTo: topAnchor, constant: 7).isActive = true
+        previewLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7).isActive = true
+        pathLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8).isActive = true
+
+        nameCenterY = nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        nameTop = nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8)
     }
 }
