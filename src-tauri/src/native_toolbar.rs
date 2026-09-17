@@ -1769,6 +1769,14 @@ fn handle_system_event(
             log_native("launcher shortcut key detected");
             thread::spawn(crate::launcher::show_launcher);
         }
+        CGEventType::KeyDown if crate::clipboard::is_clipboard_hotkey(event) => {
+            // The ONLY swallowing arm in this tap: Option+V types "√", and the
+            // paste target must never receive it. Everything else keeps
+            // passing through (CallbackResult::Keep below).
+            log_native("clipboard shortcut key detected");
+            thread::spawn(crate::clipboard::show_clipboard);
+            return CallbackResult::Drop;
+        }
         CGEventType::KeyDown if is_copy_command(event) => {
             // User pressed Cmd+C. Record what they copied (fresh for 5s) —
             // the browser fallback when AX/web-area can't read the selection.
@@ -2015,6 +2023,8 @@ fn handle_flags_changed(app: &tauri::AppHandle, event: &CGEvent) {
 
     // Launcher owns its double-modifier detection + trigger (top-level isolation).
     crate::launcher::handle_flags_changed(app, event);
+    // Clipboard owns its double-modifier detection (Alt+Alt preset path).
+    crate::clipboard::handle_flags_changed(app, event);
 }
 
 /// Show popup and read selected text — shared by KeyDown and FlagsChanged shortcut handlers.

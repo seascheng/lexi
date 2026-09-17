@@ -271,8 +271,13 @@ fn paste_tier(text: &str, pid: i32) -> Result<&'static str, String> {
         return Err("Clipboard holds non-text content; nothing was disturbed.".into());
     }
 
+    // Suspend clipboard capture for the lease window: the helper's poller
+    // would otherwise record the injected text as a genuine user copy.
+    crate::clipboard::post_suspend(unsafe { pasteboard_change_count() } as i64);
+
     let pre_text = read_pasteboard_string_via_pb();
     if let Err(e) = write_clipboard(text) {
+        crate::clipboard::post_resume(unsafe { pasteboard_change_count() } as i64);
         return Err(format!("Could not write clipboard: {e}"));
     }
     let count_after_write = unsafe { pasteboard_change_count() };
@@ -280,6 +285,7 @@ fn paste_tier(text: &str, pid: i32) -> Result<&'static str, String> {
     thread::sleep(Duration::from_millis(PASTE_SETTLE_MS));
     if secure_input_enabled() || unsafe { frontmost_pid() } != Some(pid) {
         restore_pasteboard(pre_text.as_deref());
+        crate::clipboard::post_resume(unsafe { pasteboard_change_count() } as i64);
         return Err("Target app lost focus; paste aborted.".into());
     }
     unsafe { post_command_v(pid) };
@@ -306,6 +312,10 @@ fn paste_tier(text: &str, pid: i32) -> Result<&'static str, String> {
     if unsafe { pasteboard_change_count() } == count_after_write {
         restore_pasteboard(pre_text.as_deref());
     }
+    // Resume capture only after the restore decision: a resumed poller with
+    // an unchanged changeCount re-baselines past the lease write; a foreign
+    // write leaves the baseline so the next poll sees it normally.
+    crate::clipboard::post_resume(unsafe { pasteboard_change_count() } as i64);
     if !confirmed {
         return Err("Paste was sent but could not be verified.".into());
     }
