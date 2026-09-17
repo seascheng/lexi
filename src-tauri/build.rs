@@ -67,6 +67,7 @@ fn build_native_selection_toolbar() {
             "native/ContentPanes.swift",
             "native/SurfacePanes.swift",
             "native/ShortcutMonitor.swift",
+            "native/SelectionPipeline.swift",
             "native/main.swift",
             "-o",
             "native/LexiSelectionHelper.app/Contents/MacOS/LexiSelectionHelper",
@@ -122,5 +123,6 @@ fn build_native_selection_toolbar() {
     println!("cargo:rerun-if-changed=native/StudyPanes.swift");
     println!("cargo:rerun-if-changed=native/ContentPanes.swift");
     println!("cargo:rerun-if-changed=native/SurfacePanes.swift");
+    println!("cargo:rerun-if-changed=native/SelectionPipeline.swift");
     println!("cargo:rerun-if-changed=native/ShortcutMonitor.swift");
 }

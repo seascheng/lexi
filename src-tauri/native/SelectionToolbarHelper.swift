@@ -1096,10 +1096,38 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         } else {
             FileLog.write("CLIP store unavailable — capture disabled")
         }
+        selectionPipeline = SelectionPipeline()
+        selectionPipeline?.onSelection = { [weak self] text, point in
+            self?.showToolbarFromSwift(text: text, at: point)
+        }
+        selectionPipeline?.ownFrames = {
+            NSApp.windows.filter { $0.isVisible }.map(\.frame)
+        }
+        selectionPipeline?.start()
     }
 
     /// Global keyboard shortcuts (launcher + clipboard), in-process.
     private var shortcutMonitor: ShortcutMonitor?
+    private var selectionPipeline: SelectionPipeline?
+    private var lastToolbarShow: (text: String, at: Date)?
+
+    /// Dual-track gate: identical selection text within 600ms shows once
+    /// (helper tap + Rust tap both fire during the migration overlap).
+    func selectionShowGate(_ rawText: String) -> Bool {
+        let key = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let now = Date()
+        if let last = lastToolbarShow, last.text == key, now.timeIntervalSince(last.at) < 0.6 {
+            return false
+        }
+        lastToolbarShow = (key, now)
+        return true
+    }
+
+    /// Layer-1 selection trigger from the helper's own tap.
+    func showToolbarFromSwift(text: String, at point: NSPoint) {
+        guard selectionShowGate(text) else { return }
+        showPanel(ShowPayload(text: text, x: Int(point.x), y: Int(point.y)))
+    }
 
     private static func argumentValue(_ name: String) -> String? {
         let arguments = CommandLine.arguments
@@ -1107,7 +1135,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
               arguments.indices.contains(index + 1) else {
             return nil
         }
-
         return arguments[index + 1]
     }
 
@@ -3014,6 +3041,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     private func showPanel(_ payload: ShowPayload) {
+        // Dual-track dedup: during selection migration both the helper's
+        // tap and Rust's fire for the same selection — show once.
+        guard selectionShowGate(payload.text) else { return }
         let text = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let point = currentMouseLocation(fallback: payload)
         let width = toolbarWidth(for: payload.actions?.count ?? actions.count)
@@ -3060,6 +3090,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 }
                 controller.onNativeSettingsReload = { [weak self] in
                     self?.shortcutMonitor?.reload()
+                    self?.selectionPipeline?.reload()
                     self?.postAction(action: "reload-native-settings", text: "")
                 }
                 controller.show(tab: tab)
@@ -3540,7 +3571,18 @@ private struct ShowPayload: Decodable {
     let pending: Bool?
     let actions: [ToolbarAction]?
 
+    init(text: String, x: Int, y: Int, downX: Int? = nil, downY: Int? = nil,
+         pending: Bool? = nil, actions: [ToolbarAction]? = nil) {
+        self.text = text
+        self.x = x
+        self.y = y
+        self.downX = downX
+        self.downY = downY
+        self.pending = pending
+        self.actions = actions
+    }
 }
+
 struct ResultShowPayload: Decodable {
     let runId: String?
     let featureId: String?
