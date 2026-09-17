@@ -104,9 +104,9 @@ enum SettingsTab: CaseIterable, Identifiable {
         case .shortcuts: "keyboard"
         case .vocabulary: "book"
         case .review: "brain"
-        case .notebook: "notebook-pen"
-        case .configs: "list.bullet.rectangle"
-        case .toolbar: "uiwindow.arrangement.behind.single"
+        case .notebook: "note.text"
+        case .configs: "slider.horizontal.3"
+        case .toolbar: "menubar.rectangle"
         case .card: "rectangle.inset.filled"
         case .clipboard: "doc.on.clipboard"
         case .launcher: "rocket"
@@ -136,39 +136,58 @@ enum SettingsSection: CaseIterable, Identifiable {
     }
 }
 
-/// Back/forward pair over the detail column; the tracking separator makes
-/// the sidebar run edge-to-edge under its own clean material.
+/// Back/forward pair over the detail column — TinyCast's exact recipe:
+/// `.sidebarTrackingSeparator` first so the buttons seat in the detail
+/// section ahead of the inline title, `.toolbar` bezels, unified bar with
+/// the system glass band kept (titlebar NOT transparent).
 @MainActor
 private final class SettingsToolbar: NSObject, NSToolbarDelegate {
     private static let back = NSToolbarItem.Identifier("LexiSettingsBack")
     private static let forward = NSToolbarItem.Identifier("LexiSettingsForward")
 
     private let navigation: SettingsNavigationState
-    private let backButton = SettingsToolbar.makeButton("chevron.backward", "Back")
-    private let forwardButton = SettingsToolbar.makeButton("chevron.forward", "Forward")
+    private weak var window: NSWindow?
+    private let backButton: NSButton
+    private let forwardButton: NSButton
 
     init(navigation: SettingsNavigationState) {
         self.navigation = navigation
+        // Two buttons, not a segmented control: that would draw a divider
+        // down the middle.
+        backButton = Self.makeButton("chevron.backward", "Back")
+        forwardButton = Self.makeButton("chevron.forward", "Forward")
         super.init()
-        backButton.action = #selector(goBack)
         backButton.target = self
-        forwardButton.action = #selector(goForward)
+        backButton.action = #selector(goBack)
         forwardButton.target = self
+        forwardButton.action = #selector(goForward)
         navigation.onHistoryChange = { [weak self] in self?.sync() }
-        sync()
     }
 
     func install(in window: NSWindow) {
+        self.window = window
+        // All three together are what puts the title inline and leading
+        // rather than centred.
+        window.titleVisibility = .visible
+        window.toolbarStyle = .unified
+        // `.automatic` draws a hairline once content scrolls under the bar.
+        window.titlebarSeparatorStyle = .none
+        // Transparent opts the titlebar out of the system's glass band.
+        window.titlebarAppearsTransparent = false
+        // A drag on a Form shouldn't move the window.
+        window.isMovableByWindowBackground = false
+
         let toolbar = NSToolbar(identifier: "LexiSettingsToolbar")
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        toolbar.allowsDisplayModeCustomization = false
         window.toolbar = toolbar
-        // `.preference` keeps the bar compact like System Settings' panes.
-        window.toolbarStyle = .preference
+        sync()
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, Self.back, Self.forward, .sidebarTrackingSeparator, .flexibleSpace]
+        [.sidebarTrackingSeparator, Self.back, Self.forward]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -179,26 +198,22 @@ private final class SettingsToolbar: NSObject, NSToolbarDelegate {
         _ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
         willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
+        let item = NSToolbarItem(itemIdentifier: identifier)
         switch identifier {
-        case Self.back: return backButtonItem()
-        case Self.forward: return forwardButtonItem()
-        default: return nil
+        case Self.back:
+            item.view = backButton
+            item.label = "Back"
+        case Self.forward:
+            item.view = forwardButton
+            item.label = "Forward"
+        default:
+            return nil
         }
-    }
-
-    private func backButtonItem() -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: Self.back)
-        item.view = backButton
-        item.label = "Back"
-        item.paletteLabel = "Back"
-        return item
-    }
-
-    private func forwardButtonItem() -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: Self.forward)
-        item.view = forwardButton
-        item.label = "Forward"
-        item.paletteLabel = "Forward"
+        // The one flag that seats an item ahead of the inline title.
+        item.isNavigational = true
+        item.visibilityPriority = .high
+        // Enabled state comes from history, not responder validation.
+        item.autovalidates = false
         return item
     }
 
@@ -206,16 +221,17 @@ private final class SettingsToolbar: NSObject, NSToolbarDelegate {
     @objc private func goForward() { navigation.goForward() }
 
     private func sync() {
+        window?.title = navigation.tab.title
         backButton.isEnabled = navigation.canGoBack
         forwardButton.isEnabled = navigation.canGoForward
     }
 
     /// Directional symbols so the pair mirrors in RTL.
     private static func makeButton(_ symbol: String, _ label: String) -> NSButton {
-        let button = NSButton()
-        button.bezelStyle = .accessoryBar
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-        button.imagePosition = .imageOnly
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        let button = NSButton(image: image ?? NSImage(), target: nil, action: nil)
+        button.bezelStyle = .toolbar
+        button.setAccessibilityLabel(label)
         button.toolTip = label
         return button
     }
@@ -385,9 +401,6 @@ final class LexiSettingsWindowController: NSObject, NSWindowDelegate {
             defer: false
         )
         window.title = "Lexi Settings"
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
         window.isRestorable = false
         window.contentMinSize = CGSize(width: 660, height: 480)

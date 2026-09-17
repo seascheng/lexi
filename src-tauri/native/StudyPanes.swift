@@ -137,8 +137,8 @@ struct VocabularyPane: View {
             .fixedSize()
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.bar)
+        .padding(.vertical, 10)
+        .background(.quaternary.opacity(0.35))
     }
 }
 

@@ -90,8 +90,8 @@ struct NotebookPane: View {
             .fixedSize()
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.bar)
+        .padding(.vertical, 10)
+        .background(.quaternary.opacity(0.35))
     }
 
     private var noteList: some View {
@@ -119,7 +119,7 @@ struct NotebookPane: View {
                 Button("Delete", role: .destructive) { model.delete(note) }
             }
         }
-        .listStyle(.sidebar)
+        .listStyle(.inset)
     }
 
     @ViewBuilder
@@ -217,7 +217,7 @@ struct ConfigsPane: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(.bar)
+            .background(.quaternary.opacity(0.35))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { model.reload() }
