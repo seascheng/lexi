@@ -52,8 +52,6 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         enum Kind { case favorite, recent, tagged }
         let item: FolderItem
         let kind: Kind
-        /// One-level parent folder name shown after the chip title.
-        let suffix: String?
         var x: CGFloat = 0
         var width: CGFloat = 0
     }
@@ -331,7 +329,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
             guard matches(localizedName, path: url.path) else { continue }
             favorites.append(FolderChip(
                 item: FolderItem(path: url.path, name: localizedName, tag: ""),
-                kind: .favorite, suffix: nil
+                kind: .favorite
             ))
         }
         if !favorites.isEmpty {
@@ -342,10 +340,9 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         var recentChips: [FolderChip] = []
         for item in recents where matches(item.path, path: item.path) {
             let url = URL(fileURLWithPath: item.path)
-            let parent = url.deletingLastPathComponent().lastPathComponent
             recentChips.append(FolderChip(
                 item: FolderItem(path: item.path, name: url.lastPathComponent, tag: ""),
-                kind: .recent, suffix: parent.isEmpty ? nil : parent
+                kind: .recent
             ))
         }
         if !recentChips.isEmpty {
@@ -359,12 +356,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
             out.append(.header(tag))
             let chips = grouped[tag]!
                 .sorted { $0.name.lowercased() < $1.name.lowercased() }
-                .map { item -> FolderChip in
-                    let parent = URL(fileURLWithPath: item.path).deletingLastPathComponent()
-                    let parentName = (try? parent.resourceValues(forKeys: [.localizedNameKey]))?.localizedName
-                        ?? parent.lastPathComponent
-                    return FolderChip(item: item, kind: .tagged, suffix: parentName.isEmpty ? nil : parentName)
-                }
+                .map { FolderChip(item: $0, kind: .tagged) }
             out += flowChipLines(chips).map { .chipLine($0) }
         }
         return out
@@ -863,13 +855,12 @@ final class LauncherChipLineCell: NSView {
     }
 }
 
-/// A single folder chip: leading glyph, title, one-level path suffix. The
-/// leading glyph is replaced by editor/terminal mini-buttons while hovered.
+/// A single folder chip: leading glyph + folder name. The leading glyph is
+/// replaced by editor/terminal mini-buttons while hovered.
 final class FolderChipView: NSView {
     private let dot = NSView()
     private let glyphView = NSImageView()
     private let nameLabel = NSTextField(labelWithString: "")
-    private let suffixLabel = NSTextField(labelWithString: "")
     private let editorButton = NSButton()
     private let terminalButton = NSButton()
     private var hoverArea: NSTrackingArea?
@@ -941,12 +932,6 @@ final class FolderChipView: NSView {
             nameLabel.cell?.usesSingleLineMode = true
             addSubview(nameLabel)
 
-            suffixLabel.font = .systemFont(ofSize: 10)
-            suffixLabel.textColor = theme.tertiaryText
-            suffixLabel.alignment = .right
-            suffixLabel.lineBreakMode = .byTruncatingTail
-            suffixLabel.cell?.usesSingleLineMode = true
-            addSubview(suffixLabel)
 
             // Hover key-caps: two rounded-square buttons parked over the
             // leading glyph zone. Caps get their own inset background so
@@ -979,28 +964,12 @@ final class FolderChipView: NSView {
         editorButton.isHidden = true
         terminalButton.isHidden = true
 
-        // Name left (truncating), path suffix right-aligned in the tail —
-        // name yields first when the two would collide.
+        // Name truncates toward the chip's right edge.
         nameLabel.stringValue = chip.item.name
         nameLabel.textColor = theme.foreground
-        let suffixText = chip.suffix ?? ""
-        let suffixWidth: CGFloat = suffixText.isEmpty ? 0 : min(
-            (suffixText as NSString)
-                .size(withAttributes: [.font: NSFont.systemFont(ofSize: 10)]).width + 2,
-            58
+        nameLabel.frame = NSRect(
+            x: 32, y: 6, width: max(chip.width - 32 - 8, 36), height: 14
         )
-        let nameMax = chip.width - 32 - suffixWidth - (suffixWidth > 0 ? 10 : 10)
-        nameLabel.frame = NSRect(x: 32, y: 6, width: max(nameMax, 36), height: 14)
-
-        if suffixText.isEmpty {
-            suffixLabel.isHidden = true
-        } else {
-            suffixLabel.stringValue = suffixText
-            suffixLabel.isHidden = false
-            suffixLabel.frame = NSRect(
-                x: chip.width - 8 - suffixWidth, y: 7, width: suffixWidth, height: 12
-            )
-        }
 
         switch chip.kind {
         case .favorite:
