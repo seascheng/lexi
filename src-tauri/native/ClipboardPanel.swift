@@ -205,6 +205,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             : NSAppearance(named: .vibrantLight)
         styleChrome()
         for chip in chipViews { chip.view.applyTheme(cardTheme) }
+        addChip.applyTheme(cardTheme) // outside chipViews — never themed otherwise
         tagInputView.applyTheme(cardTheme)
         tableView.reloadData()
     }
@@ -356,7 +357,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             addChip.frame = tagInputView.frame
             x = tagInputView.frame.maxX + 6
         } else {
-            addChip.frame = NSRect(x: x, y: 4, width: 32, height: PanelDesign.pillHeight)
+            addChip.frame = NSRect(x: x, y: 4, width: 26, height: PanelDesign.pillHeight)
             tagInputView.frame = addChip.frame
             x = addChip.frame.maxX + 6
         }
@@ -592,8 +593,15 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     /// Enter in the inline input: create the category and switch to it.
     private func commitTagInput() {
         let name = tagInputView.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else {
+            endTagInput()
+            return
+        }
+        guard name.count <= 24 else {
+            showFooterNotice("分类名过长（最多 24 个字符）")
+            return // keep the input open for a shorter name
+        }
         endTagInput()
-        guard !name.isEmpty else { return }
         // Rust inserts into tags (INSERT OR IGNORE) and re-pushes the notes
         // snapshot; the new chip appears with that feed. Switch optimistically
         // so the panel is already on the fresh, empty category.
@@ -695,7 +703,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             return true
         case NSSelectorFromString("cancelOperation:"):
             if isTagInput {
-                tagInputView.stringValue = ""
+                endTagInput() // cancel: fold back to the ＋ chip
                 return true
             }
             if !searchField.stringValue.isEmpty {
