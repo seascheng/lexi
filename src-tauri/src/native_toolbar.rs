@@ -930,8 +930,6 @@ struct ToolbarShowPayload {
     text: String,
     x: i32,
     y: i32,
-    /// Mouse-down position (AppKit coords) for direction-aware placement.
-    /// `None` on non-drag paths — the helper falls back to above-the-cursor.
     #[serde(rename = "downX")]
     down_x: Option<i32>,
     #[serde(rename = "downY")]
@@ -941,6 +939,7 @@ struct ToolbarShowPayload {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ToolbarThemePayload {
     theme: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -948,6 +947,7 @@ struct ToolbarThemePayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     panel_blur: Option<String>,
 }
+
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct ToolbarActionItem {
