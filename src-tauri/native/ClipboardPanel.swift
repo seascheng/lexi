@@ -761,24 +761,22 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     @objc private func renameNoteFromMenu(_ sender: NSMenuItem) {
         guard let payload = sender.representedObject as? String,
               let separator = payload.firstIndex(of: "|") else { return }
-        let id = String(payload[..<separator])
+        let noteId = Int64(String(payload[..<separator])) ?? 0
         let current = String(payload[payload.index(after: separator)...])
-
-        let alert = NSAlert()
-        alert.messageText = "重命名笔记"
-        alert.informativeText = "修改笔记名称（name）"
-        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        input.stringValue = current
-        alert.accessoryView = input
-        alert.addButton(withTitle: "确定")
-        alert.addButton(withTitle: "取消")
-        guard alert.runModal() == .alertFirstButtonReturn,
-              !input.stringValue.trimmingCharacters(in: .whitespaces).isEmpty
+        guard noteId != 0,
+              let row = rows.indices.first(where: {
+                  if case .note(let note) = rows[$0] { return note.id == noteId }
+                  return false
+              }),
+              let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: true) as? ClipCell
         else { return }
-        let body: [String: Any] = ["id": Int64(id) ?? 0, "name": input.stringValue]
-        if let data = try? JSONSerialization.data(withJSONObject: body),
-           let json = String(data: data, encoding: .utf8) {
-            onAction?("note-rename", json)
+        cell.beginRenaming(current: current) { [weak self] newName in
+            guard let self else { return }
+            let body: [String: Any] = ["id": noteId, "name": newName]
+            if let data = try? JSONSerialization.data(withJSONObject: body),
+               let json = String(data: data, encoding: .utf8) {
+                self.onAction?("note-rename", json)
+            }
         }
     }
 
@@ -1324,9 +1322,37 @@ final class ClipCell: NSView {
     private let nameLabel = NSTextField(labelWithString: "")  // single-line text / file or note name
     private let pathLabel = NSTextField(labelWithString: "")  // file path / note content (dim)
     private let previewLabel = NSTextField(wrappingLabelWithString: "")
+    /// Inline rename editor (ActionPanel NoteRowCell pattern): overlays the
+    /// name label; Enter commits via closure, Esc/focus-loss cancels.
+    private let nameEditor = RenameField()
+    private var renameCommit: ((String) -> Void)?
+    private var isRenaming = false
     private var installed = false
     private var nameCenterY: NSLayoutConstraint!
     private var nameTop: NSLayoutConstraint!
+
+    func beginRenaming(current: String, onCommit: @escaping (String) -> Void) {
+        renameCommit = onCommit
+        isRenaming = true
+        nameEditor.stringValue = current
+        nameLabel.isHidden = true
+        nameEditor.isHidden = false
+        window?.makeFirstResponder(nameEditor)
+        nameEditor.currentEditor()?.selectAll(nil)
+    }
+
+    private func endRenaming(commit: Bool) {
+        guard isRenaming else { return }
+        isRenaming = false
+        let value = nameEditor.stringValue.trimmingCharacters(in: .whitespaces)
+        nameEditor.isHidden = true
+        nameLabel.isHidden = false
+        window?.makeFirstResponder(nil)
+        if commit, !value.isEmpty {
+            renameCommit?(value)
+        }
+        renameCommit = nil
+    }
 
     func configure(
         item: ClipboardItem, theme: CardTheme, height: CGFloat,
@@ -1450,6 +1476,17 @@ final class ClipCell: NSView {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
+        nameEditor.delegate = self
+        nameEditor.translatesAutoresizingMaskIntoConstraints = false
+        nameEditor.isHidden = true
+        addSubview(nameEditor)
+        // The editor rides exactly on the name label's slot, whichever
+        // vertical anchor (top for two-deck rows, centerY for single-line)
+        // is active.
+        nameEditor.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor).isActive = true
+        nameEditor.trailingAnchor.constraint(equalTo: nameLabel.trailingAnchor).isActive = true
+        nameEditor.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor).isActive = true
+        nameEditor.heightAnchor.constraint(equalToConstant: 18).isActive = true
         // ORDER MATTERS: on NSTextField, setting lineBreakMode to a truncating
         // mode (.byTruncatingTail) resets cell.wraps to false — ONE line only.
         // Word wrap + maximumNumberOfLines(2) gives the two-line preview with
@@ -1479,6 +1516,54 @@ final class ClipCell: NSView {
 
         nameCenterY = nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
         nameTop = nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8)
+    }
+}
+extension ClipCell: NSTextFieldDelegate {
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        switch commandSelector {
+        case NSSelectorFromString("insertNewline:"):
+            endRenaming(commit: true)
+            return true
+        case NSSelectorFromString("cancelOperation:"):
+            endRenaming(commit: false)
+            return true
+        default:
+            return false
+        }
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        // Focus moved elsewhere (panel resign, row click): cancel quietly.
+        endRenaming(commit: false)
+    }
+}
+
+/// Single-line inline rename input styled like the panel's other inputs.
+final class RenameField: NSTextField {
+    init() {
+        super.init(frame: .zero)
+        font = .systemFont(ofSize: 13, weight: .medium)
+        isBordered = false
+        isEditable = true
+        isSelectable = true
+        drawsBackground = true
+        backgroundColor = .clear
+        wantsLayer = true
+        layer?.cornerRadius = 4
+        layer?.borderWidth = 1
+        focusRingType = .none
+        cell?.usesSingleLineMode = true
+        cell?.wraps = false
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    func applyTheme(_ theme: CardTheme) {
+        textColor = theme.foreground
+        backgroundColor = theme.isDark
+            ? NSColor.white.withAlphaComponent(0.10)
+            : NSColor.white.withAlphaComponent(0.55)
+        layer?.borderColor = theme.hairline.cgColor
     }
 }
 
