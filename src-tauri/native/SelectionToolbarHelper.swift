@@ -3559,7 +3559,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             return
         }
         if kind == "feature" {
-            runFeatureLocally(featureId: id, text: text)
+            // Empty id = the default feature (Rust parity: first enabled
+            // by sort order) — the input bar's Enter submits that way.
+            let featureId = id.isEmpty
+                ? (LexiStore.features().first(where: { $0.enabled })?.id ?? "")
+                : id
+            guard !featureId.isEmpty else { return }
+            runFeatureLocally(featureId: featureId, text: text)
             inputTextView.string = ""
             layoutResultCard()
             rebuildInputButtons()
