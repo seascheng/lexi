@@ -551,8 +551,9 @@ struct ConfigsPane: View {
             .toggleStyle(.switch)
             .controlSize(.small)
 
-            Image(systemName: iconName(row.icon))
-                .foregroundStyle(.tint)
+            Image(nsImage: lucideImage(
+                for: row.icon, title: row.name,
+                color: .controlAccentColor) ?? NSImage())
                 .frame(width: 22)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -619,16 +620,17 @@ struct ConfigsPane: View {
 
 // MARK: - Feature editor sheet
 
-/// Icons a feature can wear: the lucide name stored in the DB, the SF
-/// Symbol it renders as, and a human label for the picker.
-private let featureIcons: [(lucide: String, symbol: String, name: String)] = [
-    ("languages", "character.book.closed", "Translate"),
-    ("wand", "wand.and.stars", "Wand"),
-    ("highlighter", "highlighter", "Highlight"),
-    ("brain", "brain", "Think"),
-    ("pencil", "pencil", "Rewrite"),
-    ("book-open", "book", "Read"),
-    ("sparkles", "sparkles", "Sparkles"),
+/// Icons a feature can wear: the lucide name stored in the DB plus a
+/// human label for the picker (rendered with the same lucideImage the
+/// card uses).
+private let featureIcons: [(lucide: String, name: String)] = [
+    ("languages", "Translate"),
+    ("wand", "Wand"),
+    ("highlighter", "Highlight"),
+    ("brain", "Think"),
+    ("pencil", "Rewrite"),
+    ("book-open", "Read"),
+    ("sparkles", "Sparkles"),
 ]
 
 struct FeatureEditor: View {
@@ -650,7 +652,14 @@ struct FeatureEditor: View {
                     TextField("Name", text: $draft.name)
                     Picker("Icon", selection: $draft.icon) {
                         ForEach(featureIcons, id: \.lucide) { icon in
-                            Label(icon.name, systemImage: icon.symbol).tag(icon.lucide)
+                            Label {
+                                Text(icon.name)
+                            } icon: {
+                                Image(nsImage: lucideImage(
+                                    for: icon.lucide, title: icon.name,
+                                    color: .controlAccentColor) ?? NSImage())
+                            }
+                            .tag(icon.lucide)
                         }
                     }
                 }

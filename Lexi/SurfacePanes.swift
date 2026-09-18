@@ -13,28 +13,11 @@ import SwiftUI
 struct ToolbarEntry: Identifiable {
     let id: String
     let name: String
-    let symbol: String
+    /// The registry's lucide icon name — rendered with the same
+    /// `lucideImage` the live toolbar uses.
+    let icon: String
     let isTool: Bool
     var enabled: Bool
-}
-
-/// Lucide/registry icon names → SF Symbols. "notebook-pen" is not an
-/// SF Symbol — it renders blank.
-private func toolbarSymbol(_ icon: String) -> String {
-    switch icon {
-    case "copy": "doc.on.doc"
-    case "search": "magnifyingglass"
-    case "volume", "read": "speaker.wave.2"
-    case "note", "notebook-pen": "square.and.pencil"
-    case "send", "handoff": "paperplane"
-    case "languages", "translate": "character.book.closed"
-    case "wand", "wand-and-sparkles": "wand.and.stars"
-    case "highlighter": "highlighter"
-    case "book-open": "book"
-    case "brain": "brain"
-    case "pencil": "pencil"
-    default: "sparkles"
-    }
 }
 
 @MainActor
@@ -55,10 +38,10 @@ final class ToolbarConfigModel {
         let features = LexiStore.features().sorted { $0.sortOrder < $1.sortOrder }
         entries = tools.map {
             ToolbarEntry(id: $0.id, name: $0.displayName,
-                         symbol: toolbarSymbol($0.icon), isTool: true, enabled: $0.enabled)
+                         icon: $0.icon, isTool: true, enabled: $0.enabled)
         } + features.map {
             ToolbarEntry(id: $0.id, name: $0.name,
-                         symbol: toolbarSymbol($0.icon), isTool: false, enabled: $0.enabled)
+                         icon: $0.icon, isTool: false, enabled: $0.enabled)
         }
         excludedApps = LexiStore.excludedToolbarApps()
     }
@@ -132,7 +115,9 @@ struct ToolbarConfigPane: View {
     @State private var model = ToolbarConfigModel()
 
     var body: some View {
-        Form {
+        // A real List — Form's grouped sections don't support .onMove
+        // drag reordering on macOS.
+        List {
             Section {
                 Toggle(isOn: Binding(
                     get: { model.enabled },
@@ -153,8 +138,9 @@ struct ToolbarConfigPane: View {
             Section {
                 ForEach(model.entries) { entry in
                     HStack(spacing: 10) {
-                        Image(systemName: entry.symbol)
-                            .foregroundStyle(.tint)
+                        Image(nsImage: lucideImage(
+                            for: entry.icon, title: entry.name,
+                            color: .controlAccentColor) ?? NSImage())
                             .frame(width: 20)
                         Text(entry.name)
                         Spacer()
@@ -164,6 +150,7 @@ struct ToolbarConfigPane: View {
                         ))
                         .labelsHidden()
                         .toggleStyle(.switch)
+                        .controlSize(.mini)
                     }
                 }
                 .onMove { from, to in model.move(from: from, to: to) }
@@ -197,7 +184,7 @@ struct ToolbarConfigPane: View {
                 Text("Bundle identifiers where the toolbar never appears.")
             }
         }
-        .formStyle(.grouped)
+        .listStyle(.inset)
         .scrollContentBackground(.hidden)
         .contentMargins(.top, 8, for: .scrollContent)
         .onAppear {
@@ -254,8 +241,9 @@ struct CardConfigPane: View {
             Section {
                 ForEach(model.features) { feature in
                     HStack(spacing: 10) {
-                        Image(systemName: featureIconName(feature.icon))
-                            .foregroundStyle(.tint)
+                        Image(nsImage: lucideImage(
+                            for: feature.icon, title: feature.name,
+                            color: .controlAccentColor) ?? NSImage())
                             .frame(width: 20)
                         Text(feature.name)
                         Spacer()
@@ -311,19 +299,6 @@ struct CardConfigPane: View {
         .scrollContentBackground(.hidden)
         .contentMargins(.top, 8, for: .scrollContent)
         .onAppear { model.reload() }
-    }
-
-    private func featureIconName(_ lucide: String) -> String {
-        switch lucide {
-        case "languages", "translate": "character.book.closed"
-        case "wand", "wand-and-sparkles": "wand.and.stars"
-        case "highlighter": "highlighter"
-        case "book-open": "book"
-        case "brain": "brain"
-        case "pencil": "pencil"
-        case "sparkles": "sparkles"
-        default: "sparkles"
-        }
     }
 }
 
