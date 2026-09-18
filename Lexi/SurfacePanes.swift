@@ -9,42 +9,106 @@ import SwiftUI
 // table happens together with the Rust cutover (single-writer switch).
 // ---------------------------------------------------------------------------
 
+/// One row of the unified toolbar list: a built-in tool or an AI feature.
+struct ToolbarEntry: Identifiable {
+    let id: String
+    let name: String
+    let symbol: String
+    let isTool: Bool
+    var enabled: Bool
+}
+
+/// Lucide/registry icon names → SF Symbols. "notebook-pen" is not an
+/// SF Symbol — it renders blank.
+private func toolbarSymbol(_ icon: String) -> String {
+    switch icon {
+    case "copy": "doc.on.doc"
+    case "search": "magnifyingglass"
+    case "volume", "read": "speaker.wave.2"
+    case "note", "notebook-pen": "square.and.pencil"
+    case "send", "handoff": "paperplane"
+    case "languages", "translate": "character.book.closed"
+    case "wand", "wand-and-sparkles": "wand.and.stars"
+    case "highlighter": "highlighter"
+    case "book-open": "book"
+    case "brain": "brain"
+    case "pencil": "pencil"
+    default: "sparkles"
+    }
+}
+
 @MainActor
 @Observable
 final class ToolbarConfigModel {
     var enabled = true
-    var tools: [LexiToolEntry] = []
+    var entries: [ToolbarEntry] = []
     var excludedApps: [String] = []
     var newApp = ""
+    /// Wired by the pane from the shared settings model — every mutation
+    /// nudges the live surfaces via nativeSettingsChanged.
+    var effects: LexiSettingsEffects?
 
     func reload() {
         enabled = LexiStore.settingBool("toolbarEnabled", default: true)
-        tools = LexiStore.toolbarTools().sorted { $0.sortOrder < $1.sortOrder }
+        // Display order matches the bar: built-ins first, then features.
+        let tools = LexiStore.toolbarTools().sorted { $0.sortOrder < $1.sortOrder }
+        let features = LexiStore.features().sorted { $0.sortOrder < $1.sortOrder }
+        entries = tools.map {
+            ToolbarEntry(id: $0.id, name: $0.displayName,
+                         symbol: toolbarSymbol($0.icon), isTool: true, enabled: $0.enabled)
+        } + features.map {
+            ToolbarEntry(id: $0.id, name: $0.name,
+                         symbol: toolbarSymbol($0.icon), isTool: false, enabled: $0.enabled)
+        }
         excludedApps = LexiStore.excludedToolbarApps()
     }
 
     func persistEnabled(_ value: Bool) {
         enabled = value
         LexiStore.setSetting("toolbarEnabled", value ? "true" : "false")
+        effects?.nativeSettingsChanged()
     }
 
-    func toggle(_ entry: LexiToolEntry) {
-        if let index = tools.firstIndex(where: { $0.id == entry.id }) {
-            tools[index].enabled.toggle()
-            saveTools()
+    func toggle(_ entry: ToolbarEntry) {
+        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        entries[index].enabled.toggle()
+        if entries[index].isTool {
+            var tools = LexiStore.toolbarTools()
+            if let i = tools.firstIndex(where: { $0.id == entry.id }) {
+                tools[i].enabled = entries[index].enabled
+                LexiStore.saveToolbarTools(tools)
+            }
+        } else {
+            var rows = LexiStore.features()
+            if let i = rows.firstIndex(where: { $0.id == entry.id }) {
+                rows[i].enabled = entries[index].enabled
+                LexiStore.saveFeature(rows[i])
+            }
         }
+        effects?.nativeSettingsChanged()
     }
 
     func move(from source: IndexSet, to destination: Int) {
-        tools.move(fromOffsets: source, toOffset: destination)
-        for index in tools.indices {
-            tools[index].sortOrder = (index + 1) * 10
+        entries.move(fromOffsets: source, toOffset: destination)
+        // One shared numeric scale across tools and features so the bar's
+        // order-by-sort_order merge reproduces the dragged sequence.
+        for (index, entry) in entries.enumerated() {
+            let order = (index + 1) * 10
+            if entry.isTool {
+                var tools = LexiStore.toolbarTools()
+                if let i = tools.firstIndex(where: { $0.id == entry.id }) {
+                    tools[i].sortOrder = order
+                    LexiStore.saveToolbarTools(tools)
+                }
+            } else {
+                var rows = LexiStore.features()
+                if let i = rows.firstIndex(where: { $0.id == entry.id }) {
+                    rows[i].sortOrder = order
+                    LexiStore.saveFeature(rows[i])
+                }
+            }
         }
-        saveTools()
-    }
-
-    private func saveTools() {
-        LexiStore.saveToolbarTools(tools)
+        effects?.nativeSettingsChanged()
     }
 
     func addExcludedApp() {
@@ -53,11 +117,13 @@ final class ToolbarConfigModel {
         excludedApps.append(app)
         LexiStore.saveExcludedToolbarApps(excludedApps)
         newApp = ""
+        effects?.nativeSettingsChanged()
     }
 
     func removeExcludedApp(_ app: String) {
         excludedApps.removeAll { $0 == app }
         LexiStore.saveExcludedToolbarApps(excludedApps)
+        effects?.nativeSettingsChanged()
     }
 }
 
@@ -85,16 +151,16 @@ struct ToolbarConfigPane: View {
             }
 
             Section {
-                ForEach(model.tools) { tool in
+                ForEach(model.entries) { entry in
                     HStack(spacing: 10) {
-                        Image(systemName: symbol(tool.icon))
+                        Image(systemName: entry.symbol)
                             .foregroundStyle(.tint)
                             .frame(width: 20)
-                        Text(tool.displayName)
+                        Text(entry.name)
                         Spacer()
                         Toggle("", isOn: Binding(
-                            get: { tool.enabled },
-                            set: { _ in model.toggle(tool) }
+                            get: { entry.enabled },
+                            set: { _ in model.toggle(entry) }
                         ))
                         .labelsHidden()
                         .toggleStyle(.switch)
@@ -104,7 +170,7 @@ struct ToolbarConfigPane: View {
             } header: {
                 Text("Toolbar buttons")
             } footer: {
-                Text("Drag to reorder — applies on the next selection. The card's button group is configured in the Actions pane.")
+                Text("Built-in tools and AI features share one bar. Toggle to show or hide, drag to reorder — applies on the next selection. The card's button group is configured in the Actions pane.")
             }
 
             Section {
@@ -134,17 +200,9 @@ struct ToolbarConfigPane: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .contentMargins(.top, 8, for: .scrollContent)
-        .onAppear { model.reload() }
-    }
-
-    private func symbol(_ icon: String) -> String {
-        switch icon {
-        case "copy": "doc.on.doc"
-        case "search": "magnifyingglass"
-        case "volume": "speaker.wave.2"
-        case "notebook-pen": "notebook-pen"
-        case "send": "paperplane"
-        default: "sparkles"
+        .onAppear {
+            model.effects = settings.effects
+            model.reload()
         }
     }
 }

@@ -1012,6 +1012,20 @@ extension LexiStore {
 
     /// Dual-write: the normalized table AND the legacy blob (for Rust).
     static func saveAction(_ entry: LexiToolEntry) {
+        upsertActionRow(entry)
+        // Sync the blob. saveToolbarTools writes action rows directly —
+        // calling saveAction here would recurse forever.
+        var tools = toolbarTools()
+        if let index = tools.firstIndex(where: { $0.id == entry.id }) {
+            tools[index] = entry
+        } else {
+            tools.append(entry)
+        }
+        saveToolbarTools(tools)
+    }
+
+    /// One normalized action-row write, no blob sync.
+    private static func upsertActionRow(_ entry: LexiToolEntry) {
         guard let db = open() else { return }
         defer { sqlite3_close(db) }
         var statement: OpaquePointer?
@@ -1033,14 +1047,6 @@ extension LexiStore {
             sqlite3_bind_text(statement, 8, configJson, -1, SQLITE_TRANSIENT)
             sqlite3_step(statement)
         }
-        // Also update the blob for Rust readers.
-        var tools = toolbarTools()
-        if let index = tools.firstIndex(where: { $0.id == entry.id }) {
-            tools[index] = entry
-        } else {
-            tools.append(entry)
-        }
-        saveToolbarTools(tools)
     }
 }
 
@@ -1076,9 +1082,10 @@ extension LexiStore {
         guard let data = try? JSONEncoder().encode(entries),
               let raw = String(data: data, encoding: .utf8) else { return }
         setSetting("toolbar_tools", raw)
-        // Dual-write: also update the normalized actions table.
+        // Dual-write: also update the normalized actions table (direct row
+        // writes — saveAction would recurse back into this function).
         for entry in entries {
-            saveAction(entry)
+            upsertActionRow(entry)
         }
     }
 
