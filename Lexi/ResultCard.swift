@@ -1227,17 +1227,15 @@ extension SelectionToolbarApp {
             }
             origin = p
         } else {
-            // Toolbar gone: the card TOP sits just below the cursor and the
-            // card grows downward — the old bottom-anchor put a 400pt card
-            // far above the cursor.
+            // Hapigo-style placement: the card's TOP-LEFT corner matches the
+            // mouse; only an on-screen overflow nudges it back into the
+            // visible frame.
             let point = NSEvent.mouseLocation
-            var p = NSPoint(x: point.x + 16, y: point.y - 8 - cardSize.height)
+            var p = NSPoint(x: point.x, y: point.y - cardSize.height)
             if let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main {
                 let frame = screen.visibleFrame
                 p.x = min(max(p.x, frame.minX + 8), frame.maxX - cardSize.width - 8)
-                if p.y < frame.minY + 8 {
-                    p.y = min(point.y + 24, frame.maxY - cardSize.height - 8)
-                }
+                p.y = min(max(p.y, frame.minY + 8), frame.maxY - cardSize.height - 8)
             }
             origin = p
         }

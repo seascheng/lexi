@@ -560,16 +560,21 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         return max(1, min(2, Int(ceil(needed / 16))))
     }
 
-    private func placePanel() {
+    func placePanel() {
         let size = NSSize(width: Self.panelWidth, height: panelHeight)
         root.frame = NSRect(origin: .zero, size: size)
         layoutChrome(height: size.height)
-        let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
-        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let x = visible.midX - size.width / 2
-        let y = max(visible.maxY - visible.height * 0.25 - size.height, visible.minY)
-        panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
+        // Hapigo-style placement: the panel's TOP-LEFT corner matches the
+        // mouse; only an on-screen overflow nudges it horizontally or
+        // vertically back into the visible frame.
+        let point = NSEvent.mouseLocation
+        var origin = NSPoint(x: point.x, y: point.y - size.height)
+        let screen = NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main
+        if let visible = screen?.visibleFrame {
+            origin.x = min(max(origin.x, visible.minX + 8), visible.maxX - size.width - 8)
+            origin.y = min(max(origin.y, visible.minY + 8), visible.maxY - size.height - 8)
+        }
+        panel.setFrame(NSRect(origin: origin, size: size), display: true)
     }
 
     // MARK: data
