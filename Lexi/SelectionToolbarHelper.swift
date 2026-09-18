@@ -1184,6 +1184,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     /// run yet) with the current selection pre-filled if available.
     /// Replaces Rust's trigger_popup_with_selection.
     func showPopupCard() {
+        // The action bar must reflect the current enable/order config at
+        // popup time, not whatever snapshot the last refresh left.
+        refreshCardActions()
         // Try to read the current selection; empty = idle card with no input.
         let selection = SelectionPipeline.readSelectedText()?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

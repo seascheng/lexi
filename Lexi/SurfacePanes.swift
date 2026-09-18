@@ -209,6 +209,9 @@ final class CardConfigModel {
     var features: [LexiFeatureRow] = []
     var origin: CGPoint?
     var size: CGSize?
+    /// Wired by the pane — mutations must rebuild the live card's action
+    /// bar (refreshCardActions), not just the database.
+    var effects: LexiSettingsEffects?
 
     func reload() {
         features = LexiStore.features().sorted { $0.sortOrder < $1.sortOrder }
@@ -222,6 +225,7 @@ final class CardConfigModel {
         updated.enabled.toggle()
         LexiStore.saveFeature(updated)
         reload()
+        effects?.nativeSettingsChanged()
     }
 
     func move(from source: IndexSet, to destination: Int) {
@@ -232,6 +236,7 @@ final class CardConfigModel {
         for row in features {
             LexiStore.saveFeature(row)
         }
+        effects?.nativeSettingsChanged()
     }
 
     func resetFrame() {
@@ -241,6 +246,7 @@ final class CardConfigModel {
 }
 
 struct CardConfigPane: View {
+    @Environment(LexiSettingsModel.self) private var settings
     @State private var model = CardConfigModel()
 
     var body: some View {
@@ -305,7 +311,10 @@ struct CardConfigPane: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .contentMargins(.top, 8, for: .scrollContent)
-        .onAppear { model.reload() }
+        .onAppear {
+            model.effects = settings.effects
+            model.reload()
+        }
     }
 }
 
