@@ -37,6 +37,14 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     private static let defaultTag = "Tmp"
 
     private let panel: KeyablePanel
+
+    /// Whether THIS panel owns the keyboard (the app-level Tab router needs
+    /// it: panels are independent, Tab goes to whoever is key).
+    var isKeyWindow: Bool { panel.isKeyWindow }
+
+    /// Tab from the app-level router: cycle this panel's chip tabs.
+    func cycleChipTabs() { cycleTabs(1) }
+
     private let root: FlippedView
     private let glassContent: NSView
     private let searchField = NSSearchField()

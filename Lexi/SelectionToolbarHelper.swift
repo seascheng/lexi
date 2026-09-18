@@ -1075,8 +1075,15 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         buildResultCard()
         installMouseMonitors()
         installStatusItem()
+        // Persisted panel style — previously pushed by the Rust /theme route,
+        // which died with it. Must run AFTER the views exist: applyTheme
+        // relayouts the card. Applies to toolbar, card, launcher, clipboard.
+        PanelStyle.update(
+            opacity: CGFloat(LexiStore.settingInt("panelOpacity", in: 10...90, default: 40)) / 100.0,
+            blur: LexiStore.setting("panelBlur").flatMap(PanelStyle.Blur.init(rawValue:))
+        )
+        applyTheme(LexiStore.setting("theme") ?? "dark")
         refreshCardActions()
-        LexiStore.migrateActionsTable()
         startDisplayServer()
         shortcutMonitor = ShortcutMonitor(
             onLauncher: { [weak self] in
@@ -1089,8 +1096,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         shortcutMonitor?.onCopyCommand = { [weak self] in
             self?.selectionPipeline?.noteCopyCommand()
         }
-        // Clipboard capture: own store + 0.5s poller, started once the TCP
-        // server is up so suspend/resume posts can flow both ways.
+        // Clipboard capture: own store + 0.5s poller.
         if let store = ClipboardStore.open() {
             clipboardController.attach(store: store)
             ClipboardMonitor.shared.start(store: store)
@@ -1201,8 +1207,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
     }
 
-    /// The card's tab row + input action buttons read one config snapshot,
-    /// refreshed at launch and on every settings change.
+    /// The toolbar buttons, the card's tab row, and the input action buttons
+    /// all read one config snapshot, refreshed at launch and on every
+    /// settings change. Toolbar buttons use the toolbar scope
+    /// (toolbarEnabled/toolbarOrder); the card uses the panel scope.
     func refreshCardActions() {
         struct Entry {
             var order: Int
@@ -1221,6 +1229,19 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 icon: feature.icon.isEmpty ? "wand" : feature.icon, kind: "feature")))
         }
         entries.sort { $0.order < $1.order }
+
+        // Toolbar scope: same registry, toolbar columns.
+        var toolbar: [(order: Int, action: ToolbarAction)] = []
+        for tool in LexiStore.toolbarTools() where tool.enabled && !tool.id.isEmpty {
+            toolbar.append((tool.sortOrder, ToolbarAction(
+                id: tool.id, title: tool.name.isEmpty ? "Tool" : tool.name,
+                icon: tool.icon.isEmpty ? "wand" : tool.icon)))
+        }
+        for feature in LexiStore.features() where feature.enabled && !feature.id.isEmpty {
+            toolbar.append((feature.sortOrder, ToolbarAction(
+                id: feature.id, title: feature.name, icon: feature.icon)))
+        }
+        applyActions(toolbar.sorted { $0.order < $1.order }.map(\.action))
 
         // Panel tabs: DB rows + the built-ins appended when missing, then
         // canonical order (Actions, Review first).
@@ -1315,15 +1336,21 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             }
         }
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-            if event.keyCode == 53 { // kVK_Escape
-                self?.escapeResultCardIfNeeded()
+            if event.keyCode == 53, let self { // kVK_Escape
+                self.escapeResultCardIfNeeded()
             }
-            if event.keyCode == 48, let self, self.resultPanel != nil, self.resultPanel.isVisible {
-                // Tab cycles the card's panel tabs — one source of truth for
-                // every page/responder (the old per-responder handlers died on
-                // the Review page where no text view owns the key).
-                self.cyclePanelTab()
-                return nil
+            if event.keyCode == 48, let self, self.resultPanel != nil {
+                // Tab goes to whoever owns the keyboard — panels are
+                // independent surfaces (a pinned card stays visible while
+                // the clipboard panel is key and must not steal its Tab).
+                if self.resultPanel.isKeyWindow {
+                    self.cyclePanelTab()
+                    return nil
+                }
+                if self.clipboardController.isKeyWindow {
+                    self.clipboardController.cycleChipTabs()
+                    return nil
+                }
             }
             return event
         }
