@@ -228,6 +228,7 @@ extension SelectionToolbarApp {
             string: "Enter text",
             attributes: [.foregroundColor: cardTheme.tertiaryText, .font: NSFont.systemFont(ofSize: 13)]
         )
+        inputContainer.addSubview(inputTextView)
         inputButtonsRow = NSView(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
         inputButtonsClip = HorizontalOnlyClip(frame: NSRect(x: 0, y: 0, width: 90, height: 28))
         inputButtonsClip.drawsBackground = false
@@ -466,7 +467,7 @@ extension SelectionToolbarApp {
     func handleCardActions(_ payload: CardActionsPayload) {
         cardActions = payload.actions
         panelDefs = (payload.panels ?? []).map { ($0.id, $0.name, $0.icon) }
-        if !panelDefs.isEmpty, !panelTabPills.isEmpty {
+        if !panelDefs.isEmpty {
             buildPanelTabPills()
         }
         if panelDefs.isEmpty {

@@ -938,8 +938,18 @@ final class RunChipView: NSView {
 final class CardInputTextView: NSTextView {
     var onBecameFocus: (() -> Void)?
     var onLostFocus: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { onBecameFocus?() }
+        return ok
+    }
     /// Multiline text views have no native placeholder; this one paints the
-    /// hint INSIDE draw() at textContainerOrigin with the same font — the
+    /// hint INSIDE draw() at textContainerOrigin with the same font — text
     /// hint and real text share one layout pipeline, so they cannot drift.
     var placeholder: NSAttributedString?
 
@@ -956,12 +966,6 @@ final class CardInputTextView: NSTextView {
             width: bounds.width - origin.x * 2,
             height: lineH
         ))
-    }
-
-    override func becomeFirstResponder() -> Bool {
-        let ok = super.becomeFirstResponder()
-        if ok { onBecameFocus?() }
-        return ok
     }
 
     override func resignFirstResponder() -> Bool {
