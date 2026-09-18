@@ -269,6 +269,7 @@ struct NotebookPane: View {
 private struct CategoryManager: View {
     let model: NotebookModel
 
+    @Environment(\.dismiss) private var dismiss
     @State private var newName = ""
     /// Rename drafts keyed by category id — committed on Return so
     /// keystrokes don't trigger reloads mid-edit.
@@ -278,8 +279,21 @@ private struct CategoryManager: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Categories")
-                .font(.headline)
+            HStack {
+                Text("Categories")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.title3)
+                }
+                .buttonStyle(.borderless)
+                .keyboardShortcut(.cancelAction)
+                .help("Close")
+            }
 
             HStack {
                 TextField("New category", text: $newName)
