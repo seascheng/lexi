@@ -264,6 +264,11 @@ struct AppearanceSettingsPane: View {
 
 struct AISettingsPane: View {
     @Environment(LexiSettingsModel.self) private var model
+    /// Live view of the `read` tool's speech config (toolbar_tools blob).
+    @State private var ttsEngine = "system"
+    @State private var volcAppId = ""
+    @State private var volcAccessToken = ""
+    @State private var volcVoice = ""
 
     var body: some View {
         Form {
@@ -273,67 +278,167 @@ struct AISettingsPane: View {
                         get: { model.apiBaseUrl },
                         set: { model.setApiBaseUrl($0) }
                     ))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 320)
                 }
                 LabeledContent("Model") {
                     TextField("gpt-4o-mini", text: Binding(
                         get: { model.aiModel },
                         set: { model.setAiModel($0) }
                     ))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 320)
                 }
                 LabeledContent("API key") {
                     SecureField("sk-…", text: Binding(
                         get: { model.apiKey },
                         set: { model.setApiKey($0) }
                     ))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 320)
                 }
             } header: {
                 Text("OpenAI-compatible API")
             } footer: {
                 Text("Any OpenAI-compatible endpoint works. Values take effect on the next selection run.")
             }
+
+            Section {
+                Picker("Engine", selection: $ttsEngine) {
+                    Text("System built-in (say)").tag("system")
+                    Text("Volcengine TTS").tag("volcengine")
+                }
+                .onChange(of: ttsEngine) { _, value in
+                    LexiStore.setToolConfigField(id: "read", field: "engine", value: value)
+                }
+                if ttsEngine == "volcengine" {
+                    LabeledContent("APP ID") {
+                        TextField("9989685160", text: Binding(
+                            get: { volcAppId },
+                            set: {
+                                volcAppId = $0
+                                LexiStore.setToolConfigField(id: "read", field: "volcAppId", value: $0)
+                            }
+                        ))
+                    }
+                    LabeledContent("Access token") {
+                        SecureField("Access Token", text: Binding(
+                            get: { volcAccessToken },
+                            set: {
+                                volcAccessToken = $0
+                                LexiStore.setToolConfigField(id: "read", field: "volcAccessToken", value: $0)
+                            }
+                        ))
+                    }
+                    LabeledContent("Voice") {
+                        TextField("zh_female_cancan_mars_bigtts", text: Binding(
+                            get: { volcVoice },
+                            set: {
+                                volcVoice = $0
+                                LexiStore.setToolConfigField(id: "read", field: "volcVoice", value: $0)
+                            }
+                        ))
+                    }
+                }
+            } header: {
+                Text("Speech (text to speech)")
+            } footer: {
+                Text("Used by the Read action on the toolbar and the card.")
+            }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .contentMargins(.top, 8, for: .scrollContent)
+        .onAppear {
+            let config = LexiStore.toolbarToolConfig(id: "read")
+            ttsEngine = config["engine"] ?? "system"
+            volcAppId = config["volcAppId"] ?? ""
+            volcAccessToken = config["volcAccessToken"] ?? ""
+            volcVoice = config["volcVoice"] ?? ""
+        }
     }
 }
 
 // MARK: - Shortcuts
 
-/// Presets mirror exactly what ShortcutMode::parse accepts on the Rust side:
-/// key combos and double-modifier taps.
-private struct ShortcutOption: Identifiable {
-    let value: String
+/// One press-to-record row: shows the current combo, records the next
+/// keystroke (combo or double-modifier tap) into the binding.
+struct ShortcutRecorderRow: View {
     let label: String
-    var id: String { value }
+    @Binding var value: String
+    @State private var recording = false
+    @State private var tapCount = 0
+    @State private var lastModifier = ""
+    @State private var monitor: Any?
+
+    var body: some View {
+        LabeledContent(label) {
+            HStack(spacing: 8) {
+                Text(value)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 5))
+                Button(recording ? "按下快捷键…" : "录制") {
+                    if recording { stop() } else { start() }
+                }
+                .controlSize(.small)
+                .buttonStyle(.bordered)
+                .tint(recording ? .red : nil)
+            }
+        }
+    }
+
+    private func start() {
+        recording = true
+        tapCount = 0
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
+            if event.type == .flagsChanged {
+                let modifier = Self.modifierName(event.modifierFlags)
+                guard !modifier.isEmpty else { return event }
+                if modifier == lastModifier {
+                    tapCount += 1
+                    if tapCount == 2 {
+                        value = "\(modifier)+\(modifier)"
+                        stop()
+                    }
+                } else {
+                    lastModifier = modifier
+                    tapCount = 1
+                }
+                return event
+            }
+            // keyDown: Esc cancels; combo = current modifiers + the key
+            if event.keyCode == 53 { // kVK_Escape
+                stop()
+                return event
+            }
+            let f = event.modifierFlags
+            var parts: [String] = []
+            if f.contains(.command) { parts.append("Cmd") }
+            if f.contains(.control) { parts.append("Ctrl") }
+            if f.contains(.option) { parts.append("Alt") }
+            if f.contains(.shift) { parts.append("Shift") }
+            guard let key = event.charactersIgnoringModifiers?.uppercased(), !key.isEmpty, !parts.isEmpty else {
+                return event // bare keys can't be global shortcuts
+            }
+            parts.append(key == " " ? "Space" : key)
+            value = parts.joined(separator: "+")
+            stop()
+            return nil // swallow the capturing keystroke
+        }
+    }
+
+    private func stop() {
+        recording = false
+        tapCount = 0
+        lastModifier = ""
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        self.monitor = nil
+    }
+
+    private static func modifierName(_ flags: NSEvent.ModifierFlags) -> String {
+        if flags.contains(.command) { return "Cmd" }
+        if flags.contains(.control) { return "Ctrl" }
+        if flags.contains(.option) { return "Alt" }
+        if flags.contains(.shift) { return "Shift" }
+        return ""
+    }
 }
-
-private let popupOptions = [
-    ShortcutOption(value: "Ctrl+Ctrl", label: "Double Control"),
-    ShortcutOption(value: "Alt+Alt", label: "Double Option"),
-    ShortcutOption(value: "Cmd+Cmd", label: "Double Command"),
-    ShortcutOption(value: "Cmd+Shift+T", label: "⌘⇧T"),
-]
-
-private let launcherOptions = [
-    ShortcutOption(value: "Shift+Shift", label: "Double Shift"),
-    ShortcutOption(value: "Alt+Alt", label: "Double Option"),
-    ShortcutOption(value: "Cmd+Cmd", label: "Double Command"),
-    ShortcutOption(value: "Cmd+Shift+L", label: "⌘⇧L"),
-]
-
-private let clipboardOptions = [
-    ShortcutOption(value: "Alt+V", label: "⌥V"),
-    ShortcutOption(value: "Ctrl+Shift+V", label: "⌃⇧V"),
-    ShortcutOption(value: "Alt+Alt", label: "Double Option"),
-    ShortcutOption(value: "Cmd+Cmd", label: "Double Command"),
-]
 
 struct ShortcutsSettingsPane: View {
     @Environment(LexiSettingsModel.self) private var model
@@ -341,34 +446,22 @@ struct ShortcutsSettingsPane: View {
     var body: some View {
         Form {
             Section {
-                Picker("Show popup", selection: Binding(
+                ShortcutRecorderRow(label: "Show popup", value: Binding(
                     get: { model.popupShortcut },
                     set: { model.setPopupShortcut($0) }
-                )) {
-                    ForEach(popupOptions) { option in
-                        Text(option.label).tag(option.value)
-                    }
-                }
-                Picker("Show launcher", selection: Binding(
+                ))
+                ShortcutRecorderRow(label: "Show launcher", value: Binding(
                     get: { model.launcherShortcut },
                     set: { model.setLauncherShortcut($0) }
-                )) {
-                    ForEach(launcherOptions) { option in
-                        Text(option.label).tag(option.value)
-                    }
-                }
-                Picker("Show clipboard", selection: Binding(
+                ))
+                ShortcutRecorderRow(label: "Show clipboard", value: Binding(
                     get: { model.clipboardShortcut },
                     set: { model.setClipboardShortcut($0) }
-                )) {
-                    ForEach(clipboardOptions) { option in
-                        Text(option.label).tag(option.value)
-                    }
-                }
+                ))
             } header: {
                 Text("Global shortcuts")
             } footer: {
-                Text("Changes apply immediately. Double-tap shortcuts ignore keystrokes while you type.")
+                Text("Click Record, then press the key combo. Tapping the same modifier twice records a double-tap shortcut. Changes apply immediately; double-tap shortcuts ignore keystrokes while you type.")
             }
         }
         .formStyle(.grouped)

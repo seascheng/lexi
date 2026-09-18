@@ -166,9 +166,15 @@ struct NotebookPane: View {
 @Observable
 final class FeaturesModel {
     var rows: [LexiFeatureRow] = []
+    /// Per-tool config field edits (id -> field -> value), from the blob.
+    var toolConfigs: [(id: String, name: String, icon: String, config: [String: String])] = []
 
     func reload() {
         rows = LexiStore.features()
+        toolConfigs = LexiStore.toolbarTools().map {
+            (id: $0.id, name: $0.displayName,
+             icon: $0.icon.isEmpty ? "wand" : $0.icon, config: $0.config)
+        }
     }
 
     func toggle(_ row: LexiFeatureRow) {
@@ -187,6 +193,11 @@ final class FeaturesModel {
         LexiStore.deleteFeature(id: row.id)
         reload()
     }
+
+    func setToolField(_ id: String, field: String, value: String) {
+        LexiStore.setToolConfigField(id: id, field: field, value: value)
+        reload()
+    }
 }
 
 struct ConfigsPane: View {
@@ -194,44 +205,93 @@ struct ConfigsPane: View {
     @State private var editing: LexiFeatureRow?
 
     var body: some View {
-        Group {
-            if model.rows.isEmpty {
-                ContentUnavailableView(
-                    "No features",
-                    systemImage: "sparkles",
-                    description: Text("Features are the AI actions on the toolbar and the card's Actions tab.")
-                )
-            } else {
+        Form {
+            Section("Tools") {
+                ForEach(model.toolConfigs, id: \.id) { tool in
+                    toolConfigRows(tool)
+                }
+            }
+            Section {
                 List {
                     ForEach(model.rows) { row in
                         featureRow(row)
                     }
                 }
+                .frame(minHeight: 220)
+                .listStyle(.inset)
+            } header: {
+                Text("AI features")
+            } footer: {
+                Text("\(model.rows.filter(\.enabled).count) of \(model.rows.count) enabled")
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            HStack {
+            Section {
                 Button {
                     editing = newFeature()
                 } label: {
                     Label("Add Feature", systemImage: "plus")
                 }
-                Spacer()
-                Text("\(model.rows.filter(\.enabled).count) of \(model.rows.count) enabled")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.quaternary.opacity(0.35))
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .contentMargins(.top, 8, for: .scrollContent)
         .onAppear { model.reload() }
         .sheet(item: $editing) { row in
             FeatureEditor(feature: row) { updated in
                 model.save(updated)
             } onDelete: { doomed in
                 model.delete(doomed)
+            }
+        }
+    }
+
+    /// One tool row + its config fields (search/read/handoff have editable
+    /// values; copy/note have none). Fields write straight to the blob.
+    @ViewBuilder
+    private func toolConfigRows(_ tool: (id: String, name: String, icon: String, config: [String: String])) -> some View {
+        LabeledContent {
+            EmptyView()
+        } label: {
+            Label(tool.name, systemImage: toolIconName(tool.id))
+        }
+        switch tool.id {
+        case "search":
+            Picker("Engine", selection: Binding(
+                get: { tool.config["engine"] ?? "google" },
+                set: { model.setToolField(tool.id, field: "engine", value: $0) }
+            )) {
+                Text("Google").tag("google")
+                Text("Bing").tag("bing")
+                Text("DuckDuckGo").tag("duckduckgo")
+                Text("Custom").tag("custom")
+            }
+            if tool.config["engine"] == "custom" {
+                LabeledContent("URL template") {
+                    TextField("https://example.com/search?q={query}", text: Binding(
+                        get: { tool.config["customUrl"] ?? "" },
+                        set: { model.setToolField(tool.id, field: "customUrl", value: $0) }
+                    ))
+                }
+            }
+        case "read":
+            LabeledContent("TTS engine") {
+                Text(tool.config["engine"] == "volcengine" ? "Volcengine TTS" : "System (say)")
+                    .foregroundStyle(.secondary)
+            }
+            LabeledContent("Speech keys") {
+                Text("AI page → Speech section")
+                    .foregroundStyle(.secondary)
+            }
+        case "handoff":
+            LabeledContent("Target app") {
+                TextField("ChatGPT", text: Binding(
+                    get: { tool.config["targetApp"] ?? "ChatGPT" },
+                    set: { model.setToolField(tool.id, field: "targetApp", value: $0) }
+                ))
+            }
+        default:
+            LabeledContent("No options") {
+                EmptyView()
             }
         }
     }
@@ -244,14 +304,16 @@ struct ConfigsPane: View {
             ))
             .labelsHidden()
             .toggleStyle(.switch)
+            .controlSize(.small)
 
             Image(systemName: iconName(row.icon))
+                .font(.system(size: 14))
                 .foregroundStyle(.tint)
                 .frame(width: 22)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.name).fontWeight(.medium)
-                Text("\(row.kind) · \(row.outputMode == "translation_json" ? "JSON" : "Text")\(row.autoSave ? " · auto-save" : "")\(row.thinking ? " · thinking" : "")")
+                Text("\(row.kind) · \(row.outputMode == "translation_json" ? "JSON" : "Text")\(row.autoSave ? " · auto-save" : "")\(row.speechEnabled ? " · speech" : "")\(row.thinking ? " · thinking" : "")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -282,7 +344,8 @@ struct ConfigsPane: View {
             targetLanguage: "",
             icon: "wand",
             isBuiltin: false,
-            thinking: false
+            thinking: false,
+            speechEnabled: false
         )
     }
 
@@ -295,6 +358,17 @@ struct ConfigsPane: View {
         case "brain": "brain"
         case "pencil": "pencil"
         case "sparkles": "sparkles"
+        default: "sparkles"
+        }
+    }
+
+    private func toolIconName(_ id: String) -> String {
+        switch id {
+        case "copy": "doc.on.doc"
+        case "search": "magnifyingglass"
+        case "read": "speaker.wave.2"
+        case "note": "note.text"
+        case "handoff": "paperplane"
         default: "sparkles"
         }
     }
@@ -343,6 +417,7 @@ struct FeatureEditor: View {
                 Section("Behavior") {
                     Toggle("Enabled", isOn: $draft.enabled)
                     Toggle("Auto-save single words to vocabulary", isOn: $draft.autoSave)
+                    Toggle("Speak result (text to speech)", isOn: $draft.speechEnabled)
                     Toggle("Deep thinking mode (slower first token)", isOn: $draft.thinking)
                 }
             }

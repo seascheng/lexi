@@ -1220,7 +1220,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
         for tool in LexiStore.toolbarTools() where tool.panelEnabled && !tool.id.isEmpty {
             entries.append(Entry(order: tool.panelSortOrder, item: .init(
-                id: tool.id, name: tool.name.isEmpty ? "Tool" : tool.name,
+                id: tool.id, name: tool.displayName,
                 icon: tool.icon.isEmpty ? "wand" : tool.icon, kind: "tool")))
         }
         for feature in LexiStore.features() where feature.enabled && !feature.id.isEmpty {
@@ -1234,7 +1234,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         var toolbar: [(order: Int, action: ToolbarAction)] = []
         for tool in LexiStore.toolbarTools() where tool.enabled && !tool.id.isEmpty {
             toolbar.append((tool.sortOrder, ToolbarAction(
-                id: tool.id, title: tool.name.isEmpty ? "Tool" : tool.name,
+                id: tool.id, title: tool.displayName,
                 icon: tool.icon.isEmpty ? "wand" : tool.icon)))
         }
         for feature in LexiStore.features() where feature.enabled && !feature.id.isEmpty {

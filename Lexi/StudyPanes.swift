@@ -168,9 +168,9 @@ struct VocabularyPane: View {
                     Text("learning").tag("learning")
                     Text("mastered").tag("mastered")
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.segmented)
                 .controlSize(.small)
-                .frame(width: 110)
+                .frame(width: 180)
                 Button {
                     model.delete(word)
                 } label: {
@@ -268,12 +268,16 @@ struct VocabularyPane: View {
 
 // MARK: - Review
 
+enum ReviewMode: Equatable { case flashcard, typing }
+
 @MainActor
 @Observable
 final class ReviewModel {
     var current: LexiWord?
     var revealed = false
     var dueCount = 0
+    var index = 0
+    var mode = ReviewMode.flashcard
 
     /// Eager first load — same hosting-structure rationale as
     /// VocabularyModel.init.
@@ -289,6 +293,7 @@ final class ReviewModel {
     func grade(_ rating: String) {
         guard let word = current else { return }
         LexiStore.applyReviewGrade(id: word.id, rating: rating)
+        index += 1
         next()
     }
 }
@@ -299,35 +304,76 @@ struct ReviewPane: View {
     var body: some View {
         Group {
             if let word = model.current {
-                VStack(spacing: 24) {
-                    Text("\(model.dueCount) due")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-
-                    VStack(spacing: 10) {
-                        Text(word.word)
-                            .font(.system(size: 34, weight: .semibold, design: .rounded))
-                        if model.revealed {
-                            MarkdownText(content: word.translation, compact: true)
-                                .frame(maxWidth: 480)
-                            if !word.definition.isEmpty {
-                                MarkdownText(content: word.definition, compact: true)
-                                    .opacity(0.8)
-                                    .frame(maxWidth: 480)
-                            }
-                        } else {
-                            Text("Tap to reveal")
-                                .font(.title3)
-                                .foregroundStyle(.secondary)
+                VStack(spacing: 20) {
+                    HStack {
+                        Text("\(model.index + 1) / \(model.dueCount)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 80)
+                        Spacer()
+                        Picker("Mode", selection: $model.mode) {
+                            Text("Flashcard").tag(ReviewMode.flashcard)
+                            Text("Type").tag(ReviewMode.typing)
                         }
+                        .pickerStyle(.segmented)
+                        .controlSize(.small)
+                        .frame(width: 180)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 30)
-                    .contentShape(Rectangle())
-                    .onTapGesture { model.revealed.toggle() }
+                    .padding(.horizontal, 16)
 
-                    if model.revealed {
-                        gradeButtons
+                    if model.mode == .flashcard {
+                        VStack(spacing: 10) {
+                            Text(word.word)
+                                .font(.system(size: 34, weight: .semibold, design: .rounded))
+                            if !word.pos.isEmpty {
+                                Text(word.pos)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .textCase(.uppercase)
+                            }
+                            if model.revealed {
+                                MarkdownText(content: word.translation, compact: true)
+                                    .frame(maxWidth: 480)
+                            } else {
+                                Text("Tap to reveal")
+                                    .font(.title3)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                        .contentShape(Rectangle())
+                        .onTapGesture { model.revealed.toggle() }
+
+                        if model.revealed {
+                            VStack(alignment: .leading, spacing: 8) {
+                                if !word.definition.isEmpty {
+                                    MarkdownText(content: word.definition, compact: true)
+                                        .opacity(0.85)
+                                }
+                                if !word.example.isEmpty {
+                                    Text("“\(word.example)”")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
+                                }
+                                if !word.note.isEmpty {
+                                    MarkdownText(content: word.note, compact: true)
+                                        .opacity(0.8)
+                                }
+                            }
+                            .frame(maxWidth: 480)
+                            .padding(.horizontal, 16)
+                            gradeButtons
+                        }
+                    } else {
+                        // Typing mode: type the word from its meaning, then grade.
+                        TypingChallengeView(word: word) {
+                            model.next()
+                        }
+                        .frame(maxWidth: 520)
                     }
                 }
                 .padding()
@@ -352,5 +398,63 @@ struct ReviewPane: View {
                 .tint(color)
             }
         }
+    }
+}
+
+// MARK: - Typing challenge (ReviewPage typing mode parity)
+
+/// Shows the translation/definition; the user types the word. Correct +
+/// Enter (or auto-match) grades "good"; Skip grades "again".
+struct TypingChallengeView: View {
+    let word: LexiWord
+    let onDone: () -> Void
+
+    @State private var input = ""
+
+    private var meaning: String {
+        [word.translation, word.definition]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    private var normalizedTarget: String {
+        word.word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var normalizedInput: String {
+        input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            MarkdownText(content: meaning, compact: false)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            TextField("Type the word…", text: $input)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 16, design: .monospaced))
+                .multilineTextAlignment(.center)
+                .onSubmit { submit() }
+                .onChange(of: input) { _, newValue in
+                    if newValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalizedTarget {
+                        submit()
+                    }
+                }
+
+            HStack(spacing: 12) {
+                Button("Skip (Again)") {
+                    LexiStore.applyReviewGrade(id: word.id, rating: "again")
+                    onDone()
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding()
+    }
+
+    private func submit() {
+        let correct = normalizedInput == normalizedTarget
+        LexiStore.applyReviewGrade(id: word.id, rating: correct ? "good" : "again")
+        onDone()
     }
 }

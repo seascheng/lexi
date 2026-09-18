@@ -144,6 +144,22 @@ extension LexiStore {
         return result
     }
 
+    /// Set one field of a tool's config (read-modify-write of the blob).
+    static func setToolConfigField(id: String, field: String, value: String) {
+        guard let raw = setting("toolbar_tools"),
+              let data = raw.data(using: .utf8),
+              var tools = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let index = tools.firstIndex(where: { ($0["id"] as? String) == id })
+        else { return }
+        var config = tools[index]["config"] as? [String: String] ?? [:]
+        config[field] = value
+        tools[index]["config"] = config
+        if let out = try? JSONSerialization.data(withJSONObject: tools),
+           let raw = String(data: out, encoding: .utf8) {
+            setSetting("toolbar_tools", raw)
+        }
+    }
+
     /// Vocabulary auto-save — parity with the Rust pipeline's INSERT.
     static func insertWord(
         word: String, translation: String, pos: String,
@@ -378,6 +394,7 @@ struct LexiFeatureRow: Identifiable, Hashable {
     var icon: String
     var isBuiltin: Bool
     var thinking: Bool
+    var speechEnabled: Bool
 }
 
 extension LexiStore {
@@ -424,7 +441,7 @@ extension LexiStore {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(
             db,
-            "SELECT id, name, kind, prompt_template, output_mode, enabled, sort_order, auto_save_to_vocabulary, IFNULL(target_language,''), icon, is_builtin, thinking FROM ai_features ORDER BY sort_order, created_at;",
+            "SELECT id, name, kind, prompt_template, output_mode, enabled, sort_order, auto_save_to_vocabulary, IFNULL(target_language,''), icon, is_builtin, thinking, speech_enabled FROM ai_features ORDER BY sort_order, created_at;",
             -1, &statement, nil
         ) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(statement) }
@@ -442,7 +459,8 @@ extension LexiStore {
                 autoSave: sqlite3_column_int64(statement, 7) == 1,
                 targetLanguage: text(8), icon: text(9),
                 isBuiltin: sqlite3_column_int64(statement, 10) == 1,
-                thinking: sqlite3_column_int64(statement, 11) == 1
+                thinking: sqlite3_column_int64(statement, 11) == 1,
+                speechEnabled: sqlite3_column_int64(statement, 12) == 1
             ))
         }
         return rows
@@ -455,7 +473,7 @@ extension LexiStore {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(
             db,
-            "INSERT INTO ai_features (id, name, kind, prompt_template, output_mode, enabled, sort_order, auto_save_to_vocabulary, target_language, icon, is_builtin, thinking, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12, datetime('now')) ON CONFLICT(id) DO UPDATE SET name=excluded.name, kind=excluded.kind, prompt_template=excluded.prompt_template, output_mode=excluded.output_mode, enabled=excluded.enabled, sort_order=excluded.sort_order, auto_save_to_vocabulary=excluded.auto_save_to_vocabulary, target_language=excluded.target_language, icon=excluded.icon, thinking=excluded.thinking, updated_at=datetime('now');",
+            "INSERT INTO ai_features (id, name, kind, prompt_template, output_mode, enabled, sort_order, auto_save_to_vocabulary, target_language, icon, is_builtin, thinking, speech_enabled, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13, datetime('now')) ON CONFLICT(id) DO UPDATE SET name=excluded.name, kind=excluded.kind, prompt_template=excluded.prompt_template, output_mode=excluded.output_mode, enabled=excluded.enabled, sort_order=excluded.sort_order, auto_save_to_vocabulary=excluded.auto_save_to_vocabulary, target_language=excluded.target_language, icon=excluded.icon, thinking=excluded.thinking, speech_enabled=excluded.speech_enabled, updated_at=datetime('now');",
             -1, &statement, nil
         ) == SQLITE_OK else { return }
         defer { sqlite3_finalize(statement) }
@@ -471,6 +489,7 @@ extension LexiStore {
         sqlite3_bind_text(statement, 10, row.icon, -1, SQLITE_TRANSIENT)
         sqlite3_bind_int(statement, 11, row.isBuiltin ? 1 : 0)
         sqlite3_bind_int(statement, 12, row.thinking ? 1 : 0)
+        sqlite3_bind_int(statement, 13, row.speechEnabled ? 1 : 0)
         sqlite3_step(statement)
     }
 
@@ -791,7 +810,7 @@ extension LexiStore {
             if let configData = try? JSONSerialization.data(withJSONObject: entry.config),
                let configJson = String(data: configData, encoding: .utf8) {
                 sqlite3_bind_text(insert, 1, entry.id, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_text(insert, 2, entry.name, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(insert, 2, entry.displayName, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(insert, 3, entry.icon, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_int(insert, 4, entry.enabled ? 1 : 0)
                 sqlite3_bind_int(insert, 5, Int32(entry.sortOrder))
@@ -818,7 +837,7 @@ extension LexiStore {
         if let configData = try? JSONSerialization.data(withJSONObject: entry.config),
            let configJson = String(data: configData, encoding: .utf8) {
             sqlite3_bind_text(statement, 1, entry.id, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(statement, 2, entry.name, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 2, entry.displayName, -1, SQLITE_TRANSIENT)
             sqlite3_bind_text(statement, 3, entry.icon, -1, SQLITE_TRANSIENT)
             sqlite3_bind_int(statement, 4, entry.enabled ? 1 : 0)
             sqlite3_bind_int(statement, 5, Int32(entry.sortOrder))
@@ -842,13 +861,16 @@ extension LexiStore {
 /// toolbar scope and the card's Actions-tab scope each read their columns.
 struct LexiToolEntry: Codable, Identifiable, Hashable {
     var id: String
-    var name: String
+    // The blob historically has no name for tools — display falls back to id.
+    var name: String?
     var enabled: Bool
     var sortOrder: Int
     var panelEnabled: Bool
     var panelSortOrder: Int
     var icon: String
     var config: [String: String]
+
+    var displayName: String { (name?.isEmpty == false) ? name! : id }
 }
 
 extension LexiStore {

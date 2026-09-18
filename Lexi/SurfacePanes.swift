@@ -90,7 +90,7 @@ struct ToolbarConfigPane: View {
                         Image(systemName: symbol(tool.icon))
                             .foregroundStyle(.tint)
                             .frame(width: 20)
-                        Text(tool.name)
+                        Text(tool.displayName)
                         Spacer()
                         Toggle("", isOn: Binding(
                             get: { tool.enabled },
@@ -197,7 +197,7 @@ struct CardConfigPane: View {
                         Image(systemName: "square.grid.2x2")
                             .foregroundStyle(.tint)
                             .frame(width: 20)
-                        Text(tool.name)
+                        Text(tool.displayName)
                         Spacer()
                         Toggle("", isOn: Binding(
                             get: { tool.panelEnabled },

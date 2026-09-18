@@ -128,7 +128,7 @@ enum SettingsTab: CaseIterable, Identifiable {
         case .toolbar: "menubar.rectangle"
         case .card: "rectangle.inset.filled"
         case .clipboard: "doc.on.clipboard"
-        case .launcher: "rocket"
+        case .launcher: "bolt"
         }
     }
 }
@@ -294,7 +294,6 @@ struct LexiSidebarList: View {
                             Image(systemName: tab.systemImage)
                                 .font(.system(size: 12, weight: .regular))
                                 .frame(width: 16)
-                                .foregroundStyle(.tint)
                             Text(tab.title)
                                 .font(.system(size: 13))
                         }
