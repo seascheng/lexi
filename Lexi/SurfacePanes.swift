@@ -115,9 +115,7 @@ struct ToolbarConfigPane: View {
     @State private var model = ToolbarConfigModel()
 
     var body: some View {
-        // A real List — Form's grouped sections don't support .onMove
-        // drag reordering on macOS.
-        List {
+        Form {
             Section {
                 Toggle(isOn: Binding(
                     get: { model.enabled },
@@ -136,24 +134,32 @@ struct ToolbarConfigPane: View {
             }
 
             Section {
-                ForEach(model.entries) { entry in
-                    HStack(spacing: 10) {
-                        Image(nsImage: lucideImage(
-                            for: entry.icon, title: entry.name,
-                            color: .controlAccentColor) ?? NSImage())
-                            .frame(width: 20)
-                        Text(entry.name)
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { entry.enabled },
-                            set: { _ in model.toggle(entry) }
-                        ))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
+                // Nested real List: Form sections don't support .onMove
+                // drag reordering; .mini switches here render 36x16, the
+                // same size as the Form switches everywhere else.
+                List {
+                    ForEach(model.entries) { entry in
+                        HStack(spacing: 10) {
+                            Image(nsImage: lucideImage(
+                                for: entry.icon, title: entry.name,
+                                color: .controlAccentColor) ?? NSImage())
+                                .frame(width: 20)
+                            Text(entry.name)
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { entry.enabled },
+                                set: { _ in model.toggle(entry) }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                        }
                     }
+                    .onMove { from, to in model.move(from: from, to: to) }
                 }
-                .onMove { from, to in model.move(from: from, to: to) }
+                .listStyle(.inset)
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 300)
             } header: {
                 Text("Toolbar buttons")
             } footer: {
@@ -184,7 +190,7 @@ struct ToolbarConfigPane: View {
                 Text("Bundle identifiers where the toolbar never appears.")
             }
         }
-        .listStyle(.inset)
+        .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .contentMargins(.top, 8, for: .scrollContent)
         .onAppear {
