@@ -29,11 +29,8 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     /// Fixed card size: width trimmed below the shared 520 token, height
     /// constant so switching tabs never resizes or moves the window — the
     /// top-left corner stays pinned where the cursor put it.
-    private static let panelWidth: CGFloat = 460
+    static let panelWidth: CGFloat = 460
     static let panelHeight: CGFloat = 560
-    static let singleLineHeight: CGFloat = 44
-    private static let twoLineHeight: CGFloat = 54
-    private static let headerHeight: CGFloat = 30
     private static let side: CGFloat = PanelDesign.sideInset
 
     /// The category that absorbs uncategorized notes in the chip tabs.
@@ -291,7 +288,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         // that breaks the exact-fit height math (few-row tabs scrolled by
         // 2×n points). Row gaps come from the capsule insets, not here.
         tableView.intercellSpacing = .zero
-        tableView.usesAutomaticRowHeights = false
+        tableView.usesAutomaticRowHeights = true
         tableView.selectionHighlightStyle = .regular
         tableView.allowsEmptySelection = true
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("ClipboardColumn"))
@@ -538,53 +535,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         footerRight.frame = NSRect(x: Self.panelWidth - 266, y: footerY + 6, width: 250, height: 15)
     }
 
-    /// macOS 26 NSTableView pads its rows symmetrically INSIDE the table
-    /// bounds (verified against a vanilla table: rect(ofRow:0).minY == 10
-    /// with intercell/header/insets all neutralized). Every height we compute
-    /// must therefore budget rows + 2×pad, or the last row sits below the
-    /// clip and reads as "cut off". Measured live instead of hardcoded.
-    private var tableVerticalPad: CGFloat {
-        tableView.numberOfRows > 0 ? max(0, tableView.rect(ofRow: 0).minY) : 10
-    }
-
-    private func rowHeight(for row: Row) -> CGFloat {
-        switch row {
-        case .header: return Self.headerHeight
-        case .clip(let item):
-            if item.kind == .file { return Self.twoLineHeight }
-            guard let text = item.previewText else { return Self.twoLineHeight }
-            // User rule: wrap automatically, show at most TWO lines, then …
-            switch Self.previewLineCount(for: text) {
-            case 1: return Self.singleLineHeight
-            default: return Self.twoLineHeight
-            }
-        case .note(let note):
-            // Named notes are two-deck (name over content preview); unnamed
-            // notes collapse to their content as a one/two-line text row.
-            if note.name.isEmpty {
-                guard let text = ClipboardNotePreview.text(note) else {
-                    return Self.singleLineHeight
-                }
-                return ClipboardPanelController.previewLineCount(for: text) == 1
-                    ? Self.singleLineHeight : Self.twoLineHeight
-            }
-            return Self.twoLineHeight
-        }
-    }
-
-    /// Measured wrapped-line count for the preview column: lay the text out
-    /// in a throwaway wrapping label and count line heights (char-width
-    /// heuristics misjudged percent-encoded URLs and dense CJK). User rule:
-    /// at most TWO preview lines.
-    static func previewLineCount(for text: String) -> Int {
-        let measuring = NSTextField(wrappingLabelWithString: text)
-        measuring.font = .systemFont(ofSize: 15)
-        let textWidth = panelWidth - 66 // icon leading + icon + gap + trailing
-        let bounds = NSRect(x: 0, y: 0, width: textWidth, height: 10_000)
-        let needed = measuring.cell!.cellSize(forBounds: bounds).height
-        return max(1, min(2, Int(ceil(needed / 16))))
-    }
-
     func placePanel() {
         let size = NSSize(width: Self.panelWidth, height: Self.panelHeight)
         root.frame = NSRect(origin: .zero, size: size)
@@ -628,11 +578,10 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         updateHover(at: panel.convertFromScreen(
             NSRect(origin: NSEvent.mouseLocation, size: .zero)).origin)
         let viewport = scrollView.contentSize
-        // The table's own row padding is part of its content height
-        // (sizeToFit returns Σ + 2×pad) — refit with it or the scroller
-        // wakes up for exactly the padding overhang.
-        let total = rows.reduce(0.0) { $0 + rowHeight(for: $1) } + tableVerticalPad * 2
-        tableView.frame = NSRect(x: 0, y: 0, width: viewport.width, height: max(total, viewport.height))
+        let contentHeight = tableView.numberOfRows > 0
+            ? tableView.rect(ofRow: tableView.numberOfRows - 1).maxY
+            : 0
+        tableView.frame = NSRect(x: 0, y: 0, width: viewport.width, height: max(contentHeight, viewport.height))
         let clip = scrollView.contentView
         let maxOffset = max(0, tableView.frame.height - viewport.height)
         if clip.bounds.origin.y > maxOffset {
@@ -1047,11 +996,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
-    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        guard row < rows.count else { return Self.singleLineHeight }
-        return rowHeight(for: rows[row])
-    }
-
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
         guard row < rows.count else { return false }
         if case .header = rows[row] { return false }
@@ -1072,14 +1016,14 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         case .clip(let item):
             let cell = reuse(ClipCell.self, row: row)
             cell.configure(
-                item: item, theme: cardTheme, height: rowHeight(for: rows[row]),
+                item: item, theme: cardTheme,
                 thumbnail: thumbnail(for: item),
                 sourceIcon: ClipboardMonitor.shared.cachedIcon(forBundleID: item.sourceBundleID))
             return cell
         case .note(let note):
             let cell = reuse(ClipCell.self, row: row)
             cell.configureNote(
-                note: note, theme: cardTheme, height: rowHeight(for: rows[row]),
+                note: note, theme: cardTheme,
                 sourceIcon: tagColoredNoteGlyph())
             return cell
         }
@@ -1138,7 +1082,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         if let reused = tableView.makeView(withIdentifier: identifier, owner: self) as? T {
             return reused
         }
-        let view = T(frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: rowHeight(for: rows[row])))
+        let view = T(frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 44))
         view.identifier = identifier
         return view
     }
@@ -1441,8 +1385,6 @@ final class ClipCell: NSView {
     private var renameCommit: ((String) -> Void)?
     private var isRenaming = false
     private var installed = false
-    private var nameCenterY: NSLayoutConstraint!
-    private var nameTop: NSLayoutConstraint!
 
     func beginRenaming(current: String, onCommit: @escaping (String) -> Void) {
         renameCommit = onCommit
@@ -1468,120 +1410,100 @@ final class ClipCell: NSView {
     }
 
     func configure(
-        item: ClipboardItem, theme: CardTheme, height: CGFloat,
+        item: ClipboardItem, theme: CardTheme,
         thumbnail: NSImage?, sourceIcon: NSImage?
     ) {
         installConstraints()
 
         nameLabel.isHidden = true
         pathLabel.isHidden = true
-        previewLabel.isHidden = true
-        // Recycled cells carry the image branch's centered placeholder —
-        // every kind re-baselines to LEFT alignment first.
+        previewLabel.isHidden = false
         previewLabel.alignment = .natural
         thumbnailView.isHidden = true
 
         switch item.kind {
         case .text:
-            // Single-line rows center the name label; taller rows use the
-            // wrapping preview that fills the row.
-            nameTop.isActive = false
-            nameCenterY.isActive = height <= ClipboardPanelController.singleLineHeight + 1
-            if nameCenterY.isActive {
-                nameLabel.font = .systemFont(ofSize: 15)
-                nameLabel.textColor = theme.foreground
-                nameLabel.stringValue = item.previewText ?? ""
-                nameLabel.lineBreakMode = .byTruncatingTail
-                nameLabel.cell?.usesSingleLineMode = true
-                nameLabel.isHidden = false
-            } else {
-                previewLabel.font = .systemFont(ofSize: 15)
-                previewLabel.textColor = theme.foreground
-                previewLabel.stringValue = item.previewText ?? ""
-                previewLabel.isHidden = false
-            }
+            // One label does it all: wraps to two lines, trailing … after
+            // that. Row height follows from the label's intrinsic size.
+            previewLabel.font = .systemFont(ofSize: 15)
+            previewLabel.textColor = theme.foreground
+            previewLabel.stringValue = item.previewText ?? ""
         case .file:
             let url = URL(fileURLWithPath: item.text ?? "")
-            nameCenterY.isActive = false
-            nameTop.isActive = true
-            nameLabel.font = .systemFont(ofSize: 15, weight: .medium)
-            nameLabel.textColor = theme.foreground
-            nameLabel.stringValue = url.lastPathComponent
-            nameLabel.lineBreakMode = .byTruncatingTail
-            nameLabel.cell?.usesSingleLineMode = true
-            nameLabel.isHidden = false
-            pathLabel.font = .systemFont(ofSize: 13)
-            pathLabel.textColor = theme.tertiaryText
-            pathLabel.stringValue = url.deletingLastPathComponent().path
-            pathLabel.lineBreakMode = .byTruncatingMiddle
-            pathLabel.cell?.usesSingleLineMode = true
-            pathLabel.isHidden = false
+            showTwoDeck(
+                name: url.lastPathComponent, nameColor: theme.foreground,
+                detail: url.deletingLastPathComponent().path,
+                detailColor: theme.tertiaryText, truncatesPath: true)
         case .image:
             if let thumbnail {
                 thumbnailView.image = thumbnail
                 thumbnailView.isHidden = false
+                previewLabel.isHidden = true
+            } else {
+                // Without a decoded thumbnail yet, a quiet placeholder keeps
+                // the row from looking broken.
+                previewLabel.font = .systemFont(ofSize: 13)
+                previewLabel.textColor = theme.tertiaryText
+                previewLabel.stringValue = "图片"
+                previewLabel.alignment = .center
             }
-            // Without a decoded thumbnail yet, a quiet placeholder keeps the
-            // row from looking broken.
-            previewLabel.font = .systemFont(ofSize: 13)
-            previewLabel.textColor = theme.tertiaryText
-            previewLabel.stringValue = "图片"
-            previewLabel.alignment = .center
-            previewLabel.isHidden = thumbnail != nil
         }
         iconView.image = sourceIcon
+    }
+
+    private func showTwoDeck(name: String, nameColor: NSColor,
+                             detail: String, detailColor: NSColor,
+                             truncatesPath: Bool) {
+        previewLabel.isHidden = true
+        nameLabel.font = .systemFont(ofSize: 15, weight: .medium)
+        nameLabel.textColor = nameColor
+        nameLabel.stringValue = name
+        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.cell?.usesSingleLineMode = true
+        nameLabel.isHidden = false
+        pathLabel.font = .systemFont(ofSize: 13)
+        pathLabel.textColor = detailColor
+        pathLabel.stringValue = detail
+        pathLabel.isHidden = false
+        if truncatesPath {
+            // File row: one line, middle-… keeps the extension visible.
+            pathLabel.lineBreakMode = .byTruncatingMiddle
+            pathLabel.cell?.usesSingleLineMode = true
+        } else {
+            // Note content: same two-line rule as clipboard text rows.
+            pathLabel.lineBreakMode = .byTruncatingTail
+            pathLabel.cell?.wraps = true
+            pathLabel.maximumNumberOfLines = 2
+            pathLabel.preferredMaxLayoutWidth = ClipboardPanelController.panelWidth
+                - PanelDesign.rowContentLeading - PanelDesign.rowIconSize
+                - PanelDesign.rowIconToText - PanelDesign.rowContentTrailing
+        }
     }
 
     /// Note rows reuse the same skeleton: named notes render name over dim
     /// content (file-row shape); unnamed notes collapse to a text row.
     func configureNote(
-        note: ClipboardNote, theme: CardTheme, height: CGFloat, sourceIcon: NSImage?
+        note: ClipboardNote, theme: CardTheme, sourceIcon: NSImage?
     ) {
         installConstraints()
 
         nameLabel.isHidden = true
         pathLabel.isHidden = true
-        previewLabel.isHidden = true
+        previewLabel.isHidden = false
         previewLabel.alignment = .natural
         thumbnailView.isHidden = true
 
         let text = ClipboardNotePreview.text(note)
         if note.name.isEmpty {
-            // Unnamed note: the content IS the row — one line centered, or a
-            // two-line wrap in the taller row.
-            nameTop.isActive = false
-            let wraps = text != nil
-                && height > ClipboardPanelController.singleLineHeight + 1
-                && ClipboardPanelController.previewLineCount(for: text!) > 1
-            nameCenterY.isActive = !wraps
-            if wraps {
-                previewLabel.font = .systemFont(ofSize: 15)
-                previewLabel.textColor = theme.foreground
-                previewLabel.stringValue = text ?? ""
-                previewLabel.isHidden = false
-            } else {
-                nameLabel.font = .systemFont(ofSize: 15)
-                nameLabel.textColor = theme.foreground
-                nameLabel.stringValue = text ?? ""
-                nameLabel.lineBreakMode = .byTruncatingTail
-                nameLabel.cell?.usesSingleLineMode = true
-                nameLabel.isHidden = false
-            }
+            // Unnamed note: the content IS the row.
+            previewLabel.font = .systemFont(ofSize: 15)
+            previewLabel.textColor = theme.foreground
+            previewLabel.stringValue = text ?? ""
         } else {
-            nameCenterY.isActive = false
-            nameTop.isActive = true
-            nameLabel.font = .systemFont(ofSize: 15, weight: .medium)
-            nameLabel.textColor = theme.foreground
-            nameLabel.stringValue = note.name
-            nameLabel.lineBreakMode = .byTruncatingTail
-            nameLabel.cell?.usesSingleLineMode = true
-            nameLabel.isHidden = false
-            pathLabel.font = .systemFont(ofSize: 13)
-            pathLabel.textColor = theme.tertiaryText
-            pathLabel.stringValue = text ?? ""
-            pathLabel.lineBreakMode = .byTruncatingTail
-            pathLabel.cell?.usesSingleLineMode = true
-            pathLabel.isHidden = false
+            showTwoDeck(
+                name: note.name, nameColor: theme.foreground,
+                detail: text ?? "", detailColor: theme.tertiaryText,
+                truncatesPath: false)
         }
         iconView.image = sourceIcon
     }
@@ -1604,13 +1526,26 @@ final class ClipCell: NSView {
         nameEditor.trailingAnchor.constraint(equalTo: nameLabel.trailingAnchor).isActive = true
         nameEditor.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor).isActive = true
         nameEditor.heightAnchor.constraint(equalToConstant: 19).isActive = true
+        // Two-deck rows (named notes, file clips): name over dim detail.
+        // Text-only rows show previewLabel alone, centered; the row height
+        // is the label's intrinsic size plus the table's own padding.
+        nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8).isActive = true
+        pathLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 1).isActive = true
+        pathLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8).isActive = true
         // ORDER MATTERS: on NSTextField, setting lineBreakMode to a truncating
         // mode (.byTruncatingTail) resets cell.wraps to false — ONE line only.
         // Word wrap + maximumNumberOfLines(2) gives the two-line preview with
         // an automatic trailing … from TextKit.
-        previewLabel.lineBreakMode = .byWordWrapping
+        previewLabel.lineBreakMode = .byTruncatingTail
         previewLabel.cell?.wraps = true
         previewLabel.maximumNumberOfLines = 2
+        // .byTruncatingTail + wraps: TextKit ends an overflowing line 2 with …
+        // Self-sizing rows measure the cell before its width is known; a
+        // wrapping label then reports ONE-line height and the row clips the
+        // second line. State the wrap width explicitly.
+        previewLabel.preferredMaxLayoutWidth = ClipboardPanelController.panelWidth
+            - PanelDesign.rowContentLeading - PanelDesign.rowIconSize
+            - PanelDesign.rowIconToText - PanelDesign.rowContentTrailing
 
         let iconSize = PanelDesign.rowIconSize
         iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PanelDesign.rowContentLeading).isActive = true
@@ -1627,19 +1562,18 @@ final class ClipCell: NSView {
             label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: PanelDesign.rowIconToText).isActive = true
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -PanelDesign.rowContentTrailing).isActive = true
         }
-        previewLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8).isActive = true
-        previewLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8).isActive = true
+        previewLabel.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 8).isActive = true
+        previewLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -8).isActive = true
+        // The table pads self-sized rows (~14pt total), so the cell is
+        // taller than the label — anchor the label to center or it rides
+        // the top pin while the icon centers (7pt skew on single lines).
+        previewLabel.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
         // Two-deck rows (named notes, file clips): the name and path labels
         // are pinned, linked and height-fixed. Left to intrinsic sizes they
         // total ~53pt in a 50pt row — the overflow is invisible under the
         // next row's fill, but the LAST row scissor-clips at the scroll view
         // edge ("bottom of the last cell cut off").
-        pathLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 1).isActive = true
-        pathLabel.heightAnchor.constraint(equalToConstant: 15).isActive = true
-        nameTop = nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8)
-        nameLabel.heightAnchor.constraint(equalToConstant: 19).isActive = true
-
-        nameCenterY = nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -1)
+        nameLabel.setContentCompressionResistancePriority(.required, for: .vertical)
     }
 }
 extension ClipCell: NSTextFieldDelegate {
