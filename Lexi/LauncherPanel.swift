@@ -145,7 +145,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     private func buildChrome() {
         let side: CGFloat = 12
 
-        searchField.frame = NSRect(x: side, y: 12, width: Self.panelWidth - side * 2, height: 26)
+        searchField.frame = NSRect(x: side, y: 12, width: Self.panelWidth - side * 2, height: PanelDesign.searchHeight)
         searchField.placeholderString = "Search"
         searchField.focusRingType = .none
         searchField.font = .systemFont(ofSize: 16)
@@ -238,13 +238,13 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         var x = side
         for button in [foldersTabButton, appsTabButton] {
             button.sizeToFit()
-            button.frame = NSRect(x: x, y: 46, width: max(button.fittingSize.width + 20, 64), height: 24)
+            button.frame = NSRect(x: x, y: 58, width: max(button.fittingSize.width + 20, 64), height: PanelDesign.pillHeight)
             x = button.frame.maxX + 6
         }
 
-        settingsButton.frame = NSRect(x: Self.panelWidth - side - 24, y: 46, width: 24, height: 24)
-        scrollView.frame = NSRect(x: 0, y: 78, width: Self.panelWidth, height: height - Self.chromeHeight)
-        emptyLabel.frame = NSRect(x: side, y: 78, width: Self.panelWidth - side * 2, height: 40)
+        settingsButton.frame = NSRect(x: Self.panelWidth - side - 28, y: 58, width: 28, height: 28)
+        scrollView.frame = NSRect(x: 0, y: 94, width: Self.panelWidth, height: height - Self.chromeHeight)
+        emptyLabel.frame = NSRect(x: side, y: 94, width: Self.panelWidth - side * 2, height: 40)
     }
 
     /// Top-anchored adaptive height: list area is capped, panel never exceeds

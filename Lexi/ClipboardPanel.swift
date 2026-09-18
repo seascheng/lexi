@@ -32,7 +32,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     private static let panelWidth: CGFloat = 460
     static let panelHeight: CGFloat = 560
     static let singleLineHeight: CGFloat = 44
-    private static let twoLineHeight: CGFloat = 58
+    private static let twoLineHeight: CGFloat = 54
     private static let headerHeight: CGFloat = 30
     private static let side: CGFloat = PanelDesign.sideInset
 
@@ -262,7 +262,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         root.addSubview(searchField)
 
         // Chip row: horizontal scroller, one line, always the input at the end.
-        chipsScrollView.frame = NSRect(x: Self.side, y: 50, width: Self.panelWidth - Self.side * 2, height: PanelDesign.pillHeight + 4)
+        chipsScrollView.frame = NSRect(x: Self.side, y: 58, width: Self.panelWidth - Self.side * 2, height: PanelDesign.pillHeight + 4)
         chipsScrollView.drawsBackground = false
         chipsScrollView.hasVerticalScroller = false
         chipsScrollView.hasHorizontalScroller = false // gestures still scroll; no bar
@@ -522,7 +522,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         // the first row, and 6pt from the last row to the footer label
         // (footerY + 5). The viewport therefore equals the row total exactly
         // — no phantom slack, no clipping at the last capsule.
-        let listY = 50 + PanelDesign.pillHeight + 4 + 6
+        let listY = 58 + PanelDesign.pillHeight + 4 + 6
         scrollView.frame = NSRect(x: 0, y: listY, width: Self.panelWidth, height: height - listY - 28)
         let listHeight = height - listY - 28
         // Empty state floats in the MIDDLE of the content area, not pinned
@@ -614,6 +614,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         tableView.reloadData()
         updateFooter()
         updateEmptyState()
+        scrollActiveChipVisible()
         if let firstSelectable = rows.indices.first(where: {
             if case .header = rows[$0] { return false }
             return true
@@ -1246,14 +1247,17 @@ final class ChipPillView: NSView {
 
     override func layout() {
         super.layout()
+        // Everything centers within the pill's real height — fixed offsets
+        // went stale when the pill height token changed (28pt).
         if isAddStyle {
             // Centered plus across the full chip — the dot-side formula
             // computes a ZERO width at the 32pt add chip (invisible ＋).
-            label.frame = NSRect(x: 0, y: 4, width: bounds.width, height: 16)
+            label.frame = NSRect(x: 0, y: (bounds.height - 16) / 2, width: bounds.width, height: 16)
         } else {
             // Label fills everything right of the dot; the chip-row flow
             // sizes the chip with slack (fittingSize +40) so text never clips.
-            label.frame = NSRect(x: 24, y: 4, width: bounds.width - 32, height: 16)
+            label.frame = NSRect(x: 24, y: (bounds.height - 16) / 2, width: bounds.width - 32, height: 16)
+            dot.frame = NSRect(x: 11, y: (bounds.height - 7) / 2, width: 7, height: 7)
         }
     }
 
@@ -1362,7 +1366,7 @@ final class ChipInputView: NSView {
             layer?.cornerRadius = PanelDesign.pillCornerRadius
 
             plus.font = .systemFont(ofSize: 14, weight: .medium)
-            plus.frame = NSRect(x: 8, y: 4, width: 10, height: 16)
+            plus.frame = NSRect(x: 8, y: 6, width: 10, height: 16)
             addSubview(plus)
 
             field.font = .systemFont(ofSize: 13)
@@ -1373,7 +1377,7 @@ final class ChipInputView: NSView {
             field.focusRingType = .none
             field.placeholderString = "新分类"
             field.delegate = delegate
-            field.frame = NSRect(x: 22, y: 4, width: 76, height: 16)
+            field.frame = NSRect(x: 22, y: 6, width: 76, height: 16)
             addSubview(field)
         }
         applyTheme(theme)
@@ -1599,7 +1603,7 @@ final class ClipCell: NSView {
         nameEditor.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor).isActive = true
         nameEditor.trailingAnchor.constraint(equalTo: nameLabel.trailingAnchor).isActive = true
         nameEditor.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor).isActive = true
-        nameEditor.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        nameEditor.heightAnchor.constraint(equalToConstant: 19).isActive = true
         // ORDER MATTERS: on NSTextField, setting lineBreakMode to a truncating
         // mode (.byTruncatingTail) resets cell.wraps to false — ONE line only.
         // Word wrap + maximumNumberOfLines(2) gives the two-line preview with
@@ -1630,13 +1634,12 @@ final class ClipCell: NSView {
         // total ~53pt in a 50pt row — the overflow is invisible under the
         // next row's fill, but the LAST row scissor-clips at the scroll view
         // edge ("bottom of the last cell cut off").
-        pathLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6).isActive = true
-        pathLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2).isActive = true
-        pathLabel.heightAnchor.constraint(equalToConstant: 14).isActive = true
-        nameTop = nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 6)
-        nameLabel.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        pathLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 1).isActive = true
+        pathLabel.heightAnchor.constraint(equalToConstant: 15).isActive = true
+        nameTop = nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8)
+        nameLabel.heightAnchor.constraint(equalToConstant: 19).isActive = true
 
-        nameCenterY = nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        nameCenterY = nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -1)
     }
 }
 extension ClipCell: NSTextFieldDelegate {

@@ -15,7 +15,7 @@ enum PanelDesign {
     /// Panel-level horizontal margin: search field, filter/tab pill row,
     /// footer text — one shared left line down every panel.
     static let sideInset: CGFloat = 12
-    static let searchHeight: CGFloat = 30
+    static let searchHeight: CGFloat = 38
 
     // MARK: pills (filters/tabs) vs chips (inline content)
 
