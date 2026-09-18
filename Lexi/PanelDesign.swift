@@ -43,6 +43,14 @@ enum PanelDesign {
     // search field 16, footer 12.
 
     static let rowContentLeading: CGFloat = 16
+
+    /// Height of `lines` lines of preview text: NSLayoutManager's
+    /// documented line height for the given font size.
+    static func textLineBoxHeight(lines: CGFloat, fontSize: CGFloat = 15) -> CGFloat {
+        let lineHeight = NSLayoutManager().defaultLineHeight(
+            for: .systemFont(ofSize: fontSize))
+        return lineHeight * lines + 2
+    }
     static let rowContentTrailing: CGFloat = 16
     static let rowIconSize: CGFloat = 24
     static let rowIconToText: CGFloat = 10

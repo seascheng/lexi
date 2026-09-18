@@ -138,6 +138,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         // Non-key windows drop mouse-moved events by default — without this
         // the row hover tracking areas never fire.
         panel.acceptsMouseMovedEvents = true
+        panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let (background, content, _) = makePanelBackground(
             frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 300),
@@ -253,6 +254,8 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         searchField.placeholderString = "输入关键词搜索"
         searchField.focusRingType = .none
         searchField.font = .systemFont(ofSize: 16)
+        searchField.drawsBackground = false
+        searchField.backgroundColor = .clear
         (searchField.cell as? NSSearchFieldCell)?.sendsActionOnEndEditing = false
         searchField.wantsLayer = true
         searchField.delegate = self
@@ -1390,6 +1393,7 @@ final class ClipCell: NSView {
     /// under-reports multi-line CJK/emoji text (fallback-font line height)
     /// and the second line silently clips.
     private var textHeight: NSLayoutConstraint!
+    private var thumbSide: NSLayoutConstraint!
 
     func beginRenaming(current: String, onCommit: @escaping (String) -> Void) {
         renameCommit = onCommit
@@ -1442,6 +1446,10 @@ final class ClipCell: NSView {
                 detail: url.deletingLastPathComponent().path,
                 detailColor: theme.tertiaryText, truncatesPath: true)
         case .image:
+            // Image rows occupy a three-line text box, the same metric the
+            // text rows cap at.
+            thumbSide.constant = PanelDesign.textLineBoxHeight(lines: 3)
+            textHeight.constant = thumbSide.constant
             if let thumbnail {
                 thumbnailView.image = thumbnail
                 thumbnailView.isHidden = false
@@ -1586,8 +1594,9 @@ final class ClipCell: NSView {
 
         thumbnailView.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: PanelDesign.rowIconToText).isActive = true
         thumbnailView.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
-        thumbnailView.widthAnchor.constraint(equalToConstant: 44).isActive = true
-        thumbnailView.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        thumbnailView.widthAnchor.constraint(equalTo: thumbnailView.heightAnchor).isActive = true
+        thumbSide = thumbnailView.heightAnchor.constraint(equalToConstant: 44)
+        thumbSide.isActive = true
 
         for label in [nameLabel, pathLabel, previewLabel] {
             label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: PanelDesign.rowIconToText).isActive = true
