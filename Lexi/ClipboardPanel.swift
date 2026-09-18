@@ -26,11 +26,14 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     /// postAction): currently the ⊕ create-category request.
     var onAction: ((String, String) -> Void)?
 
-    private static let panelWidth: CGFloat = PanelDesign.panelWidth
-    static let singleLineHeight: CGFloat = 32
+    /// Fixed card size: width trimmed below the shared 520 token, height
+    /// constant so switching tabs never resizes or moves the window — the
+    /// top-left corner stays pinned where the cursor put it.
+    private static let panelWidth: CGFloat = 460
+    static let panelHeight: CGFloat = 560
+    static let singleLineHeight: CGFloat = 36
     private static let twoLineHeight: CGFloat = 50
     private static let headerHeight: CGFloat = 28
-    private static let maxListHeight: CGFloat = 11 * ClipboardPanelController.twoLineHeight
     private static let side: CGFloat = PanelDesign.sideInset
 
     /// The category that absorbs uncategorized notes in the chip tabs.
@@ -135,6 +138,9 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         panel.hasShadow = true
         panel.isOpaque = false
         panel.backgroundColor = .clear
+        // Non-key windows drop mouse-moved events by default — without this
+        // the row hover tracking areas never fire.
+        panel.acceptsMouseMovedEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let (background, content, _) = makePanelBackground(
             frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 300),
@@ -157,6 +163,31 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         }
         buildChrome()
         applyTheme(dark: true)
+        // Row hover follows the cursor: a local monitor fires only while a
+        // window of this app is key, which is exactly the panel-visible
+        // case (tracking areas on table row views proved unreliable).
+        NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+            guard event.window === self?.panel else { return event }
+            self?.updateHover(at: event.locationInWindow)
+            return event
+        }
+    }
+
+    private var hoveredRowView: LauncherRowView?
+
+    private func updateHover(at windowPoint: NSPoint) {
+        guard panel.isVisible else { return }
+        let loc = tableView.convert(windowPoint, from: nil)
+        let row = tableView.row(at: loc)
+        let view = row >= 0
+            ? tableView.rowView(atRow: row, makeIfNecessary: false) as? LauncherRowView
+            : nil
+        guard view !== hoveredRowView else { return }
+        hoveredRowView?.hovering = false
+        hoveredRowView?.needsDisplay = true
+        hoveredRowView = view
+        view?.hovering = true
+        view?.needsDisplay = true
     }
 
     /// Wired once at helper launch (after the TCP server is up).
@@ -252,6 +283,10 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 
         tableView.headerView = nil
         tableView.backgroundColor = .clear
+        // The default .inset style pads rows ~17pt horizontally (macOS 26) —
+        // it pushed every cell's content right of the capsule's left line.
+        // .plain: we own the geometry (capsule insetDx, leading 14).
+        tableView.style = .plain
         // Default intercellSpacing.height is 2pt — an invisible per-row tax
         // that breaks the exact-fit height math (few-row tabs scrolled by
         // 2×n points). Row gaps come from the capsule insets, not here.
@@ -260,6 +295,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         tableView.selectionHighlightStyle = .regular
         tableView.allowsEmptySelection = true
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("ClipboardColumn"))
+        column.width = Self.panelWidth
         tableView.addTableColumn(column)
         scrollView.documentView = tableView
         // Without these the table renders zero rows — the dataSource/delegate
@@ -511,18 +547,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         tableView.numberOfRows > 0 ? max(0, tableView.rect(ofRow: 0).minY) : 10
     }
 
-    /// Top-anchored adaptive height: capped list, 200–560pt total (a taller
-    /// ceiling than the launcher — multi-line previews need the room).
-    private var panelHeight: CGFloat {
-        let listHeight = min(rows.reduce(0.0) { $0 + rowHeight(for: $1) }, Self.maxListHeight)
-            + tableVerticalPad * 2
-        // search(46) + chips(24+4) + gap(6) + list(Σ + table pad) + footer
-        // zone(25) — matches layoutChrome exactly, so the viewport equals the
-        // table's true content height and nothing scrolls short lists.
-        let chrome = 46 + PanelDesign.pillHeight + 4 + 6 + 25
-        return min(max(chrome + max(listHeight, Self.singleLineHeight * 3), 200), 560)
-    }
-
     private func rowHeight(for row: Row) -> CGFloat {
         switch row {
         case .header: return Self.headerHeight
@@ -548,20 +572,21 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         }
     }
 
-    /// Measured wrapped-line count for a 452pt column: lay the text out in a
-    /// throwaway wrapping label and count line heights (char-width heuristics
-    /// misjudged percent-encoded URLs and dense CJK). User rule: at most TWO
-    /// preview lines.
+    /// Measured wrapped-line count for the preview column: lay the text out
+    /// in a throwaway wrapping label and count line heights (char-width
+    /// heuristics misjudged percent-encoded URLs and dense CJK). User rule:
+    /// at most TWO preview lines.
     static func previewLineCount(for text: String) -> Int {
         let measuring = NSTextField(wrappingLabelWithString: text)
         measuring.font = .systemFont(ofSize: 13)
-        let bounds = NSRect(x: 0, y: 0, width: 452, height: 10_000)
+        let textWidth = panelWidth - 68 // icon leading + trailing inset
+        let bounds = NSRect(x: 0, y: 0, width: textWidth, height: 10_000)
         let needed = measuring.cell!.cellSize(forBounds: bounds).height
         return max(1, min(2, Int(ceil(needed / 16))))
     }
 
     func placePanel() {
-        let size = NSSize(width: Self.panelWidth, height: panelHeight)
+        let size = NSSize(width: Self.panelWidth, height: Self.panelHeight)
         root.frame = NSRect(origin: .zero, size: size)
         layoutChrome(height: size.height)
         // Hapigo-style placement: the panel's TOP-LEFT corner matches the
@@ -595,11 +620,12 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         }) {
             tableView.selectRowIndexes(IndexSet(integer: firstSelectable), byExtendingSelection: false)
         }
-        placePanel()
-        // reloadData tiles the table against the PREVIOUS clip bounds; a
-        // few-row tab reached from a long one then shrinks the window in
-        // placePanel, stranding a taller documentView whose scroll range
-        // keeps the scroller alive. Refit to the final viewport.
+        // Fixed window: never re-place on reload — tab switches must not
+        // move the panel off its pinned top-left corner.
+        // reloadData tiles the table against the PREVIOUS clip bounds;
+        // refit the documentView to the final viewport.
+        updateHover(at: panel.convertFromScreen(
+            NSRect(origin: NSEvent.mouseLocation, size: .zero)).origin)
         let viewport = scrollView.contentSize
         // The table's own row padding is part of its content height
         // (sizeToFit returns Σ + 2×pad) — refit with it or the scroller
@@ -1086,6 +1112,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         ) as? LauncherRowView ?? LauncherRowView()
         view.identifier = NSUserInterfaceItemIdentifier("LauncherRowView")
         view.fillColor = cardTheme.selectedFill
+        view.hoverFillColor = cardTheme.hoverFill
         view.insetDx = PanelDesign.rowCapsuleInsetX
         view.insetDy = PanelDesign.rowCapsuleInsetY
         return view
@@ -1596,8 +1623,8 @@ final class ClipCell: NSView {
             label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: PanelDesign.rowIconToText).isActive = true
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -PanelDesign.rowContentTrailing).isActive = true
         }
-        previewLabel.topAnchor.constraint(equalTo: topAnchor, constant: 7).isActive = true
-        previewLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7).isActive = true
+        previewLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8).isActive = true
+        previewLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8).isActive = true
         // Two-deck rows (named notes, file clips): the name and path labels
         // are pinned, linked and height-fixed. Left to intrinsic sizes they
         // total ~53pt in a 50pt row — the overflow is invisible under the

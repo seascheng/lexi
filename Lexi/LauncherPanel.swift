@@ -1039,15 +1039,29 @@ final class FolderChipView: NSView {
 /// Selection capsule row view (selectedFill on activation). Panels tune
 /// `insetDx`/`insetDy` to their row rhythm — launcher uses the 8/2 default;
 /// the clipboard panel tightens dx so the capsule padding around its row
-/// content stays symmetric.
+/// content stays symmetric. `hoverFillColor` + `hovering` drive an opt-in
+/// row hover wash (selection always wins over hover); the clipboard panel
+/// sets `hovering` from its mouse-move monitor — tracking areas on table
+/// row views proved unreliable.
 final class LauncherRowView: NSTableRowView {
     var fillColor: NSColor = .clear
+    var hoverFillColor: NSColor?
+    var hovering = false
     var insetDx: CGFloat = PanelDesign.rowCapsuleInsetX
     var insetDy: CGFloat = PanelDesign.rowCapsuleInsetY
 
     override func drawSelection(in dirtyRect: NSRect) {
         guard isSelected else { return }
         fillColor.setFill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: insetDx, dy: insetDy), xRadius: 7, yRadius: 7).fill()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        // Hover wash drawn here, not in drawSelection: AppKit skips that
+        // hook for unselected rows.
+        guard hovering, !isSelected, let fill = hoverFillColor else { return }
+        fill.setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: insetDx, dy: insetDy), xRadius: 7, yRadius: 7).fill()
     }
 }

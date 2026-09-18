@@ -37,10 +37,11 @@ enum PanelDesign {
     // (inset rowCapsuleInsetX) the content is padded symmetrically:
     //   (rowContentLeading - rowCapsuleInsetX) == rowIconToText
     //   == (rowContentTrailing - rowCapsuleInsetX)
-    // → 10pt everywhere at the current values.
+    // → 8pt everywhere; the 36pt single-line row gives the 20pt icon the
+    // same 8pt above and below, so a cell's padding is uniform.
 
-    static let rowContentLeading: CGFloat = 16
-    static let rowContentTrailing: CGFloat = 16
-    static let rowIconSize: CGFloat = 24
-    static let rowIconToText: CGFloat = 10
+    static let rowContentLeading: CGFloat = 14
+    static let rowContentTrailing: CGFloat = 14
+    static let rowIconSize: CGFloat = 20
+    static let rowIconToText: CGFloat = 8
 }
