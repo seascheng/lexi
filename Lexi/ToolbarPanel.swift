@@ -106,13 +106,18 @@ extension SelectionToolbarApp {
         }
 
         let width = toolbarWidth(for: actions.count)
-        container.frame = NSRect(x: 0, y: 0, width: width, height: toolbarHeight)
+        // Resize the window FIRST, then pin the container frame — setting
+        // it before setContentSize lets the autoresize pass (driven by the
+        // window change) clobber the explicit frame with a stale width,
+        // leaving buttons floating past the glass.
         panel.setContentSize(NSSize(width: width, height: toolbarHeight))
+        container.frame = NSRect(x: 0, y: 0, width: width, height: toolbarHeight)
         dragHandle.frame = NSRect(x: 0, y: 0, width: toolbarHandleWidth, height: toolbarHeight)
 
         for (index, action) in actions.enumerated() {
             addToolbarButton(action: action, index: index)
         }
+        FileLog.write("APPLY actions=\(actions.count) buttons=\(buttons.count) subviews=\(container.subviews.count) width=\(Int(width)) containerW=\(Int(container.frame.width)) panelW=\(Int(panel.frame.width)) ids=[\(actions.map(\.id).joined(separator: ","))]")
     }
 
     func addToolbarButton(action: ToolbarAction, index: Int) {
