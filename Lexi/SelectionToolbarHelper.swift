@@ -1224,18 +1224,34 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 icon: feature.icon.isEmpty ? "wand" : feature.icon, kind: "feature")))
         }
 
-        // Toolbar scope: same registry, toolbar columns.
-        var toolbar: [(order: Int, action: ToolbarAction)] = []
+        // Toolbar scope: enabled tools + features, ordered by the shared
+        // toolbarOrder list (ids may interleave; unknown/missing ids land
+        // at the end in registry order).
+        var available: [String: ToolbarAction] = [:]
         for tool in LexiStore.toolbarTools() where tool.enabled && !tool.id.isEmpty {
-            toolbar.append((tool.sortOrder, ToolbarAction(
+            available[tool.id] = ToolbarAction(
                 id: tool.id, title: tool.displayName,
-                icon: tool.icon.isEmpty ? "wand" : tool.icon)))
+                icon: tool.icon.isEmpty ? "wand" : tool.icon)
         }
         for feature in LexiStore.features() where feature.enabled && !feature.id.isEmpty {
-            toolbar.append((feature.sortOrder, ToolbarAction(
-                id: feature.id, title: feature.name, icon: feature.icon)))
+            available[feature.id] = ToolbarAction(
+                id: feature.id, title: feature.name, icon: feature.icon)
         }
-        applyActions(toolbar.sorted { $0.order < $1.order }.map(\.action))
+        // Seed the order list once: built-ins first, then features — the
+        // pre-config bar order.
+        if LexiStore.toolbarOrder().isEmpty {
+            let seeded = LexiStore.toolbarTools().sorted { $0.sortOrder < $1.sortOrder }.map(\.id)
+                + LexiStore.features().sorted { $0.sortOrder < $1.sortOrder }.map(\.id)
+            LexiStore.saveToolbarOrder(seeded)
+        }
+        var barActions: [ToolbarAction] = []
+        for id in LexiStore.toolbarOrder() {
+            if let action = available.removeValue(forKey: id) {
+                barActions.append(action)
+            }
+        }
+        barActions.append(contentsOf: available.values.sorted { $0.id < $1.id })
+        applyActions(barActions)
 
         // Panel tabs: DB rows + the built-ins appended when missing, then
         // canonical order (Actions, Review first).

@@ -1089,6 +1089,21 @@ extension LexiStore {
         }
     }
 
+    /// The single source of truth for toolbar button order: ids (built-in
+    /// tools and AI features interleaved) in bar order. Both the live bar
+    /// and the Toolbar config pane render from this list.
+    static func toolbarOrder() -> [String] {
+        guard let raw = setting("toolbarOrder"),
+              let ids = try? JSONDecoder().decode([String].self, from: Data(raw.utf8))
+        else { return [] }
+        return ids
+    }
+
+    static func saveToolbarOrder(_ ids: [String]) {
+        guard let data = try? JSONEncoder().encode(ids) else { return }
+        setSetting("toolbarOrder", String(data: data, encoding: .utf8) ?? "[]")
+    }
+
     /// App bundle ids where the selection toolbar stays hidden.
     static func excludedToolbarApps() -> [String] {
         guard let raw = setting("excludedToolbarApps"),

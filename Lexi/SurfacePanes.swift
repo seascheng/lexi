@@ -33,16 +33,29 @@ final class ToolbarConfigModel {
 
     func reload() {
         enabled = LexiStore.settingBool("toolbarEnabled", default: true)
-        // Display order matches the bar: built-ins first, then features.
+        // One source of truth: the shared toolbarOrder id list. Entries
+        // missing from it (fresh tools/features) append in registry order.
         let tools = LexiStore.toolbarTools().sorted { $0.sortOrder < $1.sortOrder }
         let features = LexiStore.features().sorted { $0.sortOrder < $1.sortOrder }
-        entries = tools.map {
-            ToolbarEntry(id: $0.id, name: $0.displayName,
-                         icon: $0.icon, isTool: true, enabled: $0.enabled)
-        } + features.map {
-            ToolbarEntry(id: $0.id, name: $0.name,
-                         icon: $0.icon, isTool: false, enabled: $0.enabled)
+        var byId: [String: ToolbarEntry] = [:]
+        for tool in tools {
+            byId[tool.id] = ToolbarEntry(
+                id: tool.id, name: tool.displayName,
+                icon: tool.icon, isTool: true, enabled: tool.enabled)
         }
+        for feature in features {
+            byId[feature.id] = ToolbarEntry(
+                id: feature.id, name: feature.name,
+                icon: feature.icon, isTool: false, enabled: feature.enabled)
+        }
+        var ordered: [ToolbarEntry] = []
+        for id in LexiStore.toolbarOrder() {
+            if let entry = byId.removeValue(forKey: id) {
+                ordered.append(entry)
+            }
+        }
+        ordered.append(contentsOf: byId.values.sorted { $0.id < $1.id })
+        entries = ordered
         excludedApps = LexiStore.excludedToolbarApps()
     }
 
@@ -73,24 +86,10 @@ final class ToolbarConfigModel {
 
     func move(from source: IndexSet, to destination: Int) {
         entries.move(fromOffsets: source, toOffset: destination)
-        // One shared numeric scale across tools and features so the bar's
-        // order-by-sort_order merge reproduces the dragged sequence.
-        for (index, entry) in entries.enumerated() {
-            let order = (index + 1) * 10
-            if entry.isTool {
-                var tools = LexiStore.toolbarTools()
-                if let i = tools.firstIndex(where: { $0.id == entry.id }) {
-                    tools[i].sortOrder = order
-                    LexiStore.saveToolbarTools(tools)
-                }
-            } else {
-                var rows = LexiStore.features()
-                if let i = rows.firstIndex(where: { $0.id == entry.id }) {
-                    rows[i].sortOrder = order
-                    LexiStore.saveFeature(rows[i])
-                }
-            }
-        }
+        // Persist the dragged sequence as THE toolbar order — no per-store
+        // sort_order renumbering (two numbering spaces merged numerically
+        // is exactly the desync this replaces).
+        LexiStore.saveToolbarOrder(entries.map(\.id))
         effects?.nativeSettingsChanged()
     }
 
