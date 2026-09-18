@@ -41,7 +41,11 @@ Lexi/                            # all sources + the app bundle + build script
 ## Data
 
 Single shared SQLite database at `~/Library/Application Support/com.lexi.app/lexi.db`
-(words, notes, tags, ai_features, settings KV, toolbar_tools action registry).
+(words, notes + note_categories, ai_features, settings KV, toolbar_tools action registry).
+Notes carry exactly one category (`notes.category_id`); the settings Notebook pane,
+clipboard panel tabs, and card notes tab all render from it. The legacy `tags`/
+`note_tags` tables are retired — `migrateNoteCategories()` seeds categories from
+them once on pre-cutover databases.
 `LexiStore.ensureSchema()` folds the historical migrations 001-013 into one
 idempotent statement set and seeds builtins; it runs at every startup.
 

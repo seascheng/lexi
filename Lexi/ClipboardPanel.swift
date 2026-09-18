@@ -33,7 +33,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     private static let maxListHeight: CGFloat = 11 * ClipboardPanelController.twoLineHeight
     private static let side: CGFloat = PanelDesign.sideInset
 
-    /// The note tag that absorbs untagged notes — seeded by migration 008.
+    /// The category that absorbs uncategorized notes in the chip tabs.
     private static let defaultTag = "Tmp"
 
     private let panel: KeyablePanel
@@ -166,13 +166,13 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 
     /// Notes snapshot from the /card-notes feed — same data the ActionPanel's
     /// notes list renders. Rebuilds the chip tab row and reloads.
-    func updateNotes(notes: [ClipboardNote], tags: [String]) {
+    func updateNotes(notes: [ClipboardNote], categories: [String]) {
         self.notes = notes
-        var tags = tags
-        if !tags.contains(Self.defaultTag) {
-            tags.append(Self.defaultTag) // untagged notes always have a home
+        var categories = categories
+        if !categories.contains(Self.defaultTag) {
+            categories.append(Self.defaultTag) // uncategorized notes always have a home
         }
-        allTags = tags
+        allTags = categories
         rebuildChips()
         reload()
     }
@@ -637,8 +637,8 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     private func reloadNotes(tag: String) {
         let query = searchField.stringValue.trimmingCharacters(in: .whitespaces).lowercased()
         let matching = notes.filter { note in
-            let inTag = note.tags.contains(tag)
-                || (note.tags.isEmpty && tag == Self.defaultTag)
+            let inTag = note.category == tag
+                || (note.category == nil && tag == Self.defaultTag)
             guard inTag else { return false }
             guard !query.isEmpty else { return true }
             let haystack = "\(note.name)\n\(note.content)".lowercased()
@@ -831,7 +831,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             move.submenu = tagSubmenu(
                 selector: #selector(moveNoteToTagFromMenu(_:)),
                 payloadPrefix: "\(noteId)|",
-                excluding: note.tags.first
+                excluding: note.category
             )
             menu.addItem(move)
             return menu
@@ -1116,12 +1116,12 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
 }
 
 /// A note as seen by the clipboard panel: the ActionPanel owns editing; this
-/// surface reads name/content/tags and pastes content.
+/// surface reads name/content/category and pastes content.
 struct ClipboardNote {
     let id: Int64
     let name: String
     let content: String
-    let tags: [String]
+    let category: String?
 }
 
 enum ClipboardNotePreview {

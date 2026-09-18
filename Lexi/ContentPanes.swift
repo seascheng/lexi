@@ -10,8 +10,9 @@ import SwiftUI
 @Observable
 final class NotebookModel {
     var search = "" { didSet { refilter() } }
-    var activeTag = "all" { didSet { refilter() } }
-    var allTags: [String] = []
+    /// nil = all categories.
+    var activeCategoryId: Int64? { didSet { refilter() } }
+    var categories: [LexiNoteCategory] = []
     var displayed: [LexiNote] = []
     var selected: LexiNote?
 
@@ -23,10 +24,10 @@ final class NotebookModel {
 
     func reload() {
         all = LexiStore.notes()
-        var tags = Set<String>()
-        for note in all { tags.formUnion(note.tags) }
-        allTags = tags.sorted()
-        if activeTag != "all" && !allTags.contains(activeTag) { activeTag = "all" }
+        categories = LexiStore.noteCategories()
+        if let active = activeCategoryId, !categories.contains(where: { $0.id == active }) {
+            activeCategoryId = nil
+        }
         refilter()
     }
 
@@ -35,8 +36,8 @@ final class NotebookModel {
         displayed = all.filter { note in
             let title = note.name.isEmpty ? note.content : note.name
             let matchesQuery = query.isEmpty || title.lowercased().contains(query) || note.content.lowercased().contains(query)
-            let matchesTag = activeTag == "all" || note.tags.contains(activeTag)
-            return matchesQuery && matchesTag
+            let matchesCategory = activeCategoryId == nil || note.categoryId == activeCategoryId
+            return matchesQuery && matchesCategory
         }
     }
 
@@ -46,33 +47,65 @@ final class NotebookModel {
         reload()
     }
 
-    /// Detail-editor save: name/content/tag write, then reload with the
-    /// edited note kept selected.
-    func update(_ note: LexiNote, name: String, content: String, tag: String) {
+    /// Detail-editor save: name/content write, then reload with the edited
+    /// note kept selected.
+    func update(_ note: LexiNote, name: String, content: String) {
         LexiStore.updateNoteName(id: note.id, name: name)
         LexiStore.updateNoteContent(id: note.id, content: content)
-        LexiStore.setNoteTag(id: note.id, tag: tag)
         reload()
         selected = all.first(where: { $0.id == note.id })
     }
+
+    /// Category dropdown change: re-file the note, reload, keep selection.
+    func setCategory(of note: LexiNote, to categoryId: Int64?) {
+        LexiStore.setNoteCategory(id: note.id, categoryId: categoryId)
+        reload()
+        selected = all.first(where: { $0.id == note.id })
+    }
+
+    func addCategory(_ name: String) {
+        LexiStore.createNoteCategory(name: name)
+        reload()
+    }
+
+    func renameCategory(_ category: LexiNoteCategory, to name: String) {
+        LexiStore.renameNoteCategory(id: category.id, name: name)
+        reload()
+        if let id = selected?.id { selected = all.first(where: { $0.id == id }) }
+    }
+
+    /// Category removal deletes every note filed under it.
+    func deleteCategory(_ category: LexiNoteCategory) {
+        LexiStore.deleteNoteCategory(id: category.id)
+        if selected?.categoryId == category.id { selected = nil }
+        reload()
+    }
 }
 
-/// Editable note detail: name + tag line + content editor + Save.
-/// Re-created per selection (.id) so stale drafts never leak across notes.
+/// Editable note detail: name + category dropdown + content editor + Save.
+/// The caller applies `.id(note.id)` so a selection change recreates the
+/// view — its @State drafts must not leak across notes.
 private struct NoteDetailEditor: View {
     let note: LexiNote
-    let onSave: (String, String, String) -> Void
+    let categories: [LexiNoteCategory]
+    let onSave: (String, String) -> Void
+    let onCategoryChange: (Int64?) -> Void
 
     @State private var name: String
-    @State private var tag: String
     @State private var content: String
     @State private var saved = false
 
-    init(note: LexiNote, onSave: @escaping (String, String, String) -> Void) {
+    init(
+        note: LexiNote,
+        categories: [LexiNoteCategory],
+        onSave: @escaping (String, String) -> Void,
+        onCategoryChange: @escaping (Int64?) -> Void
+    ) {
         self.note = note
+        self.categories = categories
         self.onSave = onSave
+        self.onCategoryChange = onCategoryChange
         _name = State(initialValue: note.name)
-        _tag = State(initialValue: note.tags.joined(separator: ", "))
         _content = State(initialValue: note.content)
     }
 
@@ -81,14 +114,19 @@ private struct NoteDetailEditor: View {
             TextField("Name", text: $name)
                 .font(.title2.weight(.semibold))
                 .textFieldStyle(.plain)
-            TextField("tag", text: $tag)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .textFieldStyle(.plain)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(.quaternary, in: Capsule())
-                .frame(width: 160, alignment: .leading)
+
+            Picker("Category", selection: Binding(
+                get: { note.categoryId },
+                set: { onCategoryChange($0) }
+            )) {
+                Text("Uncategorized").tag(Int64?.none)
+                ForEach(categories) { category in
+                    Text(category.name).tag(Int64?.some(category.id))
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(width: 200, alignment: .leading)
+
             TextEditor(text: $content)
                 .font(.body)
                 .scrollContentBackground(.hidden)
@@ -104,7 +142,7 @@ private struct NoteDetailEditor: View {
                 }
                 Spacer()
                 Button("Save") {
-                    onSave(name, content, tag)
+                    onSave(name, content)
                     saved = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { saved = false }
                 }
@@ -113,22 +151,22 @@ private struct NoteDetailEditor: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .id(note.id)
     }
 }
 
 struct NotebookPane: View {
     @State private var model = NotebookModel()
+    @State private var managingCategories = false
 
     var body: some View {
         VStack(spacing: 0) {
             filterBar
             Group {
-                if model.allTags.isEmpty && model.displayed.isEmpty {
+                if model.categories.isEmpty && model.displayed.isEmpty {
                     ContentUnavailableView(
                         "No notes",
                         systemImage: "notebook-pen",
-                        description: Text("Use the toolbar's Note action — selections land here with their tag.")
+                        description: Text("Use the toolbar's Note action — selections land here.")
                     )
                 } else {
                     HStack(spacing: 0) {
@@ -142,6 +180,9 @@ struct NotebookPane: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .sheet(isPresented: $managingCategories) {
+            CategoryManager(model: model)
+        }
     }
 
     private var filterBar: some View {
@@ -153,17 +194,25 @@ struct NotebookPane: View {
             ))
             .textFieldStyle(.plain)
             Divider().frame(height: 14)
-            Picker("Tag", selection: Binding(
-                get: { model.activeTag },
-                set: { model.activeTag = $0 }
+            Picker("Category", selection: Binding(
+                get: { model.activeCategoryId },
+                set: { model.activeCategoryId = $0 }
             )) {
-                Text("All").tag("all")
-                ForEach(model.allTags, id: \.self) { tag in
-                    Text(tag.capitalized).tag(tag)
+                Text("All").tag(Int64?.none)
+                ForEach(model.categories) { category in
+                    Text(category.name).tag(Int64?.some(category.id))
                 }
             }
             .pickerStyle(.menu)
             .fixedSize()
+            Button {
+                model.reload()
+                managingCategories = true
+            } label: {
+                Image(systemName: "folder.badge.gearshape")
+            }
+            .buttonStyle(.borderless)
+            .help("Manage categories")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -175,21 +224,16 @@ struct NotebookPane: View {
             get: { model.selected },
             set: { model.selected = $0 }
         )) { note in
-            Button {
-                model.selected = note
-            } label: {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(note.name.isEmpty ? String(note.content.prefix(48)) : note.name)
-                        .font(.body.weight(.medium))
-                        .lineLimit(1)
-                    if !note.tags.isEmpty {
-                        Text(note.tags.map(\.capitalized).sorted().joined(separator: " · "))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(note.name.isEmpty ? String(note.content.prefix(48)) : note.name)
+                    .font(.body.weight(.medium))
+                    .lineLimit(1)
+                if let category = note.categoryName {
+                    Text(category)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .buttonStyle(.plain)
             .tag(note)
             .contextMenu {
                 Button("Delete", role: .destructive) { model.delete(note) }
@@ -201,12 +245,125 @@ struct NotebookPane: View {
     @ViewBuilder
     private var noteDetail: some View {
         if let note = model.selected {
-            NoteDetailEditor(note: note) { name, content, tag in
-                model.update(note, name: name, content: content, tag: tag)
-            }
+            NoteDetailEditor(
+                note: note,
+                categories: model.categories,
+                onSave: { name, content in
+                    model.update(note, name: name, content: content)
+                },
+                onCategoryChange: { categoryId in
+                    model.setCategory(of: note, to: categoryId)
+                }
+            )
+            // Identity at the call site: a selection change must recreate
+            // the editor's @State, not re-init it in place.
+            .id(note.id)
         } else {
             ContentUnavailableView("Select a note", systemImage: "sidebar.left")
         }
+    }
+}
+
+/// Top-bar category management: add, rename (commit with Return), delete.
+/// Deleting a category deletes every note filed under it — confirmed first.
+private struct CategoryManager: View {
+    let model: NotebookModel
+
+    @State private var newName = ""
+    /// Rename drafts keyed by category id — committed on Return so
+    /// keystrokes don't trigger reloads mid-edit.
+    @State private var drafts: [Int64: String] = [:]
+    @State private var pendingDelete: LexiNoteCategory?
+    @FocusState private var newNameFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Categories")
+                .font(.headline)
+
+            HStack {
+                TextField("New category", text: $newName)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($newNameFocused)
+                    .onSubmit { add() }
+                Button {
+                    add()
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            if model.categories.isEmpty {
+                Text("No categories yet — notes stay uncategorized until filed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(model.categories) { category in
+                    HStack(spacing: 8) {
+                        TextField(category.name, text: draftBinding(category))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.body)
+                            .onSubmit { commitRename(category) }
+                        Text("\(category.count)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                        Spacer()
+                        Button(role: .destructive) {
+                            pendingDelete = category
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(width: 280)
+        .confirmationDialog(
+            deleteTitle,
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete category and \(pendingDelete.map { "\($0.count) " } ?? "")notes", role: .destructive) {
+                if let category = pendingDelete { model.deleteCategory(category) }
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        }
+    }
+
+    private var deleteTitle: String {
+        guard let category = pendingDelete else { return "" }
+        return "Delete “\(category.name)”? Its \(category.count) note\(category.count == 1 ? "" : "s") will be deleted too."
+    }
+
+    private func add() {
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        model.addCategory(name)
+        newName = ""
+        newNameFocused = true
+    }
+
+    private func draftBinding(_ category: LexiNoteCategory) -> Binding<String> {
+        Binding(
+            get: { drafts[category.id] ?? category.name },
+            set: { drafts[category.id] = $0 }
+        )
+    }
+
+    private func commitRename(_ category: LexiNoteCategory) {
+        guard let draft = drafts[category.id] else { return }
+        drafts[category.id] = nil
+        let name = draft.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, name != category.name else { return }
+        model.renameCategory(category, to: name)
     }
 }
 

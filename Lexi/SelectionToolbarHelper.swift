@@ -985,7 +985,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         return controller
     }()
     var panelTabPills: [NSButton] = []
-    var cardAllTags: [String] = []
+    var cardCategories: [String] = []
     var tagDropdown: TagDropdownView?
     var tagDropdownMonitor: Any?
     var resultPanel: NSPanel!
@@ -1028,7 +1028,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     var noteTagBar: NSView!
     var noteTagButtons: [NSButton] = []
     var noteSearchText = ""
-    var noteActiveTag = "all"
+    var noteActiveCategory = "all"
     var displayedNotes: [CardNotesPayload.Note] = []
     var cardNotesItems: [CardNotesPayload.Note] = []
     var reviewCardView: NSView!
@@ -1145,31 +1145,29 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     /// Fresh notes snapshot from the DB — the card Notes tab and the
-    /// clipboard panel's tag tabs both render from it.
+    /// clipboard panel's category tabs both render from it.
     static func cardNotesPayload() -> CardNotesPayload {
         let rows = LexiStore.notes(limit: 50)
-        var tags = Set<String>()
-        for note in rows { tags.formUnion(note.tags) }
         return CardNotesPayload(
             notes: rows.map {
-                CardNotesPayload.Note(id: $0.id, name: $0.name, tags: $0.tags, content: $0.content)
+                CardNotesPayload.Note(id: $0.id, name: $0.name, category: $0.categoryName, content: $0.content)
             },
-            allTags: tags.sorted()
+            categories: LexiStore.noteCategories().map(\.name)
         )
     }
 
     /// The clipboard shortcut's local path: refresh the notes snapshot from
-    /// the shared DB (the tag tabs read it) and present the panel through
-    /// the coordinator gate (retires toolbar/launcher first).
+    /// the shared DB (the category tabs read it) and present the panel
+    /// through the coordinator gate (retires toolbar/launcher first).
     func showClipboardPanel() {
         let payload = Self.cardNotesPayload()
         clipboardController.updateNotes(
             notes: payload.notes.map {
                 ClipboardNote(
                     id: $0.id ?? 0, name: $0.name, content: $0.content,
-                    tags: $0.tags ?? [])
+                    category: $0.category)
             },
-            tags: payload.allTags ?? [])
+            categories: payload.categories ?? [])
         panels.present(.clipboard)
         clipboardController.show()
     }
@@ -1534,22 +1532,40 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                 LexiStore.deleteNote(id: id)
                 reloadCardNotes()
             }
+        case "note-rename":
+            if let data = text.data(using: .utf8),
+               let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let id = value["id"] as? Int64,
+               let name = value["name"] as? String {
+                LexiStore.updateNoteName(id: id, name: name)
+                reloadCardNotes()
+            }
         case "note-tag-create":
-            LexiStore.createTag(name: text)
+            LexiStore.createNoteCategory(name: text)
             reloadCardNotes()
+        case "note-tag":
+            // Move a note to a category ("id|Category Name").
+            let parts = text.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+            if let id = Int64(parts.first ?? ""), let name = parts.last, !name.isEmpty {
+                LexiStore.setNoteCategory(
+                    id: id,
+                    categoryId: LexiStore.noteCategoryIdOrCreate(named: String(name))
+                )
+                reloadCardNotes()
+            }
         case "note-create":
             if let data = text.data(using: .utf8),
                let value = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
                 LexiStore.insertNote(
                     name: value["name"] ?? "", content: value["content"] ?? "",
-                    tag: value["tag"] ?? ""
+                    category: value["tag"] ?? ""
                 )
                 reloadCardNotes()
             }
         case "note-tag-reorder":
             if let data = text.data(using: .utf8),
                let names = try? JSONSerialization.jsonObject(with: data) as? [String] {
-                LexiStore.reorderTags(names)
+                LexiStore.reorderNoteCategories(byNames: names)
                 reloadCardNotes()
             }
         case "note-insert":

@@ -244,7 +244,7 @@ final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
 
         noteId = note.id
         self.onRename = onRename
-        tagName = (note.tags ?? []).first ?? ""
+        tagName = note.category ?? ""
         let titleText = note.name.isEmpty ? String(note.content.prefix(40)) : note.name
         titleLabel.stringValue = titleText
         if titleEditor.isHidden {
@@ -263,13 +263,13 @@ final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
         contentLabel.cell?.truncatesLastVisibleLine = true
         contentLabel.cell?.wraps = false
 
-        // Trailing tag pill (one tag per note in this data model). It is a
-        // BUTTON: click opens the tag picker (system NSMenu) for this note.
+        // Trailing category pill (one category per note). It is a
+        // BUTTON: click opens the picker dropdown for this note.
         tagLabel?.removeFromSuperview()
         tagLabel = nil
         tagButton?.removeFromSuperview()
         tagButton = nil
-        if let tag = (note.tags ?? []).first {
+        if let tag = note.category {
             let button = TagPillButton()
             button.title = tag
             button.isBordered = false
@@ -749,25 +749,25 @@ final class NoteRowView: NSTableRowView {
 }
 
 struct CardNotesPayload: Decodable {
-    var allTags: [String]?
+    var categories: [String]?
     struct Note: Decodable {
         let id: Int64?
         let name: String
-        let tags: [String]?
+        let category: String?
         let content: String
 
-        init(id: Int64? = nil, name: String, tags: [String]? = nil, content: String) {
+        init(id: Int64? = nil, name: String, category: String? = nil, content: String) {
             self.id = id
             self.name = name
-            self.tags = tags
+            self.category = category
             self.content = content
         }
     }
     let notes: [Note]
 
-    init(notes: [Note], allTags: [String]? = nil) {
+    init(notes: [Note], categories: [String]? = nil) {
         self.notes = notes
-        self.allTags = allTags
+        self.categories = categories
     }
 }
 
@@ -1259,7 +1259,7 @@ extension SelectionToolbarApp: NSTableViewDataSource, NSTableViewDelegate {
                            self?.noteRenamed(id: id, name: name)
                        },
                        onTagPicked: { [weak self] id, anchor in
-                           self?.showTagMenu(noteId: id, tag: note.tags?.first, anchor: anchor)
+                           self?.showTagMenu(noteId: id, tag: note.category, anchor: anchor)
                        })
         cell.themeColors = cardTheme
         return cell

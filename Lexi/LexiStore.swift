@@ -372,12 +372,20 @@ extension LexiStore {
 }
 
 
-/// One notes-table row with its tags.
+/// One notes-table row with its category.
 struct LexiNote: Identifiable, Hashable {
     let id: Int64
     let name: String
     let content: String
-    let tags: [String]
+    var categoryId: Int64?
+    var categoryName: String?
+}
+
+/// One note_categories row with its note count.
+struct LexiNoteCategory: Identifiable, Hashable {
+    let id: Int64
+    let name: String
+    let count: Int
 }
 
 /// One ai_features row (full editor surface).
@@ -406,7 +414,11 @@ extension LexiStore {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(
             db,
-            "SELECT n.id, IFNULL(n.name,''), n.content, IFNULL((SELECT GROUP_CONCAT(t.name) FROM note_tags nt JOIN tags t ON t.id = nt.tag_id WHERE nt.note_id = n.id), '') FROM notes n ORDER BY n.created_at DESC, n.id DESC LIMIT \(limit);",
+            """
+            SELECT n.id, IFNULL(n.name,''), n.content, n.category_id, IFNULL(c.name, '')
+            FROM notes n LEFT JOIN note_categories c ON c.id = n.category_id
+            ORDER BY n.created_at DESC, n.id DESC LIMIT \(limit);
+            """,
             -1, &statement, nil
         ) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(statement) }
@@ -417,8 +429,13 @@ extension LexiStore {
                 guard let cString = sqlite3_column_text(statement, i) else { return "" }
                 return String(cString: cString)
             }
-            let tagList = text(3).split(whereSeparator: { $0 == "," }).map(String.init)
-            rows.append(LexiNote(id: sqlite3_column_int64(statement, 0), name: text(1), content: text(2), tags: tagList))
+            let categoryId: Int64? = sqlite3_column_type(statement, 3) == SQLITE_NULL
+                ? nil : sqlite3_column_int64(statement, 3)
+            let categoryName = text(4)
+            rows.append(LexiNote(
+                id: sqlite3_column_int64(statement, 0), name: text(1), content: text(2),
+                categoryId: categoryId, categoryName: categoryName.isEmpty ? nil : categoryName
+            ))
         }
         return rows
     }
@@ -505,8 +522,9 @@ extension LexiStore {
 }
 
 extension LexiStore {
-    /// The Note tool's write: a note row plus its default tag binding.
-    static func insertNote(content: String, tag: String = "Tmp") {
+    /// The Note tool's write: a note row filed under one category
+    /// (created on demand — "Tmp" is the tool's default bucket).
+    static func insertNote(content: String, category: String = "Tmp") {
         guard let db = open() else { return }
         defer { sqlite3_close(db) }
 
@@ -521,16 +539,9 @@ extension LexiStore {
         guard sqlite3_step(statement) == SQLITE_DONE else { return }
 
         let id = sqlite3_last_insert_rowid(db)
-        var link: OpaquePointer?
-        guard sqlite3_prepare_v2(
-            db,
-            "INSERT OR IGNORE INTO tags (name) VALUES (?1); INSERT INTO note_tags (note_id, tag_id) SELECT ?2, id FROM tags WHERE name = ?1;",
-            -1, &link, nil
-        ) == SQLITE_OK else { return }
-        defer { sqlite3_finalize(link) }
-        sqlite3_bind_text(link, 1, tag, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_int64(link, 2, id)
-        sqlite3_step(link)
+        let trimmed = category.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        setNoteCategory(id: id, categoryId: noteCategoryIdOrCreate(named: trimmed, db: db))
     }
 }
 
@@ -564,63 +575,185 @@ extension LexiStore {
         sqlite3_step(statement)
     }
 
-    /// Card notes-tab tag switch; empty name clears the tag. One visible
-    /// tag per note — replace, never add (Rust note-tag handler parity).
-    static func setNoteTag(id: Int64, tag: String) {
+    /// Set the note's category; nil clears it.
+    static func setNoteCategory(id: Int64, categoryId: Int64?) {
         guard let db = open() else { return }
         defer { sqlite3_close(db) }
-        let escapedTag = tag.trimmingCharacters(in: .whitespaces)
-            .replacingOccurrences(of: "'", with: "''")
-        if escapedTag.isEmpty {
-            sqlite3_exec(db, "DELETE FROM note_tags WHERE note_id = \(id);", nil, nil, nil)
-            return
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "UPDATE notes SET category_id = ?1 WHERE id = ?2;", -1, &statement, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        if let categoryId {
+            sqlite3_bind_int64(statement, 1, categoryId)
+        } else {
+            sqlite3_bind_null(statement, 1)
         }
-        sqlite3_exec(db, "INSERT OR IGNORE INTO tags (name) VALUES ('\(escapedTag)');", nil, nil, nil)
-        sqlite3_exec(db, "DELETE FROM note_tags WHERE note_id = \(id);", nil, nil, nil)
-        sqlite3_exec(db, """
-            INSERT INTO note_tags (note_id, tag_id)
-            SELECT \(id), id FROM tags WHERE name = '\(escapedTag)';
-            """, nil, nil, nil)
+        sqlite3_bind_int64(statement, 2, id)
+        sqlite3_step(statement)
     }
 
-    /// Clipboard panel's ⊕ chip: create a tag row (Rust note-tag-create).
-    static func createTag(name: String) {
-        let escaped = name.trimmingCharacters(in: .whitespaces)
-            .replacingOccurrences(of: "'", with: "''")
-        guard !escaped.isEmpty, let db = open() else { return }
+    /// Categories with live note counts, management order.
+    static func noteCategories() -> [LexiNoteCategory] {
+        guard let db = open() else { return [] }
         defer { sqlite3_close(db) }
-        sqlite3_exec(db, "INSERT OR IGNORE INTO tags(name) VALUES('\(escaped)');", nil, nil, nil)
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, """
+            SELECT c.id, c.name, (SELECT COUNT(*) FROM notes n WHERE n.category_id = c.id)
+            FROM note_categories c ORDER BY c.sort_order, c.id;
+            """,
+            -1, &statement, nil
+        ) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(statement) }
+
+        var rows: [LexiNoteCategory] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let name = sqlite3_column_text(statement, 1).map { String(cString: $0) } ?? ""
+            rows.append(LexiNoteCategory(
+                id: sqlite3_column_int64(statement, 0),
+                name: name,
+                count: Int(sqlite3_column_int64(statement, 2))
+            ))
+        }
+        return rows
+    }
+
+    /// Category names are unique; duplicates are silently dropped.
+    static func createNoteCategory(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let db = open() else { return }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, """
+            INSERT OR IGNORE INTO note_categories (name, sort_order)
+            VALUES (?1, (SELECT IFNULL(MAX(sort_order), 0) + 1 FROM note_categories));
+            """,
+            -1, &statement, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, trimmed, -1, SQLITE_TRANSIENT)
+        sqlite3_step(statement)
+    }
+
+    static func renameNoteCategory(id: Int64, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let db = open() else { return }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "UPDATE OR IGNORE note_categories SET name = ?1 WHERE id = ?2;", -1, &statement, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, trimmed, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int64(statement, 2, id)
+        sqlite3_step(statement)
+    }
+
+    /// Removing a category removes every note filed under it.
+    static func deleteNoteCategory(id: Int64) {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+        sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
+        var notes: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM notes WHERE category_id = ?1;", -1, &notes, nil) == SQLITE_OK {
+            sqlite3_bind_int64(notes, 1, id)
+            sqlite3_step(notes)
+        }
+        sqlite3_finalize(notes)
+        var category: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM note_categories WHERE id = ?1;", -1, &category, nil) == SQLITE_OK {
+            sqlite3_bind_int64(category, 1, id)
+            sqlite3_step(category)
+        }
+        sqlite3_finalize(category)
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
     }
 
     /// Clipboard panel's "移动到分类": save a clip as a note in a category
-    /// (Rust note-create parity; the panel deletes its own clip afterwards).
-    static func insertNote(name: String, content: String, tag: String) {
-        let escapedName = name.replacingOccurrences(of: "'", with: "''")
-        let escapedContent = content.replacingOccurrences(of: "'", with: "''")
-        let escapedTag = tag.replacingOccurrences(of: "'", with: "''")
+    /// (the panel deletes its own clip afterwards).
+    static func insertNote(name: String, content: String, category: String) {
         guard let db = open() else { return }
         defer { sqlite3_close(db) }
-        sqlite3_exec(
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
             db,
-            "INSERT INTO notes (name, content) VALUES('\(escapedName)', '\(escapedContent)');",
-            nil, nil, nil
-        )
-        guard !escapedTag.isEmpty else { return }
-        sqlite3_exec(db, """
-            INSERT INTO note_tags (note_id, tag_id)
-            SELECT (SELECT id FROM notes ORDER BY id DESC LIMIT 1), id
-            FROM tags WHERE name = '\(escapedTag)';
-            """, nil, nil, nil)
+            "INSERT INTO notes (name, content) VALUES (?1, ?2);",
+            -1, &statement, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, name, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, content, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(statement) == SQLITE_DONE else { return }
+
+        let id = sqlite3_last_insert_rowid(db)
+        let trimmed = category.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        setNoteCategory(id: id, categoryId: noteCategoryIdOrCreate(named: trimmed, db: db))
     }
 
-    /// Clipboard panel's drag-to-reorder: each tag name gets its chip-row
-    /// index as sort_order (Rust note-tag-reorder parity).
-    static func reorderTags(_ names: [String]) {
+    /// Category id for a name, creating the row when missing.
+    static func noteCategoryIdOrCreate(named name: String, db: OpaquePointer? = nil) -> Int64? {
+        let connection: OpaquePointer
+        var owned: OpaquePointer?
+        if let db {
+            connection = db
+        } else {
+            guard let opened = open() else { return nil }
+            owned = opened
+            connection = opened
+        }
+        defer { if let owned { sqlite3_close(owned) } }
+
+        var lookup: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            connection, "SELECT id FROM note_categories WHERE name = ?1;", -1, &lookup, nil
+        ) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(lookup) }
+        sqlite3_bind_text(lookup, 1, name, -1, SQLITE_TRANSIENT)
+        if sqlite3_step(lookup) == SQLITE_ROW {
+            return sqlite3_column_int64(lookup, 0)
+        }
+        sqlite3_finalize(lookup)
+
+        var insert: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            connection,
+            "INSERT OR IGNORE INTO note_categories (name, sort_order) VALUES (?1, (SELECT IFNULL(MAX(sort_order), 0) + 1 FROM note_categories));",
+            -1, &insert, nil
+        ) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(insert) }
+        sqlite3_bind_text(insert, 1, name, -1, SQLITE_TRANSIENT)
+        sqlite3_step(insert)
+
+        var relookup: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            connection, "SELECT id FROM note_categories WHERE name = ?1;", -1, &relookup, nil
+        ) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(relookup) }
+        sqlite3_bind_text(relookup, 1, name, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(relookup) == SQLITE_ROW else { return nil }
+        return sqlite3_column_int64(relookup, 0)
+    }
+
+    /// Clipboard panel's drag-to-reorder: each category name gets its
+    /// chip-row index as sort_order.
+    static func reorderNoteCategories(byNames names: [String]) {
         guard let db = open() else { return }
         defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "UPDATE note_categories SET sort_order = ?1 WHERE name = ?2;", -1, &statement, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
         for (index, name) in names.enumerated() {
-            let escaped = name.replacingOccurrences(of: "'", with: "''")
-            sqlite3_exec(db, "UPDATE tags SET sort_order = \(index) WHERE name = '\(escaped)';", nil, nil, nil)
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            sqlite3_bind_int(statement, 1, Int32(index))
+            sqlite3_bind_text(statement, 2, name, -1, SQLITE_TRANSIENT)
+            sqlite3_step(statement)
         }
     }
 }
@@ -718,27 +851,18 @@ extension LexiStore {
               enabled INTEGER NOT NULL DEFAULT 1,
               sort_order INTEGER NOT NULL DEFAULT 0
             );
-            CREATE TABLE IF NOT EXISTS tags (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              name TEXT NOT NULL UNIQUE,
-              sort_order INTEGER NOT NULL DEFAULT 0
-            );
             CREATE TABLE IF NOT EXISTS notes (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               name TEXT,
               content TEXT NOT NULL,
               created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
-            CREATE TABLE IF NOT EXISTS note_tags (
-              note_id INTEGER NOT NULL,
-              tag_id INTEGER NOT NULL,
-              PRIMARY KEY (note_id, tag_id),
-              FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
-              FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
-            );
             CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at);
-            CREATE INDEX IF NOT EXISTS idx_note_tags_tag_id ON note_tags(tag_id);
-            INSERT OR IGNORE INTO tags (name) VALUES ('Tmp');
+            CREATE TABLE IF NOT EXISTS note_categories (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL UNIQUE,
+              sort_order INTEGER NOT NULL DEFAULT 0
+            );
             INSERT OR IGNORE INTO panels (id, name, icon, enabled, sort_order) VALUES
               ('translate', 'Actions', 'file-text', 1, 0),
               ('review', 'Review', 'book-open', 1, 1);
@@ -749,8 +873,63 @@ extension LexiStore {
               ('note', 'Note', 'notebook-pen', 1, 130, 1, 130, '{}'),
               ('handoff', 'Handoff', 'send', 0, 140, 1, 140, '{"targetApp":"ChatGPT"}');
             """, nil, nil, nil)
+        migrateNoteCategories()
         migrateActionsTable()
         seedBuiltinFeatures(db: db)
+    }
+
+    /// Notes carry one category (nullable = uncategorized). The column is
+    /// added idempotently: PRAGMA check, then ALTER TABLE. On DBs from
+    /// before the category cutover, legacy per-note tags seed the
+    /// categories once: every tag bound to a note becomes a category, and
+    /// each still-uncategorized note is filed under the category matching
+    /// its first tag.
+    static func migrateNoteCategories() {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+
+        var info: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA table_info(notes);", -1, &info, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(info) }
+        var hasColumn = false
+        while sqlite3_step(info) == SQLITE_ROW {
+            if let name = sqlite3_column_text(info, 1), String(cString: name) == "category_id" {
+                hasColumn = true
+                break
+            }
+        }
+        guard hasColumn || sqlite3_exec(
+            db,
+            "ALTER TABLE notes ADD COLUMN category_id INTEGER REFERENCES note_categories(id);",
+            nil, nil, nil
+        ) == SQLITE_OK else { return }
+
+        // The legacy tags tables only exist on DBs from before the
+        // category cutover — that's the data being migrated in.
+        var legacy: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name IN ('tags', 'note_tags') GROUP BY 1 HAVING COUNT(*) = 2;",
+            -1, &legacy, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(legacy) }
+        guard sqlite3_step(legacy) == SQLITE_ROW else { return }
+
+        sqlite3_exec(db, """
+            INSERT OR IGNORE INTO note_categories (name, sort_order)
+            SELECT t.name, t.sort_order FROM tags t
+            WHERE EXISTS (SELECT 1 FROM note_tags nt WHERE nt.tag_id = t.id);
+            """, nil, nil, nil)
+        sqlite3_exec(db, """
+            UPDATE notes SET category_id = (
+                SELECT c.id FROM note_tags nt
+                JOIN tags t ON t.id = nt.tag_id
+                JOIN note_categories c ON c.name = t.name
+                WHERE nt.note_id = notes.id
+                ORDER BY t.sort_order, t.id
+                LIMIT 1
+            ) WHERE category_id IS NULL;
+            """, nil, nil, nil)
     }
 
     /// Fresh-install seeds for the four builtin AI features (INSERT OR

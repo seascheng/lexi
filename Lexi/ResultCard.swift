@@ -487,8 +487,8 @@ extension SelectionToolbarApp {
         displayedNotes = cardNotesItems.filter { note in
             let title = (note.name.isEmpty ? note.content : note.name).lowercased()
             let matchesQuery = query.isEmpty || title.contains(query)
-            let matchesTag = noteActiveTag == "all" || (note.tags ?? []).contains(noteActiveTag)
-            return matchesQuery && matchesTag
+            let matchesCategory = noteActiveCategory == "all" || note.category == noteActiveCategory
+            return matchesQuery && matchesCategory
         }
         notesTableView.reloadData()
         if !displayedNotes.isEmpty {
@@ -500,11 +500,7 @@ extension SelectionToolbarApp {
     func rebuildNoteTagBar() {
         noteTagButtons.forEach { $0.removeFromSuperview() }
         noteTagButtons.removeAll()
-        var tags = Set<String>()
-        for note in cardNotesItems {
-            (note.tags ?? []).forEach { tags.insert($0) }
-        }
-        for name in ["all"] + tags.sorted() {
+        for name in ["all"] + cardCategories {
             let button = NSButton(title: name.capitalized, target: self, action: #selector(noteTagClicked(_:)))
             button.isBordered = false
             button.font = .systemFont(ofSize: 11, weight: .medium)
@@ -530,7 +526,7 @@ extension SelectionToolbarApp {
 
     func styleNoteTagButtons() {
         for button in noteTagButtons {
-            let active = button.identifier?.rawValue == noteActiveTag
+            let active = button.identifier?.rawValue == noteActiveCategory
             button.contentTintColor = active ? cardTheme.foreground : cardTheme.secondaryText
             button.layer?.backgroundColor = active
                 ? cardTheme.selectedFill.cgColor
@@ -541,7 +537,7 @@ extension SelectionToolbarApp {
     }
 
     @objc private func noteTagClicked(_ sender: NSButton) {
-        noteActiveTag = sender.identifier?.rawValue ?? "all"
+        noteActiveCategory = sender.identifier?.rawValue ?? "all"
         styleNoteTagButtons()
         applyNoteFilters()
     }
@@ -671,7 +667,7 @@ extension SelectionToolbarApp {
 
 
     func handleCardNotes(_ payload: CardNotesPayload) {
-        cardAllTags = payload.allTags ?? []
+        cardCategories = payload.categories ?? []
         cardNotesItems = payload.notes
         notesTableView.reloadData()
         notesTableView.sizeLastColumnToFit()
@@ -681,7 +677,7 @@ extension SelectionToolbarApp {
         }
         rebuildNoteTagBar()
         applyNoteFilters()
-        FileLog.write("NOTES loaded count=\(cardNotesItems.count) allTags=\(cardAllTags.count) selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden)")
+        FileLog.write("NOTES loaded count=\(cardNotesItems.count) categories=\(cardCategories.count) selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden)")
         layoutResultCard()
         FileLog.write("NOTES post-layout selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden) panel=\(activePanel)")
     }
@@ -706,11 +702,11 @@ extension SelectionToolbarApp {
               let host = resultPanel.contentView else { return }
         closeTagDropdown()
 
-        let allTags = cardAllTags.isEmpty
-            ? Array(Set(cardNotesItems.flatMap { $0.tags ?? [] })).sorted()
-            : cardAllTags
+        let categories = cardCategories.isEmpty
+            ? Array(Set(cardNotesItems.compactMap { $0.category })).sorted()
+            : cardCategories
         let dropdown = TagDropdownView(
-            tags: allTags,
+            tags: categories,
             current: tag,
             theme: cardTheme,
             onPick: { [weak self] name in
