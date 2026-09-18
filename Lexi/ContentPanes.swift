@@ -239,7 +239,7 @@ struct NotebookPane: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(.vertical, 2)
+            .padding(.vertical, 4)
             .tag(note)
             .contextMenu {
                 Button("Delete", role: .destructive) { model.delete(note) }
@@ -489,7 +489,6 @@ struct ConfigsPane: View {
                     Text("Custom").tag("custom")
                 }
                 .pickerStyle(.menu)
-                .controlSize(.small)
                 .labelsHidden()
             } label: {
                 Label(tool.name, systemImage: toolIconName(tool.id))
@@ -513,7 +512,6 @@ struct ConfigsPane: View {
                     Text("Volcengine TTS").tag("volcengine")
                 }
                 .pickerStyle(.menu)
-                .controlSize(.small)
                 .labelsHidden()
             } label: {
                 Label(tool.name, systemImage: toolIconName(tool.id))
@@ -549,7 +547,7 @@ struct ConfigsPane: View {
             ))
             .labelsHidden()
             .toggleStyle(.switch)
-            .controlSize(.small)
+            .controlSize(.mini)
 
             Image(nsImage: lucideImage(
                 for: row.icon, title: row.name,
@@ -571,7 +569,7 @@ struct ConfigsPane: View {
             Button("Edit") { editing = row }
                 .controlSize(.small)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 5)
     }
 
     private func newFeature() -> LexiFeatureRow {

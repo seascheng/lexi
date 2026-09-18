@@ -154,6 +154,7 @@ struct ToolbarConfigPane: View {
                             .toggleStyle(.switch)
                             .controlSize(.mini)
                         }
+                        .padding(.vertical, 5)
                     }
                     .onMove { from, to in model.move(from: from, to: to) }
                 }
