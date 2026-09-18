@@ -82,7 +82,8 @@ final class NotebookModel {
     }
 }
 
-/// Editable note detail: name + category dropdown + content editor + Save.
+/// Editable note detail: name + category dropdown + content editor + Save,
+/// laid out with the same grouped Form as every other settings pane.
 /// The caller applies `.id(note.id)` so a selection change recreates the
 /// view — its @State drafts must not leak across notes.
 private struct NoteDetailEditor: View {
@@ -110,47 +111,49 @@ private struct NoteDetailEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            TextField("Name", text: $name)
-                .font(.title2.weight(.semibold))
-                .textFieldStyle(.plain)
-
-            Picker("Category", selection: Binding(
-                get: { note.categoryId },
-                set: { onCategoryChange($0) }
-            )) {
-                Text("Uncategorized").tag(Int64?.none)
-                ForEach(categories) { category in
-                    Text(category.name).tag(Int64?.some(category.id))
+        Form {
+            Section {
+                TextField("Name", text: $name)
+                Picker("Category", selection: Binding(
+                    get: { note.categoryId },
+                    set: { onCategoryChange($0) }
+                )) {
+                    Text("Uncategorized").tag(Int64?.none)
+                    ForEach(categories) { category in
+                        Text(category.name).tag(Int64?.some(category.id))
+                    }
                 }
+            } header: {
+                Text("Note")
             }
-            .pickerStyle(.menu)
-            .frame(width: 200, alignment: .leading)
-
-            TextEditor(text: $content)
-                .font(.body)
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            HStack {
-                if saved {
-                    Text("Saved")
-                        .font(.caption)
-                        .foregroundStyle(.green)
+            Section {
+                TextEditor(text: $content)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 160)
+            } header: {
+                Text("Content")
+            }
+            Section {
+                HStack {
+                    if saved {
+                        Text("Saved")
+                            .font(.footnote)
+                            .foregroundStyle(.green)
+                    }
+                    Spacer()
+                    Button("Save") {
+                        onSave(name, content)
+                        saved = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { saved = false }
+                    }
+                    .keyboardShortcut(.defaultAction)
                 }
-                Spacer()
-                Button("Save") {
-                    onSave(name, content)
-                    saved = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { saved = false }
-                }
-                .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .contentMargins(.top, 8, for: .scrollContent)
     }
 }
 
@@ -159,16 +162,16 @@ struct NotebookPane: View {
     @State private var managingCategories = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            filterBar
-            Group {
-                if model.categories.isEmpty && model.displayed.isEmpty {
-                    ContentUnavailableView(
-                        "No notes",
-                        systemImage: "notebook-pen",
-                        description: Text("Use the toolbar's Note action — selections land here.")
-                    )
-                } else {
+        Group {
+            if model.categories.isEmpty && model.displayed.isEmpty {
+                ContentUnavailableView(
+                    "No notes",
+                    systemImage: "notebook-pen",
+                    description: Text("Use the toolbar's Note action — selections land here.")
+                )
+            } else {
+                VStack(spacing: 0) {
+                    filterBar
                     HStack(spacing: 0) {
                         noteList
                             .frame(width: 280)
@@ -178,7 +181,6 @@ struct NotebookPane: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .sheet(isPresented: $managingCategories) {
             CategoryManager(model: model)
@@ -186,14 +188,15 @@ struct NotebookPane: View {
     }
 
     private var filterBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+        HStack(spacing: 8) {
             TextField("Search notes", text: Binding(
                 get: { model.search },
                 set: { model.search = $0 }
             ))
-            .textFieldStyle(.plain)
-            Divider().frame(height: 14)
+            .textFieldStyle(.roundedBorder)
+            .controlSize(.small)
+            .frame(width: 200)
+
             Picker("Category", selection: Binding(
                 get: { model.activeCategoryId },
                 set: { model.activeCategoryId = $0 }
@@ -204,7 +207,8 @@ struct NotebookPane: View {
                 }
             }
             .pickerStyle(.menu)
-            .fixedSize()
+            .controlSize(.small)
+
             Button {
                 model.reload()
                 managingCategories = true
@@ -212,11 +216,13 @@ struct NotebookPane: View {
                 Image(systemName: "folder.badge.gearshape")
             }
             .buttonStyle(.borderless)
+            .controlSize(.small)
             .help("Manage categories")
+
+            Spacer()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.quaternary.opacity(0.35))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     private var noteList: some View {
@@ -224,9 +230,8 @@ struct NotebookPane: View {
             get: { model.selected },
             set: { model.selected = $0 }
         )) { note in
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(note.name.isEmpty ? String(note.content.prefix(48)) : note.name)
-                    .font(.body.weight(.medium))
                     .lineLimit(1)
                 if let category = note.categoryName {
                     Text(category)
@@ -234,12 +239,14 @@ struct NotebookPane: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .padding(.vertical, 2)
             .tag(note)
             .contextMenu {
                 Button("Delete", role: .destructive) { model.delete(note) }
             }
         }
         .listStyle(.inset)
+        .scrollContentBackground(.hidden)
     }
 
     @ViewBuilder
@@ -470,11 +477,7 @@ struct ConfigsPane: View {
     /// values; copy/note have none). Fields write straight to the blob.
     @ViewBuilder
     private func toolConfigRows(_ tool: (id: String, name: String, icon: String, config: [String: String])) -> some View {
-        LabeledContent {
-            EmptyView()
-        } label: {
-            Label(tool.name, systemImage: toolIconName(tool.id))
-        }
+        Label(tool.name, systemImage: toolIconName(tool.id))
         switch tool.id {
         case "search":
             Picker("Engine", selection: Binding(
@@ -488,10 +491,11 @@ struct ConfigsPane: View {
             }
             if tool.config["engine"] == "custom" {
                 LabeledContent("URL template") {
-                    TextField("https://example.com/search?q={query}", text: Binding(
+                    TextField("", text: Binding(
                         get: { tool.config["customUrl"] ?? "" },
                         set: { model.setToolField(tool.id, field: "customUrl", value: $0) }
-                    ))
+                    ), prompt: Text("https://example.com/search?q={query}"))
+                    .labelsHidden()
                 }
             }
         case "read":
@@ -505,10 +509,11 @@ struct ConfigsPane: View {
             }
         case "handoff":
             LabeledContent("Target app") {
-                TextField("ChatGPT", text: Binding(
+                TextField("", text: Binding(
                     get: { tool.config["targetApp"] ?? "ChatGPT" },
                     set: { model.setToolField(tool.id, field: "targetApp", value: $0) }
-                ))
+                ), prompt: Text("ChatGPT"))
+                .labelsHidden()
             }
         default:
             LabeledContent("No options") {
@@ -528,7 +533,6 @@ struct ConfigsPane: View {
             .controlSize(.small)
 
             Image(systemName: iconName(row.icon))
-                .font(.system(size: 14))
                 .foregroundStyle(.tint)
                 .frame(width: 22)
 
@@ -541,10 +545,8 @@ struct ConfigsPane: View {
             Spacer()
             if row.isBuiltin {
                 Text("Built-in")
-                    .font(.caption2)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.quaternary, in: Capsule())
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Button("Edit") { editing = row }
                 .controlSize(.small)
@@ -621,25 +623,19 @@ struct FeatureEditor: View {
                         .font(.system(.body, design: .monospaced))
                         .frame(minHeight: 180)
                         .scrollContentBackground(.hidden)
-                        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
                     Text("Use {{text}} for the selected text.")
-                        .font(.system(size: 11))
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
-                }
-                Section {
-                    HStack {
-                        Text("Output")
-                        Spacer()
-                        Text(draft.outputMode == "translation_json" ? "structured translation JSON" : "plain text")
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.system(size: 12))
                 }
                 Section("Behavior") {
                     Toggle("Enabled", isOn: $draft.enabled)
                     Toggle("Auto-save single words to vocabulary", isOn: $draft.autoSave)
                     Toggle("Speak result (text to speech)", isOn: $draft.speechEnabled)
                     Toggle("Deep thinking mode (slower first token)", isOn: $draft.thinking)
+                    LabeledContent("Output") {
+                        Text(draft.outputMode == "translation_json" ? "structured translation JSON" : "plain text")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .formStyle(.grouped)

@@ -63,8 +63,7 @@ struct VocabularyPane: View {
     @State private var model = VocabularyModel()
 
     var body: some View {
-        VStack(spacing: 0) {
-            filterBar
+        Group {
             if model.rows.isEmpty {
                 ContentUnavailableView(
                     "No matching entries",
@@ -73,15 +72,17 @@ struct VocabularyPane: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    filterBar
+                    List {
                         ForEach(model.rows) { word in
                             wordRow(word)
-                            Divider().opacity(0.4)
                         }
                     }
+                    .listStyle(.inset)
+                    .scrollContentBackground(.hidden)
+                    paginationBar
                 }
-                paginationBar
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -90,42 +91,29 @@ struct VocabularyPane: View {
     // MARK: - Collapsed row + expanded detail (React parity)
 
     private func wordRow(_ word: LexiWord) -> some View {
-        let isExpanded = model.expandedId == word.id
-        return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) { model.toggleExpand(word) }
-            } label: {
-                HStack(spacing: 8) {
-                    // The text group absorbs all flexible width and truncates;
-                    // the badge keeps its ideal size and never leaves the pane.
-                    HStack(spacing: 6) {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        Text(word.word)
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1)
-                        if !word.translation.isEmpty {
-                            MarkdownText(content: word.translation, compact: true, inline: true)
-                        }
+        DisclosureGroup(
+            isExpanded: Binding(
+                get: { model.expandedId == word.id },
+                set: { expanded in
+                    if expanded {
+                        model.expandedId = word.id
+                    } else if model.expandedId == word.id {
+                        model.expandedId = nil
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    statusBadge(word.status)
-                        .fixedSize()
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .contentShape(Rectangle())
+            )
+        ) {
+            expandedDetail(word)
+        } label: {
+            HStack(spacing: 6) {
+                Text(word.word)
+                    .lineLimit(1)
+                if !word.translation.isEmpty {
+                    MarkdownText(content: word.translation, compact: true, inline: true)
+                }
             }
-            .buttonStyle(.plain)
-            if isExpanded {
-                expandedDetail(word)
-                    .padding(.leading, 28)
-                    .padding(.trailing, 12)
-                    .padding(.bottom, 12)
-            }
+            .badge(Text(word.status.capitalized))
         }
-        .background(isExpanded ? Color.primary.opacity(0.04) : Color.clear)
     }
 
     private func expandedDetail(_ word: LexiWord) -> some View {
@@ -135,7 +123,7 @@ struct VocabularyPane: View {
             } else {
                 if !word.pos.isEmpty {
                     Text(word.pos)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                         .textCase(.uppercase)
                 }
@@ -149,11 +137,8 @@ struct VocabularyPane: View {
             }
             if !word.example.isEmpty {
                 Text("“\(word.example)”")
-                    .font(.system(size: 12))
+                    .font(.callout)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
             }
             HStack {
                 Text("Reviews \(word.reviewCount)")
@@ -170,45 +155,32 @@ struct VocabularyPane: View {
                 }
                 .pickerStyle(.segmented)
                 .controlSize(.small)
+                .labelsHidden()
                 .frame(width: 180)
-                Button {
+                Button(role: .destructive) {
                     model.delete(word)
                 } label: {
                     Image(systemName: "trash")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.red)
                 }
-                .buttonStyle(.plain)
+                .controlSize(.small)
             }
-            .font(.system(size: 11))
+            .font(.footnote)
             .foregroundStyle(.secondary)
         }
-    }
-
-    private func statusBadge(_ status: String) -> some View {
-        let color: Color = status == "mastered" ? .green : status == "learning" ? .orange : .secondary
-        return Text(status.capitalized)
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.15), in: Capsule())
+        .padding(.vertical, 4)
     }
 
     // MARK: - Filter bar + pagination
 
     private var filterBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
             TextField("Search vocabulary or meaning", text: Binding(
                 get: { model.search },
                 set: { model.search = $0 }
             ))
-            .textFieldStyle(.plain)
-            .font(.system(size: 13))
-            Divider().frame(height: 14)
+            .textFieldStyle(.roundedBorder)
+            .controlSize(.small)
+            .frame(width: 220)
             Picker("Type", selection: Binding(
                 get: { model.entryTypeFilter },
                 set: { model.entryTypeFilter = $0 }
@@ -220,7 +192,6 @@ struct VocabularyPane: View {
             }
             .pickerStyle(.menu)
             .controlSize(.small)
-            .fixedSize()
             Picker("Status", selection: Binding(
                 get: { model.statusFilter },
                 set: { model.statusFilter = $0 }
@@ -232,11 +203,10 @@ struct VocabularyPane: View {
             }
             .pickerStyle(.menu)
             .controlSize(.small)
-            .fixedSize()
+            Spacer()
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(.quaternary.opacity(0.35))
     }
 
     private var paginationBar: some View {
@@ -247,10 +217,12 @@ struct VocabularyPane: View {
                 model.page = model.safePage - 1
             }
             .disabled(model.safePage <= 1)
+            Spacer()
             Text("\(model.safePage) / \(model.totalPages)")
-                .font(.system(size: 11))
+                .font(.footnote)
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 48)
+            Spacer()
             Button("Next") {
                 guard model.safePage < model.totalPages else { return }
                 model.expandedId = nil
@@ -259,10 +231,8 @@ struct VocabularyPane: View {
             .disabled(model.safePage >= model.totalPages)
         }
         .controlSize(.small)
-        .font(.system(size: 12))
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.35))
     }
 }
 
@@ -307,7 +277,7 @@ struct ReviewPane: View {
                 VStack(spacing: 20) {
                     HStack(spacing: 16) {
                         Text("\(model.index + 1) / \(model.dueCount)")
-                            .font(.system(size: 11))
+                            .font(.footnote)
                             .foregroundStyle(.secondary)
                             .frame(width: 70, alignment: .leading)
                         Picker("Mode", selection: $model.mode) {
@@ -323,10 +293,10 @@ struct ReviewPane: View {
                     if model.mode == .flashcard {
                         VStack(spacing: 10) {
                             Text(word.word)
-                                .font(.system(size: 34, weight: .semibold, design: .rounded))
+                                .font(.system(.largeTitle, design: .rounded).weight(.semibold))
                             if !word.pos.isEmpty {
                                 Text(word.pos)
-                                    .font(.system(size: 11, weight: .medium))
+                                    .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .textCase(.uppercase)
                             }
@@ -352,11 +322,8 @@ struct ReviewPane: View {
                                 }
                                 if !word.example.isEmpty {
                                     Text("“\(word.example)”")
-                                        .font(.system(size: 12))
+                                        .font(.callout)
                                         .foregroundStyle(.secondary)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 6)
-                                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
                                 }
                                 if !word.note.isEmpty {
                                     MarkdownText(content: word.note, compact: true)
@@ -432,7 +399,7 @@ struct TypingChallengeView: View {
 
             TextField("Type the word…", text: $input)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(size: 16, design: .monospaced))
+                .font(.system(.title3, design: .monospaced))
                 .multilineTextAlignment(.center)
                 .onSubmit { submit() }
                 .onChange(of: input) { _, newValue in
