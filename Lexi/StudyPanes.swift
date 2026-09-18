@@ -305,12 +305,11 @@ struct ReviewPane: View {
         Group {
             if let word = model.current {
                 VStack(spacing: 20) {
-                    HStack {
+                    HStack(spacing: 16) {
                         Text("\(model.index + 1) / \(model.dueCount)")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
-                            .frame(width: 80)
-                        Spacer()
+                            .frame(width: 70, alignment: .leading)
                         Picker("Mode", selection: $model.mode) {
                             Text("Flashcard").tag(ReviewMode.flashcard)
                             Text("Type").tag(ReviewMode.typing)
@@ -319,7 +318,7 @@ struct ReviewPane: View {
                         .controlSize(.small)
                         .frame(width: 180)
                     }
-                    .padding(.horizontal, 16)
+                    .frame(maxWidth: 520)
 
                     if model.mode == .flashcard {
                         VStack(spacing: 10) {
@@ -364,7 +363,7 @@ struct ReviewPane: View {
                                         .opacity(0.8)
                                 }
                             }
-                            .frame(maxWidth: 480)
+                            .frame(maxWidth: 520)
                             .padding(.horizontal, 16)
                             gradeButtons
                         }
@@ -376,7 +375,8 @@ struct ReviewPane: View {
                         .frame(maxWidth: 520)
                     }
                 }
-                .padding()
+                .padding(.top, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else {
                 ContentUnavailableView(
                     "All reviewed",

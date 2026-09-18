@@ -37,39 +37,17 @@ enum LexiActivationPolicy {
 @Observable
 final class SettingsNavigationState {
     private(set) var tab: SettingsTab
-    private var history: [SettingsTab] = []
-    private var future: [SettingsTab] = []
-    var onHistoryChange: (() -> Void)?
+    /// Fired on every tab change — the toolbar syncs the window title.
+    var onChange: (() -> Void)?
 
     init(tab: SettingsTab) {
         self.tab = tab
     }
 
-    var canGoBack: Bool { !history.isEmpty }
-    var canGoForward: Bool { !future.isEmpty }
-
     func select(_ tab: SettingsTab) {
         guard tab != self.tab else { return }
-        FileLog.write("NAV select \(tab.name) was=\(self.tab.name) cb=\(onHistoryChange != nil)")
-        history.append(self.tab)
-        future.removeAll()
         self.tab = tab
-        onHistoryChange?()
-    }
-
-    func goBack() {
-        guard let previous = history.popLast() else { return }
-        future.insert(tab, at: 0)
-        tab = previous
-        onHistoryChange?()
-    }
-
-    func goForward() {
-        guard let next = future.first else { return }
-        future.removeFirst()
-        history.append(tab)
-        tab = next
-        onHistoryChange?()
+        onChange?()
     }
 }
 
@@ -155,32 +133,18 @@ enum SettingsSection: CaseIterable, Identifiable {
     }
 }
 
-/// Back/forward pair over the detail column — TinyCast's exact recipe:
-/// `.sidebarTrackingSeparator` first so the buttons seat in the detail
-/// section ahead of the inline title, `.toolbar` bezels, unified bar with
-/// the system glass band kept (titlebar NOT transparent).
+/// Unified toolbar carrying the inline title — TinyCast's recipe minus the
+/// back/forward pair (the sidebar is a flat list; history navigation was
+/// removed).
 @MainActor
 private final class SettingsToolbar: NSObject, NSToolbarDelegate {
-    private static let back = NSToolbarItem.Identifier("LexiSettingsBack")
-    private static let forward = NSToolbarItem.Identifier("LexiSettingsForward")
-
     private let navigation: SettingsNavigationState
     private weak var window: NSWindow?
-    private let backButton: NSButton
-    private let forwardButton: NSButton
 
     init(navigation: SettingsNavigationState) {
         self.navigation = navigation
-        // Two buttons, not a segmented control: that would draw a divider
-        // down the middle.
-        backButton = Self.makeButton("chevron.backward", "Back")
-        forwardButton = Self.makeButton("chevron.forward", "Forward")
         super.init()
-        backButton.target = self
-        backButton.action = #selector(goBack)
-        forwardButton.target = self
-        forwardButton.action = #selector(goForward)
-        navigation.onHistoryChange = { [weak self] in self?.sync() }
+        navigation.onChange = { [weak self] in self?.sync() }
     }
 
     func install(in window: NSWindow) {
@@ -206,7 +170,7 @@ private final class SettingsToolbar: NSObject, NSToolbarDelegate {
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.sidebarTrackingSeparator, Self.back, Self.forward]
+        [.sidebarTrackingSeparator]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -217,44 +181,16 @@ private final class SettingsToolbar: NSObject, NSToolbarDelegate {
         _ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
         willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        switch identifier {
-        case Self.back:
-            item.view = backButton
-            item.label = "Back"
-        case Self.forward:
-            item.view = forwardButton
-            item.label = "Forward"
-        default:
-            return nil
-        }
-        // The one flag that seats an item ahead of the inline title.
-        item.isNavigational = true
-        item.visibilityPriority = .high
-        // Enabled state comes from history, not responder validation.
-        item.autovalidates = false
-        return item
+        nil
     }
-
-    @objc private func goBack() { navigation.goBack() }
-    @objc private func goForward() { navigation.goForward() }
 
     private func sync() {
         window?.title = navigation.tab.title
-        backButton.isEnabled = navigation.canGoBack
-        forwardButton.isEnabled = navigation.canGoForward
-        FileLog.write("TITLE sync tab=\(navigation.tab.title) title=\(window?.title ?? "nil")")
     }
 
     /// Directional symbols so the pair mirrors in RTL.
-    private static func makeButton(_ symbol: String, _ label: String) -> NSButton {
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-        let button = NSButton(image: image ?? NSImage(), target: nil, action: nil)
-        button.bezelStyle = .toolbar
-        button.setAccessibilityLabel(label)
-        button.toolTip = label
-        return button
-    }
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
 }
 
 /// A real `NSSplitViewController` so the toolbar can use the tracking

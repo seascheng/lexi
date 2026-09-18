@@ -550,6 +550,20 @@ extension LexiStore {
         sqlite3_step(statement)
     }
 
+    /// Notebook detail edit: replace the note body.
+    static func updateNoteContent(id: Int64, content: String) {
+        guard let db = open() else { return }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "UPDATE notes SET content = ?1 WHERE id = ?2;", -1, &statement, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, content, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int64(statement, 2, id)
+        sqlite3_step(statement)
+    }
+
     /// Card notes-tab tag switch; empty name clears the tag. One visible
     /// tag per note — replace, never add (Rust note-tag handler parity).
     static func setNoteTag(id: Int64, tag: String) {

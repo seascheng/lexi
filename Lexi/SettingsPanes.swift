@@ -273,24 +273,18 @@ struct AISettingsPane: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Base URL") {
-                    TextField("https://api.openai.com/v1", text: Binding(
-                        get: { model.apiBaseUrl },
-                        set: { model.setApiBaseUrl($0) }
-                    ))
-                }
-                LabeledContent("Model") {
-                    TextField("gpt-4o-mini", text: Binding(
-                        get: { model.aiModel },
-                        set: { model.setAiModel($0) }
-                    ))
-                }
-                LabeledContent("API key") {
-                    SecureField("sk-…", text: Binding(
-                        get: { model.apiKey },
-                        set: { model.setApiKey($0) }
-                    ))
-                }
+                TextField("Base URL", text: Binding(
+                    get: { model.apiBaseUrl },
+                    set: { model.setApiBaseUrl($0) }
+                ))
+                TextField("Model", text: Binding(
+                    get: { model.aiModel },
+                    set: { model.setAiModel($0) }
+                ))
+                SecureField("API key", text: Binding(
+                    get: { model.apiKey },
+                    set: { model.setApiKey($0) }
+                ))
             } header: {
                 Text("OpenAI-compatible API")
             } footer: {
@@ -298,41 +292,38 @@ struct AISettingsPane: View {
             }
 
             Section {
-                Picker("Engine", selection: $ttsEngine) {
+                Picker("Engine", selection: Binding(
+                    get: { ttsEngine },
+                    set: {
+                        ttsEngine = $0
+                        LexiStore.setToolConfigField(id: "read", field: "engine", value: $0)
+                    }
+                )) {
                     Text("System built-in (say)").tag("system")
                     Text("Volcengine TTS").tag("volcengine")
                 }
-                .onChange(of: ttsEngine) { _, value in
-                    LexiStore.setToolConfigField(id: "read", field: "engine", value: value)
-                }
                 if ttsEngine == "volcengine" {
-                    LabeledContent("APP ID") {
-                        TextField("9989685160", text: Binding(
-                            get: { volcAppId },
-                            set: {
-                                volcAppId = $0
-                                LexiStore.setToolConfigField(id: "read", field: "volcAppId", value: $0)
-                            }
-                        ))
-                    }
-                    LabeledContent("Access token") {
-                        SecureField("Access Token", text: Binding(
-                            get: { volcAccessToken },
-                            set: {
-                                volcAccessToken = $0
-                                LexiStore.setToolConfigField(id: "read", field: "volcAccessToken", value: $0)
-                            }
-                        ))
-                    }
-                    LabeledContent("Voice") {
-                        TextField("zh_female_cancan_mars_bigtts", text: Binding(
-                            get: { volcVoice },
-                            set: {
-                                volcVoice = $0
-                                LexiStore.setToolConfigField(id: "read", field: "volcVoice", value: $0)
-                            }
-                        ))
-                    }
+                    TextField("APP ID", text: Binding(
+                        get: { volcAppId },
+                        set: {
+                            volcAppId = $0
+                            LexiStore.setToolConfigField(id: "read", field: "volcAppId", value: $0)
+                        }
+                    ))
+                    SecureField("Access token", text: Binding(
+                        get: { volcAccessToken },
+                        set: {
+                            volcAccessToken = $0
+                            LexiStore.setToolConfigField(id: "read", field: "volcAccessToken", value: $0)
+                        }
+                    ))
+                    TextField("Voice (zh_female_cancan_mars_bigtts)", text: Binding(
+                        get: { volcVoice },
+                        set: {
+                            volcVoice = $0
+                            LexiStore.setToolConfigField(id: "read", field: "volcVoice", value: $0)
+                        }
+                    ))
                 }
             } header: {
                 Text("Speech (text to speech)")

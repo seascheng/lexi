@@ -45,6 +45,76 @@ final class NotebookModel {
         if selected == note { selected = nil }
         reload()
     }
+
+    /// Detail-editor save: name/content/tag write, then reload with the
+    /// edited note kept selected.
+    func update(_ note: LexiNote, name: String, content: String, tag: String) {
+        LexiStore.updateNoteName(id: note.id, name: name)
+        LexiStore.updateNoteContent(id: note.id, content: content)
+        LexiStore.setNoteTag(id: note.id, tag: tag)
+        reload()
+        selected = all.first(where: { $0.id == note.id })
+    }
+}
+
+/// Editable note detail: name + tag line + content editor + Save.
+/// Re-created per selection (.id) so stale drafts never leak across notes.
+private struct NoteDetailEditor: View {
+    let note: LexiNote
+    let onSave: (String, String, String) -> Void
+
+    @State private var name: String
+    @State private var tag: String
+    @State private var content: String
+    @State private var saved = false
+
+    init(note: LexiNote, onSave: @escaping (String, String, String) -> Void) {
+        self.note = note
+        self.onSave = onSave
+        _name = State(initialValue: note.name)
+        _tag = State(initialValue: note.tags.joined(separator: ", "))
+        _content = State(initialValue: note.content)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            TextField("Name", text: $name)
+                .font(.title2.weight(.semibold))
+                .textFieldStyle(.plain)
+            TextField("tag", text: $tag)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.quaternary, in: Capsule())
+                .frame(width: 160, alignment: .leading)
+            TextEditor(text: $content)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            HStack {
+                if saved {
+                    Text("Saved")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+                Spacer()
+                Button("Save") {
+                    onSave(name, content, tag)
+                    saved = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { saved = false }
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .id(note.id)
+    }
 }
 
 struct NotebookPane: View {
@@ -131,28 +201,8 @@ struct NotebookPane: View {
     @ViewBuilder
     private var noteDetail: some View {
         if let note = model.selected {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(note.name.isEmpty ? "Note \(note.id)" : note.name)
-                        .font(.title2.weight(.semibold))
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack {
-                            ForEach(note.tags, id: \.self) { tag in
-                                Text(tag.capitalized)
-                                    .font(.caption)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .background(.quaternary, in: Capsule())
-                            }
-                        }
-                    }
-                    Text(note.content)
-                        .font(.body)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            NoteDetailEditor(note: note) { name, content, tag in
+                model.update(note, name: name, content: content, tag: tag)
             }
         } else {
             ContentUnavailableView("Select a note", systemImage: "sidebar.left")
