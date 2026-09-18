@@ -15,20 +15,20 @@ enum PanelDesign {
     /// Panel-level horizontal margin: search field, filter/tab pill row,
     /// footer text — one shared left line down every panel.
     static let sideInset: CGFloat = 12
-    static let searchHeight: CGFloat = 26
+    static let searchHeight: CGFloat = 30
 
     // MARK: pills (filters/tabs) vs chips (inline content)
 
-    static let pillHeight: CGFloat = 24
+    static let pillHeight: CGFloat = 28
     /// Filter/tab pills read as capsules at their full height.
-    static let pillCornerRadius: CGFloat = 12
+    static let pillCornerRadius: CGFloat = 14
     /// Inline content chips (folder grid) stay squarer.
-    static let chipCornerRadius: CGFloat = 6
+    static let chipCornerRadius: CGFloat = 7
 
     // MARK: row selection capsule
 
     static let rowCapsuleInsetX: CGFloat = 6
-    static let rowCapsuleInsetY: CGFloat = 2
+    static let rowCapsuleInsetY: CGFloat = 3
 
     // MARK: row content geometry
     //
@@ -37,11 +37,13 @@ enum PanelDesign {
     // (inset rowCapsuleInsetX) the content is padded symmetrically:
     //   (rowContentLeading - rowCapsuleInsetX) == rowIconToText
     //   == (rowContentTrailing - rowCapsuleInsetX)
-    // → 8pt everywhere; the 36pt single-line row gives the 20pt icon the
-    // same 8pt above and below, so a cell's padding is uniform.
+    // → 10pt everywhere; a 44pt single-line row gives the 24pt icon the
+    // same 10pt above and below, so a cell's padding is uniform.
+    // Type scale (TinyCast Theme parity): row primary 15, secondary 13,
+    // search field 16, footer 12.
 
-    static let rowContentLeading: CGFloat = 14
-    static let rowContentTrailing: CGFloat = 14
-    static let rowIconSize: CGFloat = 20
-    static let rowIconToText: CGFloat = 8
+    static let rowContentLeading: CGFloat = 16
+    static let rowContentTrailing: CGFloat = 16
+    static let rowIconSize: CGFloat = 24
+    static let rowIconToText: CGFloat = 10
 }

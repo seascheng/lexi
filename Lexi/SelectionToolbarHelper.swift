@@ -108,9 +108,9 @@ enum PanelStyle {
         var cornerRadius: CGFloat {
             switch self {
             case .bar: return 10
-            case .list: return 16
-            case .card: return 20
-            case .launcher: return 22
+            case .list: return 20
+            case .card: return 22
+            case .launcher: return 24
             }
         }
     }

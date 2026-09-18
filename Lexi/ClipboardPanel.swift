@@ -31,9 +31,9 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     /// top-left corner stays pinned where the cursor put it.
     private static let panelWidth: CGFloat = 460
     static let panelHeight: CGFloat = 560
-    static let singleLineHeight: CGFloat = 36
-    private static let twoLineHeight: CGFloat = 50
-    private static let headerHeight: CGFloat = 28
+    static let singleLineHeight: CGFloat = 44
+    private static let twoLineHeight: CGFloat = 58
+    private static let headerHeight: CGFloat = 30
     private static let side: CGFloat = PanelDesign.sideInset
 
     /// The category that absorbs uncategorized notes in the chip tabs.
@@ -255,14 +255,14 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         searchField.frame = NSRect(x: Self.side, y: 12, width: Self.panelWidth - Self.side * 2, height: PanelDesign.searchHeight)
         searchField.placeholderString = "输入关键词搜索"
         searchField.focusRingType = .none
-        searchField.font = .systemFont(ofSize: 13)
+        searchField.font = .systemFont(ofSize: 16)
         (searchField.cell as? NSSearchFieldCell)?.sendsActionOnEndEditing = false
         searchField.wantsLayer = true
         searchField.delegate = self
         root.addSubview(searchField)
 
         // Chip row: horizontal scroller, one line, always the input at the end.
-        chipsScrollView.frame = NSRect(x: Self.side, y: 46, width: Self.panelWidth - Self.side * 2, height: PanelDesign.pillHeight + 4)
+        chipsScrollView.frame = NSRect(x: Self.side, y: 50, width: Self.panelWidth - Self.side * 2, height: PanelDesign.pillHeight + 4)
         chipsScrollView.drawsBackground = false
         chipsScrollView.hasVerticalScroller = false
         chipsScrollView.hasHorizontalScroller = false // gestures still scroll; no bar
@@ -315,13 +315,13 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             self?.contextMenu(for: row)
         }
 
-        footerLeft.font = .systemFont(ofSize: 11)
-        footerRight.font = .systemFont(ofSize: 11)
+        footerLeft.font = .systemFont(ofSize: 12)
+        footerRight.font = .systemFont(ofSize: 12)
         footerRight.alignment = .right
         root.addSubview(footerLeft)
         root.addSubview(footerRight)
 
-        emptyLabel.font = .systemFont(ofSize: 12)
+        emptyLabel.font = .systemFont(ofSize: 13)
         emptyLabel.alignment = .center
         emptyLabel.stringValue = "暂无粘贴板历史 — 复制任意内容开始"
         emptyLabel.isHidden = true
@@ -522,9 +522,9 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         // the first row, and 6pt from the last row to the footer label
         // (footerY + 5). The viewport therefore equals the row total exactly
         // — no phantom slack, no clipping at the last capsule.
-        let listY = 46 + PanelDesign.pillHeight + 4 + 6
-        scrollView.frame = NSRect(x: 0, y: listY, width: Self.panelWidth, height: height - listY - 25)
-        let listHeight = height - listY - 25
+        let listY = 50 + PanelDesign.pillHeight + 4 + 6
+        scrollView.frame = NSRect(x: 0, y: listY, width: Self.panelWidth, height: height - listY - 28)
+        let listHeight = height - listY - 28
         // Empty state floats in the MIDDLE of the content area, not pinned
         // under the chips.
         emptyLabel.frame = NSRect(
@@ -533,9 +533,9 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             width: Self.panelWidth - Self.side * 2,
             height: 40
         )
-        let footerY = height - 24
-        footerLeft.frame = NSRect(x: 16, y: footerY + 5, width: 240, height: 14)
-        footerRight.frame = NSRect(x: Self.panelWidth - 266, y: footerY + 5, width: 250, height: 14)
+        let footerY = height - 28
+        footerLeft.frame = NSRect(x: 16, y: footerY + 6, width: 240, height: 15)
+        footerRight.frame = NSRect(x: Self.panelWidth - 266, y: footerY + 6, width: 250, height: 15)
     }
 
     /// macOS 26 NSTableView pads its rows symmetrically INSIDE the table
@@ -578,8 +578,8 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
     /// at most TWO preview lines.
     static func previewLineCount(for text: String) -> Int {
         let measuring = NSTextField(wrappingLabelWithString: text)
-        measuring.font = .systemFont(ofSize: 13)
-        let textWidth = panelWidth - 68 // icon leading + trailing inset
+        measuring.font = .systemFont(ofSize: 15)
+        let textWidth = panelWidth - 66 // icon leading + icon + gap + trailing
         let bounds = NSRect(x: 0, y: 0, width: textWidth, height: 10_000)
         let needed = measuring.cell!.cellSize(forBounds: bounds).height
         return max(1, min(2, Int(ceil(needed / 16))))
@@ -1125,7 +1125,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             return nil
         }
         let image = NSImage(contentsOf: url)
-        image?.size = NSSize(width: 40, height: 40)
+        image?.size = NSSize(width: 44, height: 44)
         if let image {
             thumbnailCache[item.id] = image
         }
@@ -1201,7 +1201,7 @@ final class ChipPillView: NSView {
             dot.frame = NSRect(x: 11, y: 8, width: 7, height: 7)
             addSubview(dot)
 
-            label.font = .systemFont(ofSize: 12, weight: .medium)
+            label.font = .systemFont(ofSize: 13, weight: .medium)
             label.lineBreakMode = .byTruncatingTail
             label.cell?.usesSingleLineMode = true
             addSubview(label)
@@ -1223,7 +1223,7 @@ final class ChipPillView: NSView {
             wantsLayer = true
             layer?.cornerRadius = PanelDesign.pillCornerRadius
 
-            label.font = .systemFont(ofSize: 14, weight: .medium)
+            label.font = .systemFont(ofSize: 15, weight: .medium)
             label.alignment = .center
             label.lineBreakMode = .byClipping
             addSubview(label)
@@ -1361,11 +1361,11 @@ final class ChipInputView: NSView {
             wantsLayer = true
             layer?.cornerRadius = PanelDesign.pillCornerRadius
 
-            plus.font = .systemFont(ofSize: 12, weight: .medium)
+            plus.font = .systemFont(ofSize: 14, weight: .medium)
             plus.frame = NSRect(x: 8, y: 4, width: 10, height: 16)
             addSubview(plus)
 
-            field.font = .systemFont(ofSize: 12)
+            field.font = .systemFont(ofSize: 13)
             field.isBordered = false
             field.isEditable = true
             field.isSelectable = true
@@ -1405,7 +1405,7 @@ final class ClipboardHeaderCell: NSView {
 
     func configure(title: String, color: NSColor) {
         label.stringValue = title.uppercased()
-        label.font = .systemFont(ofSize: 10, weight: .semibold)
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
         label.textColor = color
         if !didLayout {
             didLayout = true
@@ -1484,14 +1484,14 @@ final class ClipCell: NSView {
             nameTop.isActive = false
             nameCenterY.isActive = height <= ClipboardPanelController.singleLineHeight + 1
             if nameCenterY.isActive {
-                nameLabel.font = .systemFont(ofSize: 13)
+                nameLabel.font = .systemFont(ofSize: 15)
                 nameLabel.textColor = theme.foreground
                 nameLabel.stringValue = item.previewText ?? ""
                 nameLabel.lineBreakMode = .byTruncatingTail
                 nameLabel.cell?.usesSingleLineMode = true
                 nameLabel.isHidden = false
             } else {
-                previewLabel.font = .systemFont(ofSize: 13)
+                previewLabel.font = .systemFont(ofSize: 15)
                 previewLabel.textColor = theme.foreground
                 previewLabel.stringValue = item.previewText ?? ""
                 previewLabel.isHidden = false
@@ -1500,13 +1500,13 @@ final class ClipCell: NSView {
             let url = URL(fileURLWithPath: item.text ?? "")
             nameCenterY.isActive = false
             nameTop.isActive = true
-            nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
+            nameLabel.font = .systemFont(ofSize: 15, weight: .medium)
             nameLabel.textColor = theme.foreground
             nameLabel.stringValue = url.lastPathComponent
             nameLabel.lineBreakMode = .byTruncatingTail
             nameLabel.cell?.usesSingleLineMode = true
             nameLabel.isHidden = false
-            pathLabel.font = .systemFont(ofSize: 11)
+            pathLabel.font = .systemFont(ofSize: 13)
             pathLabel.textColor = theme.tertiaryText
             pathLabel.stringValue = url.deletingLastPathComponent().path
             pathLabel.lineBreakMode = .byTruncatingMiddle
@@ -1519,7 +1519,7 @@ final class ClipCell: NSView {
             }
             // Without a decoded thumbnail yet, a quiet placeholder keeps the
             // row from looking broken.
-            previewLabel.font = .systemFont(ofSize: 12)
+            previewLabel.font = .systemFont(ofSize: 13)
             previewLabel.textColor = theme.tertiaryText
             previewLabel.stringValue = "图片"
             previewLabel.alignment = .center
@@ -1551,12 +1551,12 @@ final class ClipCell: NSView {
                 && ClipboardPanelController.previewLineCount(for: text!) > 1
             nameCenterY.isActive = !wraps
             if wraps {
-                previewLabel.font = .systemFont(ofSize: 13)
+                previewLabel.font = .systemFont(ofSize: 15)
                 previewLabel.textColor = theme.foreground
                 previewLabel.stringValue = text ?? ""
                 previewLabel.isHidden = false
             } else {
-                nameLabel.font = .systemFont(ofSize: 13)
+                nameLabel.font = .systemFont(ofSize: 15)
                 nameLabel.textColor = theme.foreground
                 nameLabel.stringValue = text ?? ""
                 nameLabel.lineBreakMode = .byTruncatingTail
@@ -1566,13 +1566,13 @@ final class ClipCell: NSView {
         } else {
             nameCenterY.isActive = false
             nameTop.isActive = true
-            nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
+            nameLabel.font = .systemFont(ofSize: 15, weight: .medium)
             nameLabel.textColor = theme.foreground
             nameLabel.stringValue = note.name
             nameLabel.lineBreakMode = .byTruncatingTail
             nameLabel.cell?.usesSingleLineMode = true
             nameLabel.isHidden = false
-            pathLabel.font = .systemFont(ofSize: 11)
+            pathLabel.font = .systemFont(ofSize: 13)
             pathLabel.textColor = theme.tertiaryText
             pathLabel.stringValue = text ?? ""
             pathLabel.lineBreakMode = .byTruncatingTail
@@ -1616,8 +1616,8 @@ final class ClipCell: NSView {
 
         thumbnailView.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: PanelDesign.rowIconToText).isActive = true
         thumbnailView.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
-        thumbnailView.widthAnchor.constraint(equalToConstant: 40).isActive = true
-        thumbnailView.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        thumbnailView.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        thumbnailView.heightAnchor.constraint(equalToConstant: 44).isActive = true
 
         for label in [nameLabel, pathLabel, previewLabel] {
             label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: PanelDesign.rowIconToText).isActive = true

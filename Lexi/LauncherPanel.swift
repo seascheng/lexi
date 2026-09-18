@@ -16,11 +16,11 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     var onOpenSettings: (() -> Void)?
 
     private static let panelWidth: CGFloat = 520
-    private static let rowHeight: CGFloat = 32
+    private static let rowHeight: CGFloat = 40
     private static let headerHeight: CGFloat = 28
     private static let chipLineHeight: CGFloat = 30
-    private static let maxListHeight: CGFloat = 11 * LauncherPanelController.rowHeight
-    private static let chromeHeight: CGFloat = 88 // search 12+26+8 + tabs 24+8 + bottom pad 10
+    private static let maxListHeight: CGFloat = 10 * LauncherPanelController.rowHeight
+    private static let chromeHeight: CGFloat = 92 // search 12+30+8 + tabs 28+8 + bottom pad 6
     private static let recentsKey = "launcher.recents"
 
     private let panel: KeyablePanel
@@ -148,7 +148,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         searchField.frame = NSRect(x: side, y: 12, width: Self.panelWidth - side * 2, height: 26)
         searchField.placeholderString = "Search"
         searchField.focusRingType = .none
-        searchField.font = .systemFont(ofSize: 13)
+        searchField.font = .systemFont(ofSize: 16)
         (searchField.cell as? NSSearchFieldCell)?.sendsActionOnEndEditing = false
         searchField.wantsLayer = true
         searchField.delegate = self
@@ -156,7 +156,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
 
         for (button, title) in [(foldersTabButton, "Folders"), (appsTabButton, "Apps")] {
             button.title = title
-            button.font = .systemFont(ofSize: 12, weight: .medium)
+            button.font = .systemFont(ofSize: 13, weight: .medium)
             button.bezelStyle = .recessed
             button.isBordered = false
             button.wantsLayer = true
@@ -197,7 +197,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         scrollView.drawsBackground = false
         root.addSubview(scrollView)
 
-        emptyLabel.font = .systemFont(ofSize: 12)
+        emptyLabel.font = .systemFont(ofSize: 13)
         emptyLabel.alignment = .center
         emptyLabel.isHidden = true
         root.addSubview(emptyLabel)
@@ -849,7 +849,7 @@ final class LauncherHeaderCell: NSView {
 
     func configure(title: String, color: NSColor) {
         label.stringValue = title.uppercased()
-        label.font = .systemFont(ofSize: 10, weight: .semibold)
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
         label.textColor = color
         if !didLayout {
             didLayout = true
@@ -959,7 +959,7 @@ final class FolderChipView: NSView {
             glyphView.frame = NSRect(x: 7, y: 6, width: 14, height: 14)
             addSubview(glyphView)
 
-            nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
+            nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
             nameLabel.lineBreakMode = .byTruncatingTail
             nameLabel.cell?.usesSingleLineMode = true
             addSubview(nameLabel)
@@ -1053,7 +1053,7 @@ final class LauncherRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         guard isSelected else { return }
         fillColor.setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: insetDx, dy: insetDy), xRadius: 7, yRadius: 7).fill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: insetDx, dy: insetDy), xRadius: 10, yRadius: 10).fill()
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -1062,7 +1062,7 @@ final class LauncherRowView: NSTableRowView {
         // hook for unselected rows.
         guard hovering, !isSelected, let fill = hoverFillColor else { return }
         fill.setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: insetDx, dy: insetDy), xRadius: 7, yRadius: 7).fill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: insetDx, dy: insetDy), xRadius: 10, yRadius: 10).fill()
     }
 }
 
@@ -1082,10 +1082,10 @@ final class LauncherAppCell: NSView {
     ) {
         onActivate = handler
         if !didLayout {
-            iconView.frame = NSRect(x: 16, y: 6, width: 20, height: 20)
+            iconView.frame = NSRect(x: 16, y: 8, width: 24, height: 24)
             addSubview(iconView)
-            nameLabel.font = .systemFont(ofSize: 13)
-            nameLabel.frame = NSRect(x: 46, y: 8, width: 440, height: 16)
+            nameLabel.font = .systemFont(ofSize: 15)
+            nameLabel.frame = NSRect(x: 50, y: 11, width: 440, height: 18)
             addSubview(nameLabel)
         }
         iconView.image = item.app.icon
