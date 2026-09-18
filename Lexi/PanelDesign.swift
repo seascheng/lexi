@@ -29,7 +29,6 @@ enum PanelDesign {
 
     static let rowCapsuleInsetX: CGFloat = 6
     static let rowCapsuleInsetY: CGFloat = 2
-    static let rowCapsuleRadius: CGFloat = 7
 
     // MARK: row content geometry
     //

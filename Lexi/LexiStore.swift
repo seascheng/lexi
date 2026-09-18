@@ -1133,9 +1133,4 @@ extension LexiStore {
         }
         return (origin, size)
     }
-
-    static func resetCardFrame() {
-        setSetting("popupCardPosition", "{\"x\":0,\"y\":0}")
-        setSetting("popupCardSize", "{\"width\":420,\"height\":420}")
-    }
 }

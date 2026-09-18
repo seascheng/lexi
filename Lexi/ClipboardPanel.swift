@@ -587,10 +587,6 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             reloadNotes(tag: tag)
         }
         tableView.reloadData()
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            FileLog.write("CLIP render rows=\(self.rows.count) tableFrame=\(NSStringFromRect(self.tableView.frame)) scrollFrame=\(NSStringFromRect(self.scrollView.frame)) visible=\(NSStringFromRect(self.scrollView.contentView.documentVisibleRect)) doc=\(NSStringFromRect(self.scrollView.documentView?.frame ?? .zero))")
-        }
         updateFooter()
         updateEmptyState()
         if let firstSelectable = rows.indices.first(where: {
@@ -625,7 +621,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             return
         }
         let found = store.search(searchField.stringValue, filter: .all)
-        FileLog.write("CLIP reload query='\(searchField.stringValue)' found=\(found.count) resident=\(store.items.count)")
+        // Pinned items pin to the top as a section: pinned rows live in
         // their section header block; recency rows follow unwrapped.
         let pinned = found.prefix { $0.pinnedAt != nil }
         let rest = found.dropFirst(pinned.count)

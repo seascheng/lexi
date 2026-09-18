@@ -590,20 +590,6 @@ struct ConfigsPane: View {
         )
     }
 
-    /// Lucide names map to the nearest SF Symbol for the pane.
-    private func iconName(_ lucide: String) -> String {
-        switch lucide {
-        case "languages", "translate": "character.book.closed"
-        case "wand", "wand-and-sparkles": "wand.and.stars"
-        case "highlighter": "highlighter"
-        case "book-open": "book"
-        case "brain": "brain"
-        case "pencil": "pencil"
-        case "sparkles": "sparkles"
-        default: "sparkles"
-        }
-    }
-
     private func toolIconName(_ id: String) -> String {
         switch id {
         case "copy": "doc.on.doc"

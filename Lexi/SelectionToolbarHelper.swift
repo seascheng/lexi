@@ -94,10 +94,6 @@ struct CardTheme {
     var hairline: NSColor {
         NSColor.black.withAlphaComponent(isDark ? 0.35 : 0.12)
     }
-
-    var dangerFill: NSColor {
-        NSColor(calibratedRed: 0.78, green: 0.22, blue: 0.25, alpha: 1)
-    }
 }
 
 /// Unified design language for every native surface — the ONE place visual
@@ -961,7 +957,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
     var localMouseMoveMonitor: Any?
     var globalMouseMoveMonitor: Any?
     var globalScrollMonitor: Any?
-    var notesPanel: NSPanel!
     lazy var launcherController: LauncherPanelController = {
         let controller = LauncherPanelController()
         controller.onHidden = { [weak self] in
@@ -1500,7 +1495,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
 
     func hideIfClickOutsidePanel(_ event: NSEvent) {
         let screenPoint = NSEvent.mouseLocation
-        FileLog.write("DOWN point=\(screenPoint) win=\(event.window.map { "\($0)" } ?? "nil") cardFrame=\(NSStringFromRect(resultPanel.frame)) tvFrame=\(NSStringFromRect(notesTableView.frame)) tvVisible=\(NSStringFromRect(notesTableView.visibleRect))")
 
         // Result card: pinned cards stay until unpinned (pin button again).
         // Unpinned: hide; the runs stay in memory for the tabs bar.
@@ -1604,14 +1598,6 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         default:
             FileLog.write("ACTION dropped \(action) (no local handler)")
         }
-    }
-
-    func splitTagPayload(_ text: String) -> (Int64, String)? {
-        let parts = text.components(separatedBy: "|")
-        guard parts.count == 2, let id = Int64(parts[0].trimmingCharacters(in: .whitespaces)) else {
-            return nil
-        }
-        return (id, parts[1])
     }
 
     /// Save button on the card: persist the run's translation JSON with the

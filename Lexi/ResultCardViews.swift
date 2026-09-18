@@ -201,27 +201,19 @@ final class NoteRowCell: NSTableCellView, NSTextFieldDelegate {
     var themeColors: CardTheme = .dark {
         didSet { applyThemeColors() }
     }
-    private var inverted = false
-
-    func setInverted(_ value: Bool) {
-        guard value != inverted else { return }
-        inverted = value
-        applyThemeColors()
-    }
 
     func applyThemeColors() {
         titleEditor.textColor = themeColors.foreground
         titleEditor.layer?.backgroundColor = themeColors.inputFill.cgColor
         titleEditor.layer?.borderColor = themeColors.hairline.cgColor
-        titleLabel.textColor = inverted ? themeColors.background : themeColors.foreground
-        contentLabel.textColor = inverted ? themeColors.background.withAlphaComponent(0.8) : themeColors.secondaryText
-        deleteButton?.contentTintColor = inverted ? themeColors.background : themeColors.tertiaryText
+        titleLabel.textColor = themeColors.foreground
+        contentLabel.textColor = themeColors.secondaryText
+        deleteButton?.contentTintColor = themeColors.tertiaryText
         refreshTagColors()
         if let tagButton {
-            tagButton.contentTintColor = inverted ? themeColors.background : themeColors.secondaryText
-            tagButton.layer?.backgroundColor = inverted
-                ? NSColor.black.withAlphaComponent(0.18).cgColor
-                : NSColor.labelColor.withAlphaComponent(themeColors.isDark ? 0.10 : 0.06).cgColor
+            tagButton.contentTintColor = themeColors.secondaryText
+            tagButton.layer?.backgroundColor = NSColor.labelColor
+                .withAlphaComponent(themeColors.isDark ? 0.10 : 0.06).cgColor
         }
 
         // Rename editor: always its own surface (inputFill + foreground) —
@@ -584,7 +576,6 @@ final class TagDropdownView: NSView {
             xRadius: 8,
             yRadius: 8
         ).stroke()
-        FileLog.write("TAGDROP drew bg=\(theme.background) bounds=\(bounds)")
     }
 
     required init?(coder: NSCoder) {
@@ -780,48 +771,6 @@ struct CardReviewPayload: Decodable {
         let entryType: String?
     }
     let word: ReviewWord?
-}
-
-/// Whole-row click target (notes rows: click = select + inject). Hover gives
-/// unselected rows a whisper of background so the target is discoverable.
-final class ClickableRow: NSView {
-    var onClicked: (() -> Void)?
-    var onHover: ((Bool) -> Void)?
-    private var hoverArea: NSTrackingArea?
-
-    override var isFlipped: Bool { true }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverArea { removeTrackingArea(hoverArea) }
-        hoverArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        if let hoverArea { addTrackingArea(hoverArea) }
-    }
-
-    override func mouseEntered(with event: NSEvent) { onHover?(true) }
-    override func mouseExited(with event: NSEvent) { onHover?(false) }
-
-    override func mouseDown(with event: NSEvent) {
-        onClicked?()
-    }
-}
-
-/// Top-down document view for the notes list (row 0 = the top edge).
-final class FlippedNotesDoc: NSView {
-    override var isFlipped: Bool { true }
-}
-
-/// NSTextField that reports clicks (notes rows: click = copy).
-final class ClickableTextField: NSTextField {
-    var onClicked: (() -> Void)?
-    override func mouseDown(with event: NSEvent) {
-        onClicked?()
-    }
-}
-
-/// One AI run shown in the card (WebView WorkspaceRun parity).
-struct CardNotesSelectPayload: Codable {
-    let index: Int
 }
 
 final class CardRun {

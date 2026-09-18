@@ -677,21 +677,13 @@ extension SelectionToolbarApp {
         }
         rebuildNoteTagBar()
         applyNoteFilters()
-        FileLog.write("NOTES loaded count=\(cardNotesItems.count) categories=\(cardCategories.count) selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden)")
         layoutResultCard()
-        FileLog.write("NOTES post-layout selected=\(notesTableView.selectedRow) clipHidden=\(cardNotesClip.isHidden) panel=\(activePanel)")
     }
 
     /// Mouse click on a row: select it (selectionDidChange copies the
     /// content) and arm the card for Enter. Injection happens on Enter only.
     @objc private func notesTableClicked(_ sender: NSTableView) {
         setInputFocused(false)
-    }
-
-    @objc private func noteInsertClicked(_ sender: NSButton) {
-        guard let content = sender.identifier?.rawValue, !content.isEmpty else { return }
-        ClipboardPaster.pasteString(content, previousApp: sourceApp)
-        resultPanel.orderOut(nil)
     }
     // picker is an in-card dropdown layer instead: same material, opens at
     // the pill, click-outside/Esc closes, picking posts note-tag.
@@ -760,11 +752,6 @@ extension SelectionToolbarApp {
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let body = String(data: data, encoding: .utf8) else { return }
         handleAction(action: "note-rename", text: body)
-    }
-
-    @objc private func noteDeleteClicked(_ sender: NSButton) {
-        guard let id = sender.identifier?.rawValue else { return }
-        handleAction(action: "note-delete", text: id)
     }
 
     func handleCardReview(_ payload: CardReviewPayload) {
