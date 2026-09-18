@@ -139,6 +139,9 @@ struct ToolbarConfigPane: View {
                 List {
                     ForEach(model.entries) { entry in
                         HStack(spacing: 10) {
+                            Image(systemName: "line.3.horizontal")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
                             Image(nsImage: lucideImage(
                                 for: entry.icon, title: entry.name,
                                 color: .controlAccentColor) ?? NSImage())
@@ -159,7 +162,7 @@ struct ToolbarConfigPane: View {
                 }
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
-                .frame(minHeight: 300)
+                .frame(height: CGFloat(model.entries.count) * 38 + 12)
             } header: {
                 Text("Toolbar buttons")
             } footer: {
@@ -206,17 +209,23 @@ struct ToolbarConfigPane: View {
 @Observable
 final class CardConfigModel {
     var features: [LexiFeatureRow] = []
-    var origin: CGPoint?
-    var size: CGSize?
     /// Wired by the pane — mutations must rebuild the live card's action
     /// bar (refreshCardActions), not just the database.
     var effects: LexiSettingsEffects?
 
     func reload() {
-        features = LexiStore.features().sorted { $0.sortOrder < $1.sortOrder }
-        let frame = LexiStore.cardFrame()
-        origin = frame.origin
-        size = frame.size
+        // Same source as the live card bar: the shared toolbarOrder list,
+        // filtered to features.
+        let all = LexiStore.features()
+        var byId: [String: LexiFeatureRow] = [:]
+        for row in all { byId[row.id] = row }
+        var ordered: [LexiFeatureRow] = []
+        for id in LexiStore.toolbarOrder() {
+            if let row = byId.removeValue(forKey: id) {
+                ordered.append(row)
+            }
+        }
+        features = ordered + byId.values.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     func toggle(_ row: LexiFeatureRow) {
@@ -229,18 +238,19 @@ final class CardConfigModel {
 
     func move(from source: IndexSet, to destination: Int) {
         features.move(fromOffsets: source, toOffset: destination)
-        for index in features.indices {
-            features[index].sortOrder = (index + 1) * 10
+        // Splice the new feature order back into the shared toolbarOrder at
+        // the first feature position — tools keep their slots, the card
+        // bar and this pane stay in lockstep.
+        var full = LexiStore.toolbarOrder()
+        let featureIds = features.map(\.id)
+        let anchor = full.firstIndex(where: { featureIds.contains($0) }) ?? full.count
+        full.removeAll { featureIds.contains($0) }
+        full.insert(contentsOf: featureIds, at: min(anchor, full.count))
+        for id in featureIds where !full.contains(id) {
+            full.append(id)
         }
-        for row in features {
-            LexiStore.saveFeature(row)
-        }
+        LexiStore.saveToolbarOrder(full)
         effects?.nativeSettingsChanged()
-    }
-
-    func resetFrame() {
-        LexiStore.resetCardFrame()
-        reload()
     }
 }
 
@@ -251,49 +261,40 @@ struct CardConfigPane: View {
     var body: some View {
         Form {
             Section {
-                ForEach(model.features) { feature in
-                    HStack(spacing: 10) {
-                        Image(nsImage: lucideImage(
-                            for: feature.icon, title: feature.name,
-                            color: .controlAccentColor) ?? NSImage())
-                            .frame(width: 20)
-                        Text(feature.name)
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { feature.enabled },
-                            set: { _ in model.toggle(feature) }
-                        ))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
+                // Nested real List: Form sections don't support .onMove
+                // drag reordering on macOS. Same pattern as the Toolbar
+                // pane's button list.
+                List {
+                    ForEach(model.features) { feature in
+                        HStack(spacing: 10) {
+                            Image(systemName: "line.3.horizontal")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                            Image(nsImage: lucideImage(
+                                for: feature.icon, title: feature.name,
+                                color: .controlAccentColor) ?? NSImage())
+                                .frame(width: 20)
+                            Text(feature.name)
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { feature.enabled },
+                                set: { _ in model.toggle(feature) }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                        }
+                        .padding(.vertical, 5)
                     }
+                    .onMove { from, to in model.move(from: from, to: to) }
                 }
-                .onMove { from, to in model.move(from: from, to: to) }
+                .listStyle(.inset)
+                .scrollContentBackground(.hidden)
+                .frame(height: CGFloat(model.features.count) * 38 + 12)
             } header: {
                 Text("Action buttons")
             } footer: {
                 Text("The AI-feature button group after the card's input field. Toggle to show or hide, drag to reorder — applies on the next card show.")
-            }
-
-            Section {
-                if let size = model.size {
-                    LabeledContent("Size") {
-                        Text("\(Int(size.width)) × \(Int(size.height)) pt")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                if let origin = model.origin {
-                    LabeledContent("Origin") {
-                        Text("\(Int(origin.x)), \(Int(origin.y))")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Button("Reset to default frame") { model.resetFrame() }
-            } header: {
-                Text("Window frame")
-            } footer: {
-                Text("Drag-resize the card anytime; this forgets the remembered frame.")
             }
         }
         .formStyle(.grouped)
