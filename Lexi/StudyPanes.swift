@@ -89,27 +89,19 @@ struct VocabularyPane: View {
     // MARK: - Collapsed row + expanded detail (React parity)
 
     private func wordRow(_ word: LexiWord) -> some View {
-        DisclosureGroup(
-            isExpanded: Binding(
-                get: { model.expandedId == word.id },
-                set: { expanded in
-                    if expanded {
-                        model.expandedId = word.id
-                    } else if model.expandedId == word.id {
-                        model.expandedId = nil
-                    }
-                }
-            )
-        ) {
-            expandedDetail(word)
-        } label: {
-            HStack(spacing: 8) {
-                // Button, not a tap gesture: the inline markdown is an
-                // NSTextView that swallows gesture clicks.
+        // Manual disclosure row: DisclosureGroup's system chevron sits
+        // high against custom label heights — everything here shares one
+        // centered HStack instead.
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
                 Button {
-                    model.expandedId = model.expandedId == word.id ? nil : word.id
+                    model.toggleExpand(word)
                 } label: {
                     HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(model.expandedId == word.id ? 90 : 0))
                         Text(word.word)
                             .lineLimit(1)
                         if !word.translation.isEmpty {
@@ -137,6 +129,10 @@ struct VocabularyPane: View {
             }
             .frame(height: 24, alignment: .center)
             .padding(.vertical, 4)
+
+            if model.expandedId == word.id {
+                expandedDetail(word)
+            }
         }
     }
 
