@@ -125,16 +125,9 @@ final class SelectionPipeline {
 
     private func handleMouseUp(up upLocation: CGPoint) {
         guard enabled else { return }
-        // Drag detection: a moved mouse is a drag/scroll gesture, not a
-        // selection click. (Layer-1 rule: click selections only; Rust's
-        // richer drag logic migrates in Layer 2.)
-        if let down = downLocation {
-            let dx = upLocation.x - down.x, dy = upLocation.y - down.y
-            if dx * dx + dy * dy >= 64 {
-                FileLog.write("SEL1 skip: drag dx=\(Int(dx)) dy=\(Int(dy))")
-                return
-            }
-        }
+        // Drag selections and click selections both land here: the AX read
+        // below decides — no selection (window drag, scroll gesture, plain
+        // click) simply skips via the empty-text guard.
 
         // Cocoa coords (bottom-left origin) for panel placement.
         let maxY = NSScreen.screens.map(\.frame.maxY).max() ?? upLocation.y

@@ -296,17 +296,6 @@ struct CardConfigPane: View {
             } footer: {
                 Text("Drag-resize the card anytime; this forgets the remembered frame.")
             }
-
-            Section {
-                LabeledContent("Default note category") {
-                    Text("Tmp")
-                        .foregroundStyle(.secondary)
-                }
-            } header: {
-                Text("Notes")
-            } footer: {
-                Text("Notes created from the toolbar's Note action land under this category in the Clipboard panel.")
-            }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
@@ -349,7 +338,7 @@ struct ClipboardConfigPane: View {
             Section {
                 Picker("Show clipboard", selection: Binding(
                     get: { model.shortcut },
-                    set: { model.setShortcut($0) }
+                    set: { settings.setClipboardShortcut($0) }
                 )) {
                     ForEach(clipboardShortcuts, id: \.0) { value, label in
                         Text(label).tag(value)
@@ -414,7 +403,7 @@ struct LauncherConfigPane: View {
             Section {
                 Picker("Show launcher", selection: Binding(
                     get: { model.shortcut },
-                    set: { model.setShortcut($0) }
+                    set: { settings.setLauncherShortcut($0) }
                 )) {
                     ForEach(launcherShortcuts, id: \.0) { value, label in
                         Text(label).tag(value)
