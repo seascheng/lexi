@@ -87,7 +87,7 @@ enum SettingsTab: CaseIterable, Identifiable {
         case .notebook: "Notebook"
         case .configs: "Configs"
         case .toolbar: "Toolbar"
-        case .card: "Card & Notes"
+        case .card: "Actions"
         case .clipboard: "Clipboard"
         case .launcher: "Launcher"
         }
@@ -370,6 +370,12 @@ final class LexiSettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     // MARK: - Private
+
+    /// Match the window's material to the app theme so the Appearance
+    /// controls visibly affect the window they live in.
+    func applyWindowAppearance(dark: Bool) {
+        window?.appearance = NSAppearance(named: dark ? .vibrantDark : .vibrantLight)
+    }
 
     private func makeWindow(navigation: SettingsNavigationState) -> NSWindow {
         let window = NSWindow(

@@ -447,17 +447,15 @@ struct ConfigsPane: View {
                 }
                 .frame(minHeight: 220)
                 .listStyle(.inset)
-            } header: {
-                Text("AI features")
-            } footer: {
-                Text("\(model.rows.filter(\.enabled).count) of \(model.rows.count) enabled")
-            }
-            Section {
                 Button {
                     editing = newFeature()
                 } label: {
                     Label("Add Feature", systemImage: "plus")
                 }
+            } header: {
+                Text("AI features")
+            } footer: {
+                Text("\(model.rows.filter(\.enabled).count) of \(model.rows.count) enabled")
             }
         }
         .formStyle(.grouped)
@@ -473,21 +471,28 @@ struct ConfigsPane: View {
         }
     }
 
-    /// One tool row + its config fields (search/read/handoff have editable
-    /// values; copy/note have none). Fields write straight to the blob.
+    /// One row per tool: tool name left, its config control right. Tools
+    /// without configuration (copy/note) are a single row — no "No options"
+    /// filler.
     @ViewBuilder
     private func toolConfigRows(_ tool: (id: String, name: String, icon: String, config: [String: String])) -> some View {
-        Label(tool.name, systemImage: toolIconName(tool.id))
         switch tool.id {
         case "search":
-            Picker("Engine", selection: Binding(
-                get: { tool.config["engine"] ?? "google" },
-                set: { model.setToolField(tool.id, field: "engine", value: $0) }
-            )) {
-                Text("Google").tag("google")
-                Text("Bing").tag("bing")
-                Text("DuckDuckGo").tag("duckduckgo")
-                Text("Custom").tag("custom")
+            LabeledContent {
+                Picker("Engine", selection: Binding(
+                    get: { tool.config["engine"] ?? "google" },
+                    set: { model.setToolField(tool.id, field: "engine", value: $0) }
+                )) {
+                    Text("Google").tag("google")
+                    Text("Bing").tag("bing")
+                    Text("DuckDuckGo").tag("duckduckgo")
+                    Text("Custom").tag("custom")
+                }
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .labelsHidden()
+            } label: {
+                Label(tool.name, systemImage: toolIconName(tool.id))
             }
             if tool.config["engine"] == "custom" {
                 LabeledContent("URL template") {
@@ -499,26 +504,40 @@ struct ConfigsPane: View {
                 }
             }
         case "read":
-            LabeledContent("TTS engine") {
-                Text(tool.config["engine"] == "volcengine" ? "Volcengine TTS" : "System (say)")
-                    .foregroundStyle(.secondary)
+            LabeledContent {
+                Picker("TTS engine", selection: Binding(
+                    get: { tool.config["engine"] ?? "system" },
+                    set: { model.setToolField(tool.id, field: "engine", value: $0) }
+                )) {
+                    Text("System (say)").tag("system")
+                    Text("Volcengine TTS").tag("volcengine")
+                }
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .labelsHidden()
+            } label: {
+                Label(tool.name, systemImage: toolIconName(tool.id))
             }
-            LabeledContent("Speech keys") {
-                Text("AI page → Speech section")
-                    .foregroundStyle(.secondary)
+            if tool.config["engine"] == "volcengine" {
+                LabeledContent("Speech keys") {
+                    Text("AI page → Speech section")
+                        .foregroundStyle(.secondary)
+                }
             }
         case "handoff":
-            LabeledContent("Target app") {
+            LabeledContent {
                 TextField("", text: Binding(
                     get: { tool.config["targetApp"] ?? "ChatGPT" },
                     set: { model.setToolField(tool.id, field: "targetApp", value: $0) }
                 ), prompt: Text("ChatGPT"))
                 .labelsHidden()
+                .frame(maxWidth: 220)
+                .multilineTextAlignment(.trailing)
+            } label: {
+                Label(tool.name, systemImage: toolIconName(tool.id))
             }
         default:
-            LabeledContent("No options") {
-                EmptyView()
-            }
+            Label(tool.name, systemImage: toolIconName(tool.id))
         }
     }
 
@@ -577,6 +596,7 @@ struct ConfigsPane: View {
         switch lucide {
         case "languages", "translate": "character.book.closed"
         case "wand", "wand-and-sparkles": "wand.and.stars"
+        case "highlighter": "highlighter"
         case "book-open": "book"
         case "brain": "brain"
         case "pencil": "pencil"
@@ -599,6 +619,18 @@ struct ConfigsPane: View {
 
 // MARK: - Feature editor sheet
 
+/// Icons a feature can wear: the lucide name stored in the DB, the SF
+/// Symbol it renders as, and a human label for the picker.
+private let featureIcons: [(lucide: String, symbol: String, name: String)] = [
+    ("languages", "character.book.closed", "Translate"),
+    ("wand", "wand.and.stars", "Wand"),
+    ("highlighter", "highlighter", "Highlight"),
+    ("brain", "brain", "Think"),
+    ("pencil", "pencil", "Rewrite"),
+    ("book-open", "book", "Read"),
+    ("sparkles", "sparkles", "Sparkles"),
+]
+
 struct FeatureEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: LexiFeatureRow
@@ -616,7 +648,11 @@ struct FeatureEditor: View {
             Form {
                 Section("Feature") {
                     TextField("Name", text: $draft.name)
-                    TextField("Icon (Lucide name)", text: $draft.icon)
+                    Picker("Icon", selection: $draft.icon) {
+                        ForEach(featureIcons, id: \.lucide) { icon in
+                            Label(icon.name, systemImage: icon.symbol).tag(icon.lucide)
+                        }
+                    }
                 }
                 Section("Prompt") {
                     TextEditor(text: $draft.promptTemplate)

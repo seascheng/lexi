@@ -1205,28 +1205,21 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
     }
 
-    /// The toolbar buttons, the card's tab row, and the input action buttons
-    /// all read one config snapshot, refreshed at launch and on every
-    /// settings change. Toolbar buttons use the toolbar scope
-    /// (toolbarEnabled/toolbarOrder); the card uses the panel scope.
+    /// The card's input-area button group: AI features only (the copy/
+    /// search/read/note/handoff tools are toolbar-only). Also rebuilds the
+    /// toolbar buttons and card tabs from one config snapshot, refreshed at
+    /// launch and on every settings change.
     func refreshCardActions() {
         struct Entry {
             var order: Int
             var item: CardActionsPayload.Item
         }
         var entries: [Entry] = []
-
-        for tool in LexiStore.toolbarTools() where tool.panelEnabled && !tool.id.isEmpty {
-            entries.append(Entry(order: tool.panelSortOrder, item: .init(
-                id: tool.id, name: tool.displayName,
-                icon: tool.icon.isEmpty ? "wand" : tool.icon, kind: "tool")))
-        }
         for feature in LexiStore.features() where feature.enabled && !feature.id.isEmpty {
             entries.append(Entry(order: feature.sortOrder, item: .init(
                 id: feature.id, name: feature.name.isEmpty ? "AI" : feature.name,
                 icon: feature.icon.isEmpty ? "wand" : feature.icon, kind: "feature")))
         }
-        entries.sort { $0.order < $1.order }
 
         // Toolbar scope: same registry, toolbar columns.
         var toolbar: [(order: Int, action: ToolbarAction)] = []
@@ -1456,9 +1449,13 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                         opacity: opacity.map { CGFloat($0) / 100.0 },
                         blur: blur.flatMap(PanelStyle.Blur.init(rawValue:))
                     )
-                    if let theme {
-                        self?.applyTheme(theme)
-                    }
+                    // Opacity/blur changes must repaint the live scrims too —
+                    // PanelStyle.update only retunes materials. Reapplying the
+                    // current theme re-derives every scrim from the new values.
+                    self?.applyTheme(theme ?? (self?.theme ?? .dark).rawValue)
+                    // The settings window itself follows the app theme so the
+                    // Appearance controls have a visible effect in place.
+                    controller.applyWindowAppearance(dark: (self?.theme ?? .dark) == .dark)
                 }
                 controller.onNativeSettingsReload = { [weak self] in
                     self?.shortcutMonitor?.reload()
@@ -1466,6 +1463,9 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
                     self?.refreshCardActions()
                 }
                 controller.show(tab: tab)
+                // Match the window chrome to the persisted theme immediately —
+                // onPanelStyleChange only fires on the next change.
+                controller.applyWindowAppearance(dark: self.theme == .dark)
             }
         }
     }

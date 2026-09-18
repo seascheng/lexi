@@ -106,46 +106,75 @@ struct VocabularyPane: View {
             expandedDetail(word)
         } label: {
             HStack(spacing: 6) {
-                Text(word.word)
-                    .lineLimit(1)
-                if !word.translation.isEmpty {
-                    MarkdownText(content: word.translation, compact: true, inline: true)
+                // Button, not a tap gesture: the inline markdown is an
+                // NSTextView that swallows gesture clicks.
+                Button {
+                    model.expandedId = model.expandedId == word.id ? nil : word.id
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(word.word)
+                            .lineLimit(1)
+                        if !word.translation.isEmpty {
+                            MarkdownText(content: word.translation, compact: true, inline: true)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+
+                Button(role: .destructive) {
+                    model.delete(word)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .help("Delete entry")
             }
             .badge(Text(word.status.capitalized))
+            .padding(.vertical, 6)
         }
     }
 
+    /// Review-pane-style markdown block, then the meta line and the status
+    /// picker on their own rows so nothing overlaps.
     private func expandedDetail(_ word: LexiWord) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !word.note.isEmpty {
-                MarkdownText(content: word.note, compact: true)
-            } else {
-                if !word.pos.isEmpty {
-                    Text(word.pos)
-                        .font(.caption)
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                if !word.note.isEmpty {
+                    MarkdownText(content: word.note, compact: false)
+                } else {
+                    if !word.pos.isEmpty {
+                        Text(word.pos)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textCase(.uppercase)
+                    }
+                    if !word.translation.isEmpty {
+                        MarkdownText(content: word.translation, compact: false)
+                    }
+                    if !word.definition.isEmpty {
+                        MarkdownText(content: word.definition, compact: false)
+                    }
+                }
+                if !word.example.isEmpty {
+                    Text("“\(word.example)”")
+                        .font(.callout)
                         .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                }
-                if !word.translation.isEmpty {
-                    MarkdownText(content: word.translation, compact: true)
-                }
-                if !word.definition.isEmpty {
-                    MarkdownText(content: word.definition, compact: true)
-                        .opacity(0.8)
                 }
             }
-            if !word.example.isEmpty {
-                Text("“\(word.example)”")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+
+            Text([word.reviewCount > 0 ? "Reviews \(word.reviewCount)" : nil,
+                  word.nextReview.map { "Next \($0)" },
+                  word.createdAt.isEmpty ? nil : "Added \(word.createdAt)"]
+                .compactMap { $0 }
+                .joined(separator: " · "))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
             HStack {
-                Text("Reviews \(word.reviewCount)")
-                if let next = word.nextReview { Text("Next \(next)") }
-                if !word.createdAt.isEmpty { Text("Added \(word.createdAt)") }
-                Spacer()
-                Picker("", selection: Binding(
+                Picker("Status", selection: Binding(
                     get: { word.status },
                     set: { model.setStatus(word, to: $0) }
                 )) {
@@ -156,18 +185,11 @@ struct VocabularyPane: View {
                 .pickerStyle(.segmented)
                 .controlSize(.small)
                 .labelsHidden()
-                .frame(width: 180)
-                Button(role: .destructive) {
-                    model.delete(word)
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .controlSize(.small)
+                .frame(width: 220)
+                Spacer()
             }
-            .font(.footnote)
-            .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 
     // MARK: - Filter bar + pagination
@@ -286,7 +308,8 @@ struct ReviewPane: View {
                         }
                         .pickerStyle(.segmented)
                         .controlSize(.small)
-                        .frame(width: 180)
+                        .labelsHidden()
+                        .frame(width: 200)
                     }
                     .frame(maxWidth: 520)
 

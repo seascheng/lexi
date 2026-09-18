@@ -104,7 +104,7 @@ struct ToolbarConfigPane: View {
             } header: {
                 Text("Toolbar buttons")
             } footer: {
-                Text("Shared registry: this scope is the bar over selections; the card's Actions tab has its own copy in the Card pane. Drag to reorder — applies on the next selection.")
+                Text("Drag to reorder — applies on the next selection. The card's button group is configured in the Actions pane.")
             }
 
             Section {
@@ -149,35 +149,37 @@ struct ToolbarConfigPane: View {
     }
 }
 
-// MARK: - Card & Notes
+// MARK: - Actions (result card)
 
 @MainActor
 @Observable
 final class CardConfigModel {
-    var tools: [LexiToolEntry] = []
+    var features: [LexiFeatureRow] = []
     var origin: CGPoint?
     var size: CGSize?
 
     func reload() {
-        tools = LexiStore.toolbarTools().sorted { $0.panelSortOrder < $1.panelSortOrder }
+        features = LexiStore.features().sorted { $0.sortOrder < $1.sortOrder }
         let frame = LexiStore.cardFrame()
         origin = frame.origin
         size = frame.size
     }
 
-    func togglePanel(_ entry: LexiToolEntry) {
-        if let index = tools.firstIndex(where: { $0.id == entry.id }) {
-            tools[index].panelEnabled.toggle()
-            LexiStore.saveToolbarTools(tools)
-        }
+    func toggle(_ row: LexiFeatureRow) {
+        var updated = row
+        updated.enabled.toggle()
+        LexiStore.saveFeature(updated)
+        reload()
     }
 
     func move(from source: IndexSet, to destination: Int) {
-        tools.move(fromOffsets: source, toOffset: destination)
-        for index in tools.indices {
-            tools[index].panelSortOrder = (index + 1) * 10
+        features.move(fromOffsets: source, toOffset: destination)
+        for index in features.indices {
+            features[index].sortOrder = (index + 1) * 10
         }
-        LexiStore.saveToolbarTools(tools)
+        for row in features {
+            LexiStore.saveFeature(row)
+        }
     }
 
     func resetFrame() {
@@ -192,16 +194,16 @@ struct CardConfigPane: View {
     var body: some View {
         Form {
             Section {
-                ForEach(model.tools) { tool in
+                ForEach(model.features) { feature in
                     HStack(spacing: 10) {
-                        Image(systemName: "square.grid.2x2")
+                        Image(systemName: featureIconName(feature.icon))
                             .foregroundStyle(.tint)
                             .frame(width: 20)
-                        Text(tool.displayName)
+                        Text(feature.name)
                         Spacer()
                         Toggle("", isOn: Binding(
-                            get: { tool.panelEnabled },
-                            set: { _ in model.togglePanel(tool) }
+                            get: { feature.enabled },
+                            set: { _ in model.toggle(feature) }
                         ))
                         .labelsHidden()
                         .toggleStyle(.switch)
@@ -209,9 +211,9 @@ struct CardConfigPane: View {
                 }
                 .onMove { from, to in model.move(from: from, to: to) }
             } header: {
-                Text("Actions tab buttons")
+                Text("Action buttons")
             } footer: {
-                Text("The card's input-bar action row — its own scope of the shared registry. Drag to reorder.")
+                Text("The AI-feature button group after the card's input field. Toggle to show or hide, drag to reorder — applies on the next card show.")
             }
 
             Section {
@@ -237,20 +239,33 @@ struct CardConfigPane: View {
             }
 
             Section {
-                LabeledContent("Default note tag") {
+                LabeledContent("Default note category") {
                     Text("Tmp")
                         .foregroundStyle(.secondary)
                 }
             } header: {
                 Text("Notes")
             } footer: {
-                Text("Notes created from the toolbar's Note action land under this tag in the Clipboard panel.")
+                Text("Notes created from the toolbar's Note action land under this category in the Clipboard panel.")
             }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .contentMargins(.top, 8, for: .scrollContent)
         .onAppear { model.reload() }
+    }
+
+    private func featureIconName(_ lucide: String) -> String {
+        switch lucide {
+        case "languages", "translate": "character.book.closed"
+        case "wand", "wand-and-sparkles": "wand.and.stars"
+        case "highlighter": "highlighter"
+        case "book-open": "book"
+        case "brain": "brain"
+        case "pencil": "pencil"
+        case "sparkles": "sparkles"
+        default: "sparkles"
+        }
     }
 }
 
