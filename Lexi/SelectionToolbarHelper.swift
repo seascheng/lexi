@@ -1320,14 +1320,23 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
             self?.hidePanel(force: true)
         }
 
-        // Escape closes the bar or the result card. Global key monitoring
-        // needs the helper's own Accessibility grant; without it this
-        // silently never fires and the other dismissal paths still work.
+        // Any keystroke dismisses the bar — typing means the user moved on
+        // (openclip's actions-mode rule). Escape additionally closes the
+        // result card. Global key monitoring needs the helper's own
+        // Accessibility grant; without it this silently never fires and the
+        // other dismissal paths still work.
         globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            self?.hidePanel(force: true)
             if event.keyCode == 53 { // kVK_Escape
-                self?.hidePanel(force: true)
                 self?.escapeResultCardIfNeeded()
             }
+// A space switch leaves the bar floating over the wrong desktop.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.hidePanel(force: true)
+        }
         }
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             if event.keyCode == 53, let self { // kVK_Escape
@@ -1500,6 +1509,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate, NSWindowDelega
         }
 
         log("hide outside click x=\(Int(screenPoint.x)) y=\(Int(screenPoint.y))")
+        hidePanel(force: true)
     }
     @objc func runToolbarAction(_ sender: NSButton) {
         guard let action = sender.identifier?.rawValue, !selectedText.isEmpty else {
