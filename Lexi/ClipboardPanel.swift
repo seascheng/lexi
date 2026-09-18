@@ -1385,6 +1385,11 @@ final class ClipCell: NSView {
     private var renameCommit: ((String) -> Void)?
     private var isRenaming = false
     private var installed = false
+    /// Rendered text height (cellSize), capped at two lines — the one true
+    /// input for the row's self-sized height. Auto Layout's intrinsic size
+    /// under-reports multi-line CJK/emoji text (fallback-font line height)
+    /// and the second line silently clips.
+    private var textHeight: NSLayoutConstraint!
 
     func beginRenaming(current: String, onCommit: @escaping (String) -> Void) {
         renameCommit = onCommit
@@ -1428,6 +1433,8 @@ final class ClipCell: NSView {
             previewLabel.font = .systemFont(ofSize: 15)
             previewLabel.textColor = theme.foreground
             previewLabel.stringValue = item.previewText ?? ""
+            previewLabel.cell?.wraps = true
+            textHeight.constant = measuredTextHeight(item.previewText ?? "", wraps: true)
         case .file:
             let url = URL(fileURLWithPath: item.text ?? "")
             showTwoDeck(
@@ -1451,6 +1458,25 @@ final class ClipCell: NSView {
         iconView.image = sourceIcon
     }
 
+    /// Rendered height of `text`, capped at two lines. cellSize runs the
+    /// same layout engine that draws the text, so the number matches what
+    /// renders (unlike intrinsicContentSize, which under-reports CJK/emoji
+    /// fallback line heights and silently clips the second line).
+    private func measuredTextHeight(_ text: String, wraps: Bool) -> CGFloat {
+        let textWidth = ClipboardPanelController.panelWidth
+            - PanelDesign.rowContentLeading - PanelDesign.rowIconSize
+            - PanelDesign.rowIconToText - PanelDesign.rowContentTrailing
+        let oldWraps = previewLabel.cell?.wraps ?? false
+        previewLabel.cell?.wraps = wraps
+        let size = previewLabel.cell!.cellSize(forBounds: NSRect(
+            x: 0, y: 0, width: textWidth, height: 10_000))
+        previewLabel.cell?.wraps = oldWraps
+        // Single-line height from the same engine — real fallback-font metrics.
+        let single = previewLabel.cell!.cellSize(forBounds: NSRect(
+            x: 0, y: 0, width: 10_000, height: 10_000)).height
+        return min(size.height, single * 2 + 2)
+    }
+
     private func showTwoDeck(name: String, nameColor: NSColor,
                              detail: String, detailColor: NSColor,
                              truncatesPath: Bool) {
@@ -1471,7 +1497,7 @@ final class ClipCell: NSView {
             pathLabel.cell?.usesSingleLineMode = true
         } else {
             // Note content: same two-line rule as clipboard text rows.
-            pathLabel.lineBreakMode = .byTruncatingTail
+            pathLabel.lineBreakMode = .byWordWrapping
             pathLabel.cell?.wraps = true
             pathLabel.maximumNumberOfLines = 2
             pathLabel.preferredMaxLayoutWidth = ClipboardPanelController.panelWidth
@@ -1499,6 +1525,8 @@ final class ClipCell: NSView {
             previewLabel.font = .systemFont(ofSize: 15)
             previewLabel.textColor = theme.foreground
             previewLabel.stringValue = text ?? ""
+            previewLabel.cell?.wraps = true
+            textHeight.constant = measuredTextHeight(text ?? "", wraps: true)
         } else {
             showTwoDeck(
                 name: note.name, nameColor: theme.foreground,
@@ -1536,10 +1564,13 @@ final class ClipCell: NSView {
         // mode (.byTruncatingTail) resets cell.wraps to false — ONE line only.
         // Word wrap + maximumNumberOfLines(2) gives the two-line preview with
         // an automatic trailing … from TextKit.
-        previewLabel.lineBreakMode = .byTruncatingTail
+        // ORDER MATTERS (verified): a truncating lineBreakMode (.byTruncatingTail)
+        // resets cell.wraps to false — the label collapses to ONE line and
+        // self-sizing rows all come out single-line height. Word wrap keeps
+        // the two-line preview; TextKit appends the trailing … itself.
+        previewLabel.lineBreakMode = .byWordWrapping
         previewLabel.cell?.wraps = true
         previewLabel.maximumNumberOfLines = 2
-        // .byTruncatingTail + wraps: TextKit ends an overflowing line 2 with …
         // Self-sizing rows measure the cell before its width is known; a
         // wrapping label then reports ONE-line height and the row clips the
         // second line. State the wrap width explicitly.
@@ -1564,15 +1595,14 @@ final class ClipCell: NSView {
         }
         previewLabel.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 8).isActive = true
         previewLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -8).isActive = true
+        textHeight = previewLabel.heightAnchor.constraint(equalToConstant: 19)
+        textHeight.isActive = true
         // The table pads self-sized rows (~14pt total), so the cell is
         // taller than the label — anchor the label to center or it rides
         // the top pin while the icon centers (7pt skew on single lines).
         previewLabel.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
-        // Two-deck rows (named notes, file clips): the name and path labels
-        // are pinned, linked and height-fixed. Left to intrinsic sizes they
-        // total ~53pt in a 50pt row — the overflow is invisible under the
-        // next row's fill, but the LAST row scissor-clips at the scroll view
-        // edge ("bottom of the last cell cut off").
+        // Two-deck rows (named notes, file clips): name over dim detail;
+        // the stack's pins drive the row height together with textHeight.
         nameLabel.setContentCompressionResistancePriority(.required, for: .vertical)
     }
 }
