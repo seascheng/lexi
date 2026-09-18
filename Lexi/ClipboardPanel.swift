@@ -1393,7 +1393,6 @@ final class ClipCell: NSView {
     /// under-reports multi-line CJK/emoji text (fallback-font line height)
     /// and the second line silently clips.
     private var textHeight: NSLayoutConstraint!
-    private var thumbSide: NSLayoutConstraint!
 
     func beginRenaming(current: String, onCommit: @escaping (String) -> Void) {
         renameCommit = onCommit
@@ -1446,10 +1445,8 @@ final class ClipCell: NSView {
                 detail: url.deletingLastPathComponent().path,
                 detailColor: theme.tertiaryText, truncatesPath: true)
         case .image:
-            // Image rows occupy a three-line text box, the same metric the
-            // text rows cap at.
-            thumbSide.constant = PanelDesign.textLineBoxHeight(lines: 3)
-            textHeight.constant = thumbSide.constant
+            // Image rows occupy a five-line text box, the cap text rows use.
+            textHeight.constant = PanelDesign.textLineBoxHeight(lines: 5)
             if let thumbnail {
                 thumbnailView.image = thumbnail
                 thumbnailView.isHidden = false
@@ -1482,7 +1479,7 @@ final class ClipCell: NSView {
         // Single-line height from the same engine — real fallback-font metrics.
         let single = previewLabel.cell!.cellSize(forBounds: NSRect(
             x: 0, y: 0, width: 10_000, height: 10_000)).height
-        return min(size.height, single * 2 + 2)
+        return min(size.height, single * 5 + 2)
     }
 
     private func showTwoDeck(name: String, nameColor: NSColor,
@@ -1538,7 +1535,7 @@ final class ClipCell: NSView {
         } else {
             showTwoDeck(
                 name: note.name, nameColor: theme.foreground,
-                detail: text ?? "", detailColor: theme.tertiaryText,
+                detail: text ?? "", detailColor: theme.foreground,
                 truncatesPath: false)
         }
         iconView.image = sourceIcon
@@ -1594,9 +1591,9 @@ final class ClipCell: NSView {
 
         thumbnailView.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: PanelDesign.rowIconToText).isActive = true
         thumbnailView.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
-        thumbnailView.widthAnchor.constraint(equalTo: thumbnailView.heightAnchor).isActive = true
-        thumbSide = thumbnailView.heightAnchor.constraint(equalToConstant: 44)
-        thumbSide.isActive = true
+        let imageBox = PanelDesign.textLineBoxHeight(lines: 5)
+        thumbnailView.widthAnchor.constraint(equalToConstant: imageBox).isActive = true
+        thumbnailView.heightAnchor.constraint(equalToConstant: imageBox).isActive = true
 
         for label in [nameLabel, pathLabel, previewLabel] {
             label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: PanelDesign.rowIconToText).isActive = true

@@ -124,7 +124,11 @@ final class SelectionPipeline {
             callback: keyCallback,
             userInfo: nil
         ) else {
-            FileLog.write("RAWKEY tap create failed — recorder falls back to localized events")
+            // Same rapid-relaunch race as the shortcut tap — retry.
+            FileLog.write("RAWKEY tap create failed — retrying")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.installTap()
+            }
             return
         }
         CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(kCFAllocatorDefault, keyTap, 0), .commonModes)

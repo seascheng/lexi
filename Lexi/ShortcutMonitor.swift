@@ -171,7 +171,10 @@ final class ShortcutMonitor {
             callback: callback,
             userInfo: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
         ) else {
-            FileLog.write("SHORTCUT tap create failed — shortcuts disabled this launch")
+            // Rapid relaunches (build.sh run) can race the previous
+            // instance's tap teardown — retry before giving up.
+            FileLog.write("SHORTCUT tap create failed — retrying")
+            retryInstallTap()
             return
         }
         tap = machPort
@@ -179,6 +182,20 @@ final class ShortcutMonitor {
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: machPort, enable: true)
         FileLog.write("SHORTCUT tap installed (launcher + clipboard, in-process)")
+    }
+
+    private var installRetries = 0
+
+    private func retryInstallTap() {
+        guard installRetries < 10 else {
+            FileLog.write("SHORTCUT tap create failed — shortcuts disabled this launch")
+            return
+        }
+        installRetries += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.tap == nil else { return }
+            self.installTap()
+        }
     }
 
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
