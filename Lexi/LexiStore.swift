@@ -205,9 +205,7 @@ struct LexiWord: Identifiable, Hashable {
 
 extension LexiStore {
     /// Paged, searched word list. Empty search + nil status = whole table.
-    /// Optional entryType filter (all/word/phrase/pattern), parity with the
-    /// React page's client-side filter.
-    static func words(search: String, status: String?, entryType: String?, offset: Int, limit: Int) -> [LexiWord] {
+    static func words(search: String, status: String?, offset: Int, limit: Int) -> [LexiWord] {
         guard let db = open() else { return [] }
         defer { sqlite3_close(db) }
 
@@ -221,10 +219,6 @@ extension LexiStore {
         if let status, !status.isEmpty {
             clauses.append("status = ?\(bindings.count + 1)")
             bindings.append(status)
-        }
-        if let entryType, !entryType.isEmpty {
-            clauses.append("IFNULL(entry_type,'word') = ?\(bindings.count + 1)")
-            bindings.append(entryType)
         }
         let whereSQL = clauses.isEmpty ? "" : "WHERE " + clauses.joined(separator: " AND ")
         let sql = "SELECT id, word, translation, IFNULL(pos,''), IFNULL(definition,''), IFNULL(example,''), status, IFNULL(entry_type,'word'), IFNULL(note,''), review_count, strftime('%Y-%m-%d', next_review), strftime('%Y-%m-%d', created_at) FROM words \(whereSQL) ORDER BY created_at DESC, id DESC LIMIT \(limit) OFFSET \(offset);"

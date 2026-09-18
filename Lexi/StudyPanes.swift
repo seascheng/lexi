@@ -14,7 +14,6 @@ import SwiftUI
 final class VocabularyModel {
     var search = "" { didSet { reload() } }
     var statusFilter: String = "all" { didSet { reload() } }
-    var entryTypeFilter: String = "all" { didSet { reload() } }
     var page = 1 { didSet { reload() } }
     var rows: [LexiWord] = []
     var counts: [String: Int] = [:]
@@ -34,12 +33,11 @@ final class VocabularyModel {
     func reload() {
         counts = LexiStore.wordCounts()
         let status = statusFilter == "all" ? nil : statusFilter
-        let entryType = entryTypeFilter == "all" ? nil : entryTypeFilter
         total = counts.values.reduce(0, +)
         let filtered = status.map { counts[$0] ?? 0 } ?? total
         total = status == nil ? total : filtered
         let offset = (safePage - 1) * pageSize
-        rows = LexiStore.words(search: search, status: status, entryType: entryType, offset: offset, limit: pageSize)
+        rows = LexiStore.words(search: search, status: status, offset: offset, limit: pageSize)
         FileLog.write("VOCAB reload page=\(safePage) total=\(total) rows=\(rows.count)")
     }
 
@@ -105,7 +103,7 @@ struct VocabularyPane: View {
         ) {
             expandedDetail(word)
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 // Button, not a tap gesture: the inline markdown is an
                 // NSTextView that swallows gesture clicks.
                 Button {
@@ -116,12 +114,17 @@ struct VocabularyPane: View {
                             .lineLimit(1)
                         if !word.translation.isEmpty {
                             MarkdownText(content: word.translation, compact: true, inline: true)
+                                .frame(height: 18, alignment: .center)
                         }
                         Spacer(minLength: 0)
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+
+                Text(word.status.capitalized)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Button(role: .destructive) {
                     model.delete(word)
@@ -132,8 +135,8 @@ struct VocabularyPane: View {
                 .controlSize(.small)
                 .help("Delete entry")
             }
-            .badge(Text(word.status.capitalized))
-            .padding(.vertical, 6)
+            .frame(height: 24, alignment: .center)
+            .padding(.vertical, 4)
         }
     }
 
@@ -143,7 +146,7 @@ struct VocabularyPane: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 if !word.note.isEmpty {
-                    MarkdownText(content: word.note, compact: false)
+                    MarkdownText(content: word.note, compact: true)
                 } else {
                     if !word.pos.isEmpty {
                         Text(word.pos)
@@ -152,10 +155,10 @@ struct VocabularyPane: View {
                             .textCase(.uppercase)
                     }
                     if !word.translation.isEmpty {
-                        MarkdownText(content: word.translation, compact: false)
+                        MarkdownText(content: word.translation, compact: true)
                     }
                     if !word.definition.isEmpty {
-                        MarkdownText(content: word.definition, compact: false)
+                        MarkdownText(content: word.definition, compact: true)
                     }
                 }
                 if !word.example.isEmpty {
@@ -164,6 +167,7 @@ struct VocabularyPane: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .frame(maxWidth: 560, alignment: .leading)
 
             Text([word.reviewCount > 0 ? "Reviews \(word.reviewCount)" : nil,
                   word.nextReview.map { "Next \($0)" },
@@ -174,6 +178,7 @@ struct VocabularyPane: View {
                 .foregroundStyle(.secondary)
 
             HStack {
+                Spacer()
                 Picker("Status", selection: Binding(
                     get: { word.status },
                     set: { model.setStatus(word, to: $0) }
@@ -203,17 +208,6 @@ struct VocabularyPane: View {
             .textFieldStyle(.roundedBorder)
             .controlSize(.small)
             .frame(width: 220)
-            Picker("Type", selection: Binding(
-                get: { model.entryTypeFilter },
-                set: { model.entryTypeFilter = $0 }
-            )) {
-                Text("All types").tag("all")
-                Text("Word").tag("word")
-                Text("Phrase").tag("phrase")
-                Text("Pattern").tag("pattern")
-            }
-            .pickerStyle(.menu)
-            .controlSize(.small)
             Picker("Status", selection: Binding(
                 get: { model.statusFilter },
                 set: { model.statusFilter = $0 }
