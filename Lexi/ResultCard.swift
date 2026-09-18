@@ -1303,7 +1303,7 @@ extension SelectionToolbarApp {
             button.identifier = NSUserInterfaceItemIdentifier(item.id)
             button.image = lucideImage(for: item.icon, title: item.name)
             button.imageScaling = .scaleProportionallyDown
-            button.contentTintColor = .secondaryLabelColor
+            button.contentTintColor = .labelColor
             button.toolTip = "\(item.name) input text"
             button.isEnabled = hasInput
             button.alphaValue = hasInput ? 1 : 0.4

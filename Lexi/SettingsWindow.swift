@@ -54,7 +54,7 @@ final class SettingsNavigationState {
 /// The settings sidebar's flat tab list, grouped for display. New pages
 /// join here as the migration proceeds.
 enum SettingsTab: CaseIterable, Identifiable {
-    case general, appearance, ai, shortcuts, vocabulary, review, notebook, configs, toolbar, card, clipboard, launcher
+    case general, appearance, ai, shortcuts, vocabulary, review, notebook, configs, toolbar, card
 
     var id: Self { self }
 
@@ -71,8 +71,6 @@ enum SettingsTab: CaseIterable, Identifiable {
         case .configs: "configs"
         case .toolbar: "toolbar"
         case .card: "card"
-        case .clipboard: "clipboard"
-        case .launcher: "launcher"
         }
     }
 
@@ -88,8 +86,6 @@ enum SettingsTab: CaseIterable, Identifiable {
         case .configs: "Configs"
         case .toolbar: "Toolbar"
         case .card: "Actions"
-        case .clipboard: "Clipboard"
-        case .launcher: "Launcher"
         }
     }
 
@@ -105,8 +101,6 @@ enum SettingsTab: CaseIterable, Identifiable {
         case .configs: "slider.horizontal.3"
         case .toolbar: "menubar.rectangle"
         case .card: "rectangle.inset.filled"
-        case .clipboard: "doc.on.clipboard"
-        case .launcher: "bolt"
         }
     }
 }
@@ -128,7 +122,7 @@ enum SettingsSection: CaseIterable, Identifiable {
         switch self {
         case .general: [.general, .appearance, .ai, .shortcuts]
         case .study: [.vocabulary, .review, .notebook, .configs]
-        case .surfaces: [.toolbar, .card, .clipboard, .launcher]
+        case .surfaces: [.toolbar, .card]
         }
     }
 }
@@ -270,8 +264,6 @@ struct LexiSettingsDetail: View {
             case .configs: ConfigsPane()
             case .toolbar: ToolbarConfigPane()
             case .card: CardConfigPane()
-            case .clipboard: ClipboardConfigPane()
-            case .launcher: LauncherConfigPane()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

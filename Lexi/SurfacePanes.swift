@@ -23,7 +23,6 @@ struct ToolbarEntry: Identifiable {
 @MainActor
 @Observable
 final class ToolbarConfigModel {
-    var enabled = true
     var entries: [ToolbarEntry] = []
     var excludedApps: [String] = []
     var newApp = ""
@@ -32,7 +31,6 @@ final class ToolbarConfigModel {
     var effects: LexiSettingsEffects?
 
     func reload() {
-        enabled = LexiStore.settingBool("toolbarEnabled", default: true)
         // One source of truth: the shared toolbarOrder id list. Entries
         // missing from it (fresh tools/features) append in registry order.
         let tools = LexiStore.toolbarTools().sorted { $0.sortOrder < $1.sortOrder }
@@ -57,12 +55,6 @@ final class ToolbarConfigModel {
         ordered.append(contentsOf: byId.values.sorted { $0.id < $1.id })
         entries = ordered
         excludedApps = LexiStore.excludedToolbarApps()
-    }
-
-    func persistEnabled(_ value: Bool) {
-        enabled = value
-        LexiStore.setSetting("toolbarEnabled", value ? "true" : "false")
-        effects?.nativeSettingsChanged()
     }
 
     func toggle(_ entry: ToolbarEntry) {
@@ -116,23 +108,6 @@ struct ToolbarConfigPane: View {
     var body: some View {
         Form {
             Section {
-                Toggle(isOn: Binding(
-                    get: { model.enabled },
-                    set: { model.persistEnabled($0) }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Show selection toolbar")
-                        Text("The action bar that appears over selected text.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .toggleStyle(.switch)
-            } header: {
-                Text("Toolbar")
-            }
-
-            Section {
                 // Nested real List: Form sections don't support .onMove
                 // drag reordering; .mini switches here render 36x16, the
                 // same size as the Form switches everywhere else.
@@ -183,7 +158,7 @@ struct ToolbarConfigPane: View {
                     }
                 }
                 HStack {
-                    TextField("com.apple.finder", text: $model.newApp)
+                    TextField("Bundle identifier", text: $model.newApp)
                     Button("Add") { model.addExcludedApp() }
                         .disabled(model.newApp.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
@@ -304,135 +279,5 @@ struct CardConfigPane: View {
             model.effects = settings.effects
             model.reload()
         }
-    }
-}
-
-// MARK: - Clipboard
-
-@MainActor
-@Observable
-final class ClipboardConfigModel {
-    var shortcut = "Alt+V"
-
-    func reload() {
-        shortcut = LexiStore.setting("clipboardShortcut") ?? "Alt+V"
-    }
-
-    func setShortcut(_ value: String) {
-        guard value != shortcut else { return }
-        shortcut = value
-        LexiStore.setSetting("clipboardShortcut", value)
-    }
-}
-
-private let clipboardShortcuts: [(String, String)] = [
-    ("Alt+V", "⌥V"), ("Ctrl+Shift+V", "⌃⇧V"), ("Alt+Alt", "Double Option"), ("Cmd+Cmd", "Double Command"),
-]
-
-struct ClipboardConfigPane: View {
-    @Environment(LexiSettingsModel.self) private var settings
-    @State private var model = ClipboardConfigModel()
-
-    var body: some View {
-        Form {
-            Section {
-                Picker("Show clipboard", selection: Binding(
-                    get: { model.shortcut },
-                    set: { settings.setClipboardShortcut($0) }
-                )) {
-                    ForEach(clipboardShortcuts, id: \.0) { value, label in
-                        Text(label).tag(value)
-                    }
-                }
-            } header: {
-                Text("Global shortcut")
-            } footer: {
-                Text("Applies immediately.")
-            }
-
-            Section {
-                LabeledContent("History") {
-                    Text("Unlimited — pinned items survive cleanup")
-                        .foregroundStyle(.secondary)
-                }
-                LabeledContent("Capture") {
-                    Text("Text and file clips from any app")
-                        .foregroundStyle(.secondary)
-                }
-            } header: {
-                Text("Behavior")
-            } footer: {
-                Text("Per-app capture rules and retention limits arrive with the Clipboard store's next settings pass.")
-            }
-        }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .contentMargins(.top, 8, for: .scrollContent)
-        .onAppear { model.reload() }
-    }
-}
-
-// MARK: - Launcher
-
-@MainActor
-@Observable
-final class LauncherConfigModel {
-    var shortcut = "Shift+Shift"
-
-    func reload() {
-        shortcut = LexiStore.setting("launcherShortcut") ?? "Shift+Shift"
-    }
-
-    func setShortcut(_ value: String) {
-        guard value != shortcut else { return }
-        shortcut = value
-        LexiStore.setSetting("launcherShortcut", value)
-    }
-}
-
-private let launcherShortcuts: [(String, String)] = [
-    ("Shift+Shift", "Double Shift"), ("Alt+Alt", "Double Option"), ("Cmd+Cmd", "Double Command"), ("Cmd+Shift+L", "⌘⇧L"),
-]
-
-struct LauncherConfigPane: View {
-    @Environment(LexiSettingsModel.self) private var settings
-    @State private var model = LauncherConfigModel()
-
-    var body: some View {
-        Form {
-            Section {
-                Picker("Show launcher", selection: Binding(
-                    get: { model.shortcut },
-                    set: { settings.setLauncherShortcut($0) }
-                )) {
-                    ForEach(launcherShortcuts, id: \.0) { value, label in
-                        Text(label).tag(value)
-                    }
-                }
-            } header: {
-                Text("Global shortcut")
-            } footer: {
-                Text("Applies immediately. Double-tap shortcuts ignore keystrokes while you type.")
-            }
-
-            Section {
-                LabeledContent("Folder opening") {
-                    Text("Default app (Finder)")
-                        .foregroundStyle(.secondary)
-                }
-                LabeledContent("Sources") {
-                    Text("Finder tags · Recents · Favorites")
-                        .foregroundStyle(.secondary)
-                }
-            } header: {
-                Text("Behavior")
-            } footer: {
-                Text("Per-folder open behaviors (Terminal, default app) arrive with the launcher's next settings pass.")
-            }
-        }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .contentMargins(.top, 8, for: .scrollContent)
-        .onAppear { model.reload() }
     }
 }

@@ -15,6 +15,11 @@ import CoreGraphics
 // ---------------------------------------------------------------------------
 
 final class SelectionPipeline {
+    /// Pre-IME hardware key events (keyCode, CGEventFlags), forwarded from
+    /// the cghidEventTap listen-only key tap. The shortcut recorder arms
+    /// this so Option+letter combos are captured before the input method
+    /// rewrites them.
+    nonisolated(unsafe) static var rawKeyHandler: ((UInt16, UInt64) -> Void)?
     private var tap: CFMachPort?
     private var downLocation: CGPoint?
     private var excludedApps: [String] = ["com.apple.finder"]
@@ -99,6 +104,33 @@ final class SelectionPipeline {
             FileLog.write("SELECTION tap create failed — Rust pipeline remains sole trigger")
             return
         }
+
+        // Pre-IME key tap: input methods rewrite Option+letter combos at the
+        // session level (WeChat IME turns Option+V into Cmd+J), so the
+        // shortcut recorder must observe the RAW hardware key, not the
+        // localized one. Listen-only — keystrokes always pass through.
+        let keyCallback: CGEventTapCallBack = { _, type, event, _ in
+            guard type == .keyDown else { return Unmanaged.passRetained(event) }
+            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            SelectionPipeline.rawKeyHandler?(UInt16(keyCode), event.flags.rawValue)
+            return Unmanaged.passRetained(event)
+        }
+        let keyMask = (1 << CGEventType.keyDown.rawValue)
+        guard let keyTap = CGEvent.tapCreate(
+            tap: CGEventTapLocation(rawValue: 1) ?? .cghidEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: CGEventMask(keyMask),
+            callback: keyCallback,
+            userInfo: nil
+        ) else {
+            FileLog.write("RAWKEY tap create failed — recorder falls back to localized events")
+            return
+        }
+        CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(kCFAllocatorDefault, keyTap, 0), .commonModes)
+        CGEvent.tapEnable(tap: keyTap, enable: true)
+        FileLog.write("RAWKEY tap installed (pre-IME hardware keys)")
+
         tap = machPort
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, machPort, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)

@@ -377,6 +377,15 @@ struct ShortcutRecorderRow: View {
     private func start() {
         recording = true
         tapCount = 0
+        // Arm the pre-IME raw key tap: input methods rewrite Option+letter
+        // combos at the session level, so the localized keyDown cannot be
+        // trusted (Option+V surfaced as Cmd+J under the WeChat IME).
+        SelectionPipeline.rawKeyHandler = { keyCode, rawFlags in
+            DispatchQueue.main.async {
+                self.handleRawKey(keyCode: keyCode, rawFlags: rawFlags)
+            }
+        }
+        // Local fallback for double-modifier taps (flagsChanged events).
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
             if event.type == .flagsChanged {
                 let modifier = Self.modifierName(event.modifierFlags)
@@ -393,31 +402,41 @@ struct ShortcutRecorderRow: View {
                 }
                 return event
             }
-            // keyDown: Esc cancels; combo = current modifiers + the key
             if event.keyCode == 53 { // kVK_Escape
                 stop()
                 return event
             }
-            let f = event.modifierFlags
-            var parts: [String] = []
-            if f.contains(.command) { parts.append("Cmd") }
-            if f.contains(.control) { parts.append("Ctrl") }
-            if f.contains(.option) { parts.append("Alt") }
-            if f.contains(.shift) { parts.append("Shift") }
-            guard let key = event.charactersIgnoringModifiers?.uppercased(), !key.isEmpty, !parts.isEmpty else {
-                return event // bare keys can't be global shortcuts
-            }
-            parts.append(key == " " ? "Space" : key)
-            value = parts.joined(separator: "+")
-            stop()
-            return nil // swallow the capturing keystroke
+            return event
         }
+    }
+
+    /// Raw (pre-IME) keyDown from the cghidEventTap: combo = current
+    /// modifiers + the hardware key.
+    private func handleRawKey(keyCode: UInt16, rawFlags: UInt64) {
+        guard recording else { return }
+        if keyCode == 53 as UInt16 { // kVK_Escape
+            stop()
+            return
+        }
+        let f = NSEvent.ModifierFlags(rawValue: UInt(rawFlags))
+        var parts: [String] = []
+        if f.contains(.command) { parts.append("Cmd") }
+        if f.contains(.control) { parts.append("Ctrl") }
+        if f.contains(.option) { parts.append("Alt") }
+        if f.contains(.shift) { parts.append("Shift") }
+        guard let key = Self.keyName(for: keyCode), !parts.isEmpty else {
+            return // bare keys can't be global shortcuts
+        }
+        parts.append(key)
+        value = parts.joined(separator: "+")
+        stop()
     }
 
     private func stop() {
         recording = false
         tapCount = 0
         lastModifier = ""
+        SelectionPipeline.rawKeyHandler = nil
         if let monitor { NSEvent.removeMonitor(monitor) }
         self.monitor = nil
     }
@@ -428,6 +447,25 @@ struct ShortcutRecorderRow: View {
         if flags.contains(.option) { return "Alt" }
         if flags.contains(.shift) { return "Shift" }
         return ""
+    }
+
+    /// Hardware keyCode → stable shortcut name. The table follows the
+    /// ANSI hardware keycode layout (keycode 9 = V, not alphabetical).
+    private static func keyName(for keyCode: UInt16) -> String? {
+        let letters: [UInt16: String] = [
+            0: "A", 1: "S", 2: "D", 3: "F", 4: "H", 5: "G", 6: "Z", 7: "X",
+            8: "C", 9: "V", 11: "B", 12: "Q", 13: "W", 14: "E", 15: "R",
+            16: "Y", 17: "T", 31: "O", 32: "U", 34: "I", 35: "P",
+            37: "L", 38: "J", 40: "K", 45: "N", 46: "M",
+        ]
+        if let letter = letters[keyCode] { return letter }
+        let digitKeys: [UInt16: String] = [
+            18: "1", 19: "2", 20: "3", 21: "4", 23: "5",
+            22: "6", 26: "7", 28: "8", 25: "9", 29: "0",
+        ]
+        if let digit = digitKeys[keyCode] { return digit }
+        if keyCode == 49 { return "Space" }
+        return nil
     }
 }
 
