@@ -52,6 +52,18 @@ extension SelectionToolbarApp {
         editMenu.addItem(withTitle: "Select All",
                          action: #selector(NSText.selectAll(_:)),
                          keyEquivalent: "a")
+        // Merge into the standing main menu (app menu + Edit) instead of
+        // replacing it — replacing dropped the app menu (Settings/Quit).
+        if let main = NSApp.mainMenu {
+            if let edit = main.items.first(where: { $0.submenu?.title == "Edit" }) {
+                edit.submenu = editMenu
+                return
+            }
+            let editItem = NSMenuItem()
+            editItem.submenu = editMenu
+            main.addItem(editItem)
+            return
+        }
         let mainMenu = NSMenu()
         let editItem = NSMenuItem()
         editItem.submenu = editMenu

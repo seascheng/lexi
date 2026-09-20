@@ -5,23 +5,39 @@ final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
-/// Section header row (tag name / "Recent").
+/// Section header row (tag name / "Recent"): one style — 11pt semibold
+/// secondary label; tag groups lead with a 5pt dot in their Finder tag
+/// color (Finder-sidebar semantics) instead of coloring the whole title.
 final class LauncherHeaderCell: NSView {
     private let label = NSTextField(labelWithString: "")
+    private let dot = NSView()
     private var didLayout = false
     override var isFlipped: Bool { true }
 
-    func configure(title: String, color: NSColor) {
+    func configure(title: String, dotColor: NSColor?, secondary: NSColor) {
         label.stringValue = title.uppercased()
         label.font = .systemFont(ofSize: 11, weight: .semibold)
-        label.textColor = color
+        label.textColor = secondary
         if !didLayout {
             didLayout = true
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = 2.5
+            addSubview(dot)
             // Bottom-anchored in the 28pt row: ~12pt above (separation
             // from the previous section), ~6pt below (hugs its own list).
-            label.frame = NSRect(x: 16, y: 10, width: 600, height: 14)
+            label.frame = NSRect(x: 27, y: 10, width: 590, height: 14)
             addSubview(label)
         }
+        if let dotColor {
+            dot.isHidden = false
+            dot.frame = NSRect(x: 16, y: 14.5, width: 5, height: 5)
+            dot.layer?.backgroundColor = dotColor.cgColor
+        } else {
+            dot.isHidden = true
+        }
+        // Fixed sections align their text with the chip column below;
+        // dotted headers shift right of the dot.
+        label.frame.origin.x = dotColor == nil ? 16 : 27
     }
 }
 
@@ -111,16 +127,17 @@ final class FolderChipView: NSView {
     ) {
         self.theme = theme
         self.isSelectedChip = selected
+        // Fixed grid cells truncate long names — the tooltip carries
+        // the full one.
+        toolTip = chip.item.name
         self.onOpen = onOpen
         if !didLayout {
             didLayout = true
-            wantsLayer = true
-            layer?.cornerRadius = PanelDesign.chipCornerRadius
 
             glyphView.frame = NSRect(x: 9, y: 9, width: 14, height: 14)
             addSubview(glyphView)
 
-            nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
+            nameLabel.font = .systemFont(ofSize: 13)
             nameLabel.lineBreakMode = .byTruncatingTail
             nameLabel.cell?.usesSingleLineMode = true
             addSubview(nameLabel)
@@ -129,7 +146,7 @@ final class FolderChipView: NSView {
         nameLabel.stringValue = chip.item.name
         nameLabel.textColor = selected ? .white : theme.foreground
         // Uniform 9pt padding on every side: glyph leading 9, name at
-        // 9+14+3, trailing 9 (the chipWidth guard covers the cell insets).
+        // 9+14+3, trailing 9 (the fixed cell covers the cell insets).
         // The label gets the 13pt font's NATURAL single-line height (~16)
         // vertically centered on the chip — a 14pt cell squeezes the line
         // box and the drawn text rides visibly off the 14pt glyph's
@@ -137,35 +154,45 @@ final class FolderChipView: NSView {
         nameLabel.frame = NSRect(
             x: 26, y: 8, width: max(chip.width - 26 - 9, 36), height: 16
         )
-        // Glyph color: the quiet gray glyphs flip to white on the blue
-        // selection fill (contrast); tag colors stay — legible on blue and
-        // they carry the tag identity. Tagged folders wear the FINDER tag
-        // color (from the raw xattr slot); tags without a color slot fall
-        // back to the deterministic hue.
-        let glyphColor: NSColor
-        switch chip.kind {
-        case .favorite, .recent:
-            glyphColor = selected ? .white : theme.secondaryText
-        case .tagged:
-            glyphColor = finderTagColor(chip.item.tagIndex)
-                ?? vividTagColor(for: chip.item.tag, dark: theme.isDark)
-        }
+        // One glyph color for every section (tagged folders match the
+        // favorites' quiet gray): the tag identity lives in the header
+        // dot alone — tinting the folder icons made the grid noisy.
         glyphView.image = panelIcon(
             for: chip.kind == .recent ? "clock" : "folder",
             title: chip.item.name,
-            color: glyphColor
+            color: selected ? .white : theme.secondaryText
         )
         applyBackground(hovering: false)
     }
 
+    private var hovering = false
+    private var lastFillSelected = false
+    private var lastFillHovering = true  // differs from the first apply → initial paint
+
     private func applyBackground(hovering: Bool) {
-        wantsLayer = true
-        layer?.cornerRadius = 6
-        // Selected = the system selection blue with white text; hover is a
-        // quiet wash; rest is bare on the glass.
-        layer?.backgroundColor = isSelectedChip
-            ? NSColor.selectedContentBackgroundColor.cgColor
-            : (hovering ? theme.hoverFill.cgColor : NSColor.clear.cgColor)
+        self.hovering = hovering
+        guard isSelectedChip != lastFillSelected || hovering != lastFillHovering else { return }
+        lastFillSelected = isSelectedChip
+        lastFillHovering = hovering
+        needsDisplay = true
+    }
+
+    /// The capsule is DRAWN here, not set as layer.backgroundColor: the
+    /// dynamic system selection color only resolves inside a drawing
+    /// context — a context-free `.cgColor` painted nothing and left the
+    /// selected chip's white content on bare glass. The row views
+    /// (LauncherRowView, clipboard rows) have always drawn selection the
+    /// same way; the chip now matches the panels' blue-capule style.
+    override func draw(_ dirtyRect: NSRect) {
+        let fill: NSColor = isSelectedChip
+            ? .selectedContentBackgroundColor
+            : (hovering ? theme.hoverFill : .clear)
+        fill.setFill()
+        NSBezierPath(
+            roundedRect: bounds,
+            xRadius: PanelDesign.chipCornerRadius,
+            yRadius: PanelDesign.chipCornerRadius
+        ).fill()
     }
 }
 

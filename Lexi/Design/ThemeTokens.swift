@@ -270,18 +270,21 @@ func vividTagColor(for tag: String, dark: Bool) -> NSColor {
 }
 
 /// Finder's seven fixed tag color slots, by the index stored on disk in
-/// `com.apple.metadata:_kMDItemUserTags` ("Name\nN"). Same swatches in
-/// both appearances — Finder does not vary them. 0 / unknown → nil (the
-/// caller falls back to the deterministic tag hue).
+/// `com.apple.metadata:_kMDItemUserTags` ("Name\nN"). The numbering is the
+/// classic Finder label order — 1=gray 2=green 3=purple 4=blue 5=yellow
+/// 6=red 7=orange (NOT the Settings-list display order; cross-checked on
+/// this machine: green "个人" writes \n2, "项目" carries \n4=blue). Same
+/// swatches in both appearances — Finder does not vary them. 0 / unknown
+/// → nil (the caller falls back to the deterministic tag hue).
 func finderTagColor(_ index: Int) -> NSColor? {
     switch index {
-    case 1: return NSColor(red: 1.000, green: 0.231, blue: 0.188, alpha: 1)  // red    #FF3B30
-    case 2: return NSColor(red: 1.000, green: 0.584, blue: 0.000, alpha: 1)  // orange #FF9500
-    case 3: return NSColor(red: 1.000, green: 0.800, blue: 0.000, alpha: 1)  // yellow #FFCC00
-    case 4: return NSColor(red: 0.204, green: 0.780, blue: 0.349, alpha: 1)  // green  #34C759
-    case 5: return NSColor(red: 0.000, green: 0.478, blue: 1.000, alpha: 1)  // blue   #007AFF
-    case 6: return NSColor(red: 0.686, green: 0.322, blue: 0.871, alpha: 1)  // purple #AF52DE
-    case 7: return NSColor(red: 0.557, green: 0.557, blue: 0.576, alpha: 1)  // gray   #8E8E93
+    case 1: return NSColor(red: 0.557, green: 0.557, blue: 0.576, alpha: 1)  // gray   #8E8E93
+    case 2: return NSColor(red: 0.204, green: 0.780, blue: 0.349, alpha: 1)  // green  #34C759
+    case 3: return NSColor(red: 0.686, green: 0.322, blue: 0.871, alpha: 1)  // purple #AF52DE
+    case 4: return NSColor(red: 0.000, green: 0.478, blue: 1.000, alpha: 1)  // blue   #007AFF
+    case 5: return NSColor(red: 1.000, green: 0.800, blue: 0.000, alpha: 1)  // yellow #FFCC00
+    case 6: return NSColor(red: 1.000, green: 0.231, blue: 0.188, alpha: 1)  // red    #FF3B30
+    case 7: return NSColor(red: 1.000, green: 0.584, blue: 0.000, alpha: 1)  // orange #FF9500
     default: return nil
     }
 }

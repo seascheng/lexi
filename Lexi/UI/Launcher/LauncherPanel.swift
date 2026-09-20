@@ -55,7 +55,8 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     var calcValue: Double?
 
     enum Row {
-        /// Header title + its color (nil = the quiet fixed sections).
+        /// Header title + its Finder tag color (rendered as a leading
+        /// dot; nil = fixed section, no dot).
         case header(String, NSColor?)
         case chipLine([FolderChip])
         /// Search-mode result: a folder or an installed app.
@@ -82,8 +83,8 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     struct FolderItem { let path: String; let name: String; let tag: String; var tagIndex: Int = 0 }
     struct RecentItem: Codable, Equatable { var path: String; var count: Int; var lastAt: Double }
 
-    /// One folder chip inside a wrapping grid line. `x`/`width` are assigned
-    /// by the flow-layout pass (`flowChipLines`).
+    /// One folder chip inside a grid line. `x`/`width` are assigned by the
+    /// fixed-column pass (`gridChipLines`).
     struct FolderChip {
         enum Kind { case favorite, recent, tagged }
         let item: FolderItem
@@ -624,11 +625,11 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard row < rows.count else { return nil }
         switch rows[row] {
-        case .header(let title, let headerColor):
+        case .header(let title, let tagColor):
             let cell = reuse(LauncherHeaderCell.self, row: row)
-            // Tag groups carry their Finder tag color; the fixed sections
-            // (Favorites/Recent, nil) stay a quiet secondary.
-            cell.configure(title: title, color: headerColor ?? cardTheme.secondaryText)
+            // One header style: secondary label for every section; tag
+            // groups carry their Finder color as a leading dot.
+            cell.configure(title: title, dotColor: tagColor, secondary: cardTheme.secondaryText)
             return cell
         case .chipLine(let chips):
             let cell = reuse(LauncherChipLineCell.self, row: row)

@@ -246,21 +246,101 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
 
     var statusItem: NSStatusItem?
 
-    /// Menu-bar presence: the native successor to the tauri tray.
+    /// Menu-bar presence: the native successor to the tauri tray. The menu
+    /// is built EAGERLY (never inside menuNeedsUpdate — mutating a menu
+    /// during AppKit's update pass self-deadlocks, which once froze the
+    /// whole app) and rebuilt wholesale on settings changes while closed.
     func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = LexiLogo.menuBarImage
-        let menu = NSMenu()
-        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(statusSettingsClicked), keyEquivalent: ",")
-        let launcherItem = NSMenuItem(title: "Open Launcher", action: #selector(statusLauncherClicked), keyEquivalent: "l")
-        let quitItem = NSMenuItem(title: "Quit Lexi", action: #selector(statusQuitClicked), keyEquivalent: "q")
-        for entry in [settingsItem, launcherItem, quitItem] { entry.target = self }
-        menu.addItem(settingsItem)
-        menu.addItem(launcherItem)
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(quitItem)
-        item.menu = menu
+        item.menu = buildStatusMenu()
         statusItem = item
+    }
+
+    /// Freshly built status menu: the four surface entries carry their live
+    /// Settings shortcuts as key equivalents, then the app staples.
+    func buildStatusMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(shortcutItem("Open Launcher", action: #selector(statusLauncherClicked),
+                                  settingKey: "launcherShortcut", fallback: "Shift+Shift"))
+        menu.addItem(shortcutItem("Open Action Panel", action: #selector(statusPopupClicked),
+                                  settingKey: "popupShortcut", fallback: "Ctrl+Ctrl"))
+        menu.addItem(shortcutItem("Open Clipboard", action: #selector(statusClipboardClicked),
+                                  settingKey: "clipboardShortcut", fallback: "Alt+V"))
+        menu.addItem(NSMenuItem.separator())
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(statusSettingsClicked), keyEquivalent: ",")
+        settingsItem.keyEquivalentModifierMask = .command
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+        menu.addItem(NSMenuItem.separator())
+        let quitItem = NSMenuItem(title: "Quit Lexi", action: #selector(statusQuitClicked), keyEquivalent: "q")
+        quitItem.keyEquivalentModifierMask = .command
+        quitItem.target = self
+        menu.addItem(quitItem)
+        return menu
+    }
+
+    /// Swap in a rebuilt status menu (safe: the object is replaced while
+    /// closed, the open menu is never touched). Wired to the settings
+    /// reload hook so shortcut hints stay in lockstep with the Shortcuts
+    /// pane.
+    func rebuildStatusMenu() {
+        statusItem?.menu = buildStatusMenu()
+    }
+
+    /// One status-menu row: title + action, with the CONFIGURED global
+    /// shortcut shown as its key equivalent (Settings stays the source of
+    /// truth; the tap also consumes fired combos, so the two paths never
+    /// double-fire).
+    func shortcutItem(
+        _ title: String, action: Selector, settingKey: String, fallback: String
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        if let (key, mask) = LexiShortcutMode
+            .parse(LexiStore.setting(settingKey) ?? fallback)?
+            .menuKeyEquivalent(), !key.isEmpty {
+            item.keyEquivalent = key
+            item.keyEquivalentModifierMask = mask
+        }
+        return item
+    }
+
+    @objc func statusPopupClicked() { showPopupCard() }
+    @objc func statusClipboardClicked() { showClipboardPanel() }
+
+    /// The screen-top menu bar shown while a Lexi surface holds focus
+    /// (settings window, focused card): an app menu carrying the standard
+    /// Settings item, plus the Edit submenu the text key equivalents
+    /// (Cmd+C/V/X/A) live on. Merges with whatever installEditMenu()
+    /// already put up — never drops it.
+    func installAppMainMenu() {
+        let editMenu: NSMenu
+        if let existing = NSApp.mainMenu?.items.first(where: { $0.submenu?.title == "Edit" })?.submenu {
+            editMenu = existing
+        } else {
+            editMenu = NSMenu(title: "Edit")
+            editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+            editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+            editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+            editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        }
+        let appSubmenu = NSMenu(title: "Lexi")
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(statusSettingsClicked), keyEquivalent: ",")
+        settingsItem.keyEquivalentModifierMask = .command
+        settingsItem.target = self
+        appSubmenu.addItem(settingsItem)
+        appSubmenu.addItem(NSMenuItem.separator())
+        // terminate: with no target rides the responder chain to NSApp.
+        appSubmenu.addItem(withTitle: "Quit Lexi", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let appItem = NSMenuItem()
+        appItem.submenu = appSubmenu
+        let editItem = NSMenuItem()
+        editItem.submenu = editMenu
+        let mainMenu = NSMenu()
+        mainMenu.addItem(appItem)
+        mainMenu.addItem(editItem)
+        NSApp.mainMenu = mainMenu
     }
 
     @objc func statusSettingsClicked() {

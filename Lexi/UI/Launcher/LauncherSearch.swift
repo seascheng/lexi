@@ -136,6 +136,7 @@ extension LauncherPanelController {
         }
 
         var favorites: [FolderChip] = []
+        var favoritePaths: Set<String> = []
         let showFavorites = LexiStore.settingBool("launcher.showFavorites", default: true)
         for name in Self.favoriteFolderNames where showFavorites {
             let url = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(name)
@@ -148,15 +149,19 @@ extension LauncherPanelController {
                 item: FolderItem(path: url.path, name: localizedName, tag: ""),
                 kind: .favorite
             ))
+            favoritePaths.insert(url.path)
         }
         if !favorites.isEmpty {
             out.append(.header("Favorites", nil))
-            out += flowChipLines(favorites).map { .chipLine($0) }
+            out += gridChipLines(favorites).map { .chipLine($0) }
         }
 
         var recentChips: [FolderChip] = []
         let showRecents = LexiStore.settingBool("launcher.showRecents", default: true)
-        for item in recents where showRecents && matches(item.path, path: item.path) {
+        for item in recents where showRecents && matches(item.path, path: item.path)
+            && !favoritePaths.contains(item.path) {
+            // The five fixed home folders live in Favorites forever —
+            // repeating them in Recent adds no information.
             let url = URL(fileURLWithPath: item.path)
             recentChips.append(FolderChip(
                 item: FolderItem(path: item.path, name: url.lastPathComponent, tag: ""),
@@ -165,7 +170,7 @@ extension LauncherPanelController {
         }
         if !recentChips.isEmpty {
             out.append(.header("Recent", nil))
-            out += flowChipLines(recentChips).map { .chipLine($0) }
+            out += gridChipLines(recentChips).map { .chipLine($0) }
         }
 
         let matching = LexiStore.settingBool("launcher.showTagged", default: true)
@@ -190,7 +195,7 @@ extension LauncherPanelController {
                     if item.tagIndex == 0 { item.tagIndex = slotByTag[tag] ?? 0 }
                     return FolderChip(item: item, kind: .tagged)
                 }
-            out += flowChipLines(chips).map { .chipLine($0) }
+            out += gridChipLines(chips).map { .chipLine($0) }
         }
         return out
     }
@@ -208,34 +213,31 @@ extension LauncherPanelController {
     }
 
 
-    /// Wraps chips into lines of at most `maxWidth` points (8pt gaps).
-    /// Chip widths hug their text — every chip carries the same uniform
-    /// padding on all four sides.
-    func flowChipLines(_ chips: [FolderChip], maxWidth: CGFloat = 608) -> [[FolderChip]] {
-        var lines: [[FolderChip]] = [[]]
-        var x: CGFloat = 0
-        for chip in chips {
-            let width = Self.chipWidth(for: chip)
-            if x > 0, x + width > maxWidth {
-                lines.append([])
-                x = 0
-            }
-            var placed = chip
-            placed.x = x
-            placed.width = width
-            lines[lines.count - 1].append(placed)
-            x += width + 8
-        }
-        return lines.filter { !$0.isEmpty }
-    }
+    /// Fixed-column grid: 4 columns × 146pt at an 8pt gutter (608 total).
+    /// Every chip fills its cell — wrapped rows stay column-aligned, gaps
+    /// are uniform, and the full width is used. Flow-hugged widths left
+    /// ragged columns (HIG: inconsistent spacing destroys grid
+    /// perception). Overlong names truncate inside the chip; the full
+    /// name rides the chip's tooltip.
+    static let gridColumns = 4
+    static let gridChipWidth: CGFloat = 146
+    static let gridGutter: CGFloat = 8
 
-    /// Text-adaptive chip width: 9pt padding on every side (matching the
-    /// vertical (32-14)/2), glyph(14) + 3pt gap + measured name + an 8pt
-    /// cell-inset guard so the last character never truncates.
-    static func chipWidth(for chip: FolderChip) -> CGFloat {
-        let font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        let text = (chip.item.name as NSString).size(withAttributes: [.font: font]).width
-        return max(text + 9 + 14 + 3 + 9 + 8, 48)
+    func gridChipLines(_ chips: [FolderChip]) -> [[FolderChip]] {
+        var lines: [[FolderChip]] = []
+        var line: [FolderChip] = []
+        for (index, chip) in chips.enumerated() {
+            var placed = chip
+            placed.x = CGFloat(index % Self.gridColumns) * (Self.gridChipWidth + Self.gridGutter)
+            placed.width = Self.gridChipWidth
+            line.append(placed)
+            if line.count == Self.gridColumns {
+                lines.append(line)
+                line = []
+            }
+        }
+        if !line.isEmpty { lines.append(line) }
+        return lines
     }
 
     // MARK: unified search (folders + installed apps + calculator)

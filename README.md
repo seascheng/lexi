@@ -1,57 +1,120 @@
-# Lexi
+<div align="center">
 
-macOS 桌面英语学习工具。选中任意文本即可翻译、收藏、复习。
+<img src="images/logo.png" alt="Lexi" width="88" height="88" />
 
-## 功能
+### Lexi
 
-- **全局划词翻译** — 选中文字自动弹出翻译，支持全局快捷键（默认 `Cmd+Shift+T`）
-- **AI 翻译引擎** — 基于 OpenAI 兼容 API，可自定义模型和提示词
-- **生词本** — 自动保存翻译结果，支持搜索、筛选、导出（JSON/CSV）
-- **间隔重复复习** — SM-2 算法，支持闪卡和打字两种模式
-- **笔记本** — 标签管理，Markdown 渲染
-- **自定义 AI 功能** — 创建翻译以外的自定义 AI 功能，自定义提示词和输出格式
-- **原生浮动工具栏** — 配套 Swift 辅助应用，macOS 原生渲染
-- **多窗口** — 主窗口、浮动翻译栏、弹窗卡片，支持置顶和位置记忆
-- **主题** — 深色/浅色模式，6 种强调色，支持透明和 macOS Liquid Glass 效果
-- **朗读** — macOS `say` 命令或 API 驱动的文本转语音
+**A native macOS companion for reading English: select to translate, collect, and remember.**
 
-## 技术栈
+<sub>Swift · AppKit · SQLite — no webview, no Electron, no Node toolchain</sub>
+<sub>v0.1.0 · macOS 13+ · ad-hoc signed</sub>
+<img src="images/launcher.png" alt="The Lexi launcher: a folder grid with Favorites, Finder tag groups (个人 green, 项目 blue) and Recents" width="640" />
+<br />
+<sub>Double-Shift (recordable — even <code>⌘Space</code>): the folder grid. Favorites, your Finder tag groups in their real tag colors, recents.</sub>
 
-- **前端:** React 18 + TypeScript + Tailwind CSS
-- **桌面:** Tauri v2
-- **后端:** Rust
-- **数据库:** SQLite（浏览器预览模式回退到 localStorage）
-- **配套应用:** Swift（原生浮动工具栏）
+</div>
 
-## 开发
+## Install
 
-```bash
-npm install
-npm run tauri dev
+Build from source (Xcode command-line tools):
+
+```sh
+cd Lexi
+./build.sh            # swiftc -O over the sources -> codesigned LexiSelectionHelper.app
+./build.sh run        # build, kill the running instance, relaunch
 ```
 
-## 构建
+Drag `LexiSelectionHelper.app` wherever you keep it and launch. Ad-hoc signed: on first open, right-click the app → **Open** (once).
 
-```bash
-npm run tauri build
+On first launch, grant **Accessibility** and **Screen Recording** when prompted — the selection reading chain and the global shortcuts need them, and both grants are tied to the bundle id (`com.lexi.selection-helper`), so don't change it casually. Launch at login via **Settings → General → Startup** (SMAppService).
+
+## Who it's for
+
+### You read English all day
+
+Docs, issues, papers, error messages. Looking words up in a dictionary tab breaks the reading; Lexi keeps everything one selection away.
+
+- **Selection toolbar over any text** — select anywhere and a small pill appears above it: translate, rewrite, speak, extract, more. The reading chain (AX direct read → range slice → WebArea) never swallows your mouse or keyboard events.
+- **A streaming AI card, not a popup webpage** — results render as native markdown as they stream; each run gets its own tab, cards can be pinned, and the input line lets you follow up in place.
+- **One click from reading to remembering** — save the word to your vocabulary straight from the card, or file the sentence as a note.
+
+<img src="images/toolbar.png" alt="The selection toolbar: a small pill with icon actions floating over selected text" width="360" />
+
+### You live on the keyboard and the clipboard
+
+- **Launcher, two keystrokes away** — double-Shift by default, and the shortcut is fully recordable (`⌘Space` works — fired combos are consumed so Spotlight doesn't double-open). Empty query shows the folder grid; typing switches to unified results: folders, apps, recent usage — led by a calculator row when the query parses as math (Enter copies).
+- **Clipboard history that stays out of the way** — `⌥V` opens the panel; paste-through promotes the item (the pasted entry becomes the clipboard, standard clipboard-manager semantics). Full-text search, pinning, file links, and a notes tab with categories.
+- **Finder right where you right-click** — a Lexi submenu in Finder: copy path, new file, open in terminal, open in editor. Each action toggles independently in Settings → Finder.
+
+<div align="center">
+<img src="images/launcher-search.png" alt="Launcher with the query 2^10 and a calculator answer row = 1,024" width="420" />
+<img src="images/clipboard.png" alt="Clipboard panel: category chips, search field, history list" width="360" />
+<br />
+<sub>Left: the calculator answer row. Right: clipboard history with tag chips and search.</sub>
+</div>
+
+### You collect words, not just look them up
+
+- **SM-2 spaced repetition, built in** — the card's Review tab is a flashcard flow: reveal, then grade Again / Hard / Good / Easy. Due scheduling follows the classic SM-2 algorithm.
+- **A vocabulary that reflects usage** — words saved from cards land in the Vocabulary pane with source sentence and status; the list is searchable and paginated.
+- **Notes with exactly one category** — the notebook keeps every saved sentence filed under a category you manage; the same categories drive the clipboard panel's notes tab and the card's notes tab.
+- **Your AI features, your prompts** — the Configs pane edits every built-in feature (prompt template, output mode, target language, icon, auto-save) and adds new ones; the toolbar and card pick them up live.
+
+<div align="center">
+<img src="images/card.png" alt="Result card in Review mode: a flashcard with Again/Hard/Good/Easy grading" width="380" />
+<img src="images/finder_menu.png" alt="Finder right-click Lexi submenu: copy path, new file, open in terminal, open in editor" width="300" />
+<br />
+<sub>Left: the Review flashcard. Right: the Finder right-click menu.</sub>
+</div>
+
+## What's inside
+
+| | |
+|---|---|
+| **Selection toolbar** | pill over any selection · AX read chain (direct → range slice → WebArea) · never swallows events · drag handle · actions configured in Settings |
+| **Result card** | per-run tabs · streaming markdown · follow-up input · pin · notes / review tabs · TTS speak |
+| **Clipboard panel** | 0.5s poller → SQLite history · paste-through promotes · FTS search · pin · file links · notes tab |
+| **Launcher** | double-Shift (recordable, `⌘Space` OK) · folder grid: favorites + Finder tag groups in real tag colors (xattr `_kMDItemUserTags`) + recents · unified results: folders + apps + recent usage · calculator row (Enter copies) |
+| **Vocabulary & Review** | save-to-vocab from the card · SM-2 scheduling · Again/Hard/Good/Easy grading · status list |
+| **Notebook** | notes with exactly one category each · categories manage themselves into every surface |
+| **Finder menu** | FinderSync appex: 复制路径 · 新建文件 · 在终端打开 · 用编辑器打开 · per-action toggles |
+| **Settings** | native split-view window: General / Appearance / AI / Shortcuts / Vocabulary / Review / Notebook / Configs + per-surface panes (Toolbar, Card, Clipboard, Launcher, Finder) · applies in-process, persists to SQLite |
+| **AI** | OpenAI-compatible SSE streaming · built-in features + your own (prompt, output mode, target language) · system TTS |
+| **Shortcuts** | global, recordable — key combos (incl. `⌘Space`, arrows, Space, Return…) and double-modifier taps · fired combos are consumed |
+| **Data** | `~/Library/Application Support/com.lexi.app/lexi.db` (settings, words, notes, features) + `com.lexi.selection-helper/clipboard.sqlite3` · nothing leaves the Mac except the AI endpoint you configure |
+
+## Build & debug
+
+```sh
+cd Lexi
+./build.sh          # compile + codesign LexiSelectionHelper.app
+./build.sh run      # build, kill the running instance, launch
 ```
 
-## 项目结构
+- Helper log: `/private/tmp/lexi-selection-helper.log`
+- Headless UI snapshots: launch with `--debug-server`, then `POST /debug-shot?tab=<pane>`, `/debug-launcher-shot[?query=]`, `/debug-clip-shot`, `/debug-card-shot`, `/debug-toolbar-shot` on `127.0.0.1:43877` — every screenshot in this README was captured through these routes.
+
+## Architecture
 
 ```
-src/                # React 前端
-  pages/            # 页面：生词本、复习、笔记本、配置、设置
-  components/       # 组件：翻译窗口、复习、UI 基础组件
-  lib/              # 工具库：AI、数据库、SM-2、导出、主题
-src-tauri/          # Tauri/Rust 后端
-  src/              # Rust 源码：命令、事件监听、窗口管理
-  migrations/       # SQLite 迁移（001-008）
-  native/           # Swift 辅助应用（划词工具栏）
+Lexi/
+  App/        app delegate: lifecycle, shared state, action routing
+  Data/       LexiStore (SQLite) · ClipboardStore · FinderSyncConfig
+  Debug/      headless debug server (the /debug-* routes)
+  Design/     theme tokens · lucide icon set · logo
+  Services/   AI SSE service · selection pipeline · shortcut monitor · clipboard monitor
+  UI/         Toolbar / Result card / Clipboard / Launcher / Settings panes
+  FinderSync/ Finder right-click extension (.appex, zero IPC with the main app)
 ```
 
-## 要求
+One native Swift app — the entire product is AppKit; the only compiled extras are the FinderSync extension and the two SQLite stores. Long-lived invariants live in `AGENTS.md` and are binding.
 
-- macOS
-- Node.js
-- Rust 工具链
-- OpenAI 兼容 API（用于翻译功能）
+---
+
+<div align="center">
+<sub>
+
+Icons from [Lucide](https://lucide.dev) · spaced repetition by SM-2 · v0.1.0
+
+</sub>
+</div>

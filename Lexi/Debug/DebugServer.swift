@@ -120,6 +120,14 @@ extension SelectionToolbarApp {
             }
             return
         }
+        if request.hasPrefix("POST /debug-toolbar-shot ") {
+            // Shows the selection toolbar with a sample payload — no host
+            // app or real selection needed — then snapshots and hides.
+            DispatchQueue.main.async {
+                self.debugToolbarShot()
+            }
+            return
+        }
         if request.hasPrefix("POST /debug-shot") {
             // /debug-shot?tab=vocabulary — navigate, settle, snapshot to /tmp.
             let tabName = request
@@ -164,6 +172,27 @@ extension SelectionToolbarApp {
                 self.log("DEBUG \(state)")
             }
             return
+        }
+    }
+
+    /// Headless toolbar snapshot for the /debug-toolbar-shot route: shows
+    /// the REAL panel with a sample selection payload (the AX pipeline is
+    /// bypassed — no host app or screen real estate needed), settles,
+    /// captures, hides.
+    func debugToolbarShot() {
+        MainActor.assumeIsolated {
+            refreshCardActions()
+            showPanel(ShowPayload(
+                text: "The quick brown fox jumps over the lazy dog.",
+                x: 660, y: 500
+            ))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if let png = self.panel.contentView?.snapshotPNG() {
+                    try? png.write(to: URL(fileURLWithPath: "/tmp/lexi-toolbar.png"))
+                    FileLog.write("TOOLBAR-SHOT saved bytes=\(png.count)")
+                }
+                self.hidePanel()
+            }
         }
     }
 

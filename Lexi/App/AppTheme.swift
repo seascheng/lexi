@@ -143,8 +143,15 @@ extension SelectionToolbarApp {
                 controller.onNativeSettingsReload = { [weak self] in
                     self?.shortcutMonitor?.reload()
                     self?.selectionPipeline?.reload()
+                    self?.rebuildStatusMenu()
                     self?.refreshCardActions()
                 }
+                // The app menu (Settings… ⌘, / Quit) goes up WITH the first
+                // Lexi window, not at launch: installing it during startup
+                // raised inside applicationDidFinishLaunching and AppKit
+                // swallowed the exception, silently killing everything
+                // after it (shortcuts, clipboard store, debug server).
+                self.installAppMainMenu()
                 controller.show(tab: tab)
                 // Match the window chrome to the persisted theme immediately —
                 // onPanelStyleChange only fires on the next change.

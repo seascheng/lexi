@@ -130,6 +130,52 @@ enum LexiShortcutMode: Equatable {
         default: return nil
         }
     }
+
+    // MARK: menu rendering
+
+    /// Single-character menu glyphs for the multi-character keys
+    /// (letters and digits are their own keyEquivalent).
+    private static let menuKeyGlyphs: [UInt16: String] = [
+        UInt16(kVK_Space): " ",
+        UInt16(kVK_UpArrow): "↑", UInt16(kVK_DownArrow): "↓",
+        UInt16(kVK_LeftArrow): "←", UInt16(kVK_RightArrow): "→",
+        UInt16(kVK_Return): "↩", UInt16(kVK_ANSI_KeypadEnter): "↩",
+        UInt16(kVK_Tab): "⇥",
+        UInt16(kVK_Delete): "⌫", UInt16(kVK_ForwardDelete): "⌦",
+    ]
+
+    /// Double-tap display glyphs ("⌘⌘" reads like the gesture itself).
+    private static let modifierGlyphs: [UInt16: String] = [
+        UInt16(kVK_Shift): "⇧", UInt16(kVK_Command): "⌘",
+        UInt16(kVK_Control): "⌃", UInt16(kVK_Option): "⌥",
+    ]
+
+    /// NSMenuItem rendering of the shortcut, in lockstep with the string the
+    /// Shortcuts pane shows: a combo becomes a real keyEquivalent — native
+    /// right-aligned glyphs, and it performs while its menu is open. A
+    /// double-modifier tap has no keystroke form and no honest glyph
+    /// (keyEquivalent renders only its first character), so such rows show
+    /// nothing; Settings remains the display for them.
+    func menuKeyEquivalent() -> (String, NSEvent.ModifierFlags) {
+        switch self {
+        case .keyCombo(let cmd, let shift, let ctrl, let alt, let keyCode):
+            var mask: NSEvent.ModifierFlags = []
+            if cmd { mask.insert(.command) }
+            if shift { mask.insert(.shift) }
+            if ctrl { mask.insert(.control) }
+            if alt { mask.insert(.option) }
+            guard let name = LexiShortcutMode.keyName(for: keyCode) else { return ("", []) }
+            let key = LexiShortcutMode.menuKeyGlyphs[keyCode]
+                ?? String(name.prefix(1)).lowercased()
+            return (key, mask)
+        case .doubleModifier:
+            // keyEquivalent renders only its FIRST character — a doubled
+            // "⌘⌘" would display as a single ⌘ and read as a real (wrong)
+            // shortcut. A double-tap gesture has no keystroke form; the
+            // row shows nothing and Settings remains the display.
+            return ("", [])
+        }
+    }
 }
 
 
