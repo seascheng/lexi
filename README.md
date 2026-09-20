@@ -4,7 +4,7 @@
 
 ### Lexi
 
-**A native macOS companion for reading English: select to translate, collect, and remember.**
+**A native macOS enhancement suite: act on any selection, own your clipboard, launch everything — with language learning built in.**
 
 <sub>Swift · AppKit · SQLite — no webview, no Electron, no Node toolchain</sub>
 <sub>v0.1.0 · macOS 13+ · ad-hoc signed</sub>
@@ -30,13 +30,13 @@ On first launch, grant **Accessibility** and **Screen Recording** when prompted 
 
 ## Who it's for
 
-### You read English all day
+### You act on text all day
 
-Docs, issues, papers, error messages. Looking words up in a dictionary tab breaks the reading; Lexi keeps everything one selection away.
+Docs, issues, papers, error messages, chats, logs. Whatever the text is, Lexi keeps the next action one selection away — no app switching, no copy-paste detour.
 
-- **Selection toolbar over any text** — select anywhere and a small pill appears above it: translate, rewrite, speak, extract, more. The reading chain (AX direct read → range slice → WebArea) never swallows your mouse or keyboard events.
+- **Selection toolbar over any text** — select anywhere and a small pill appears above it: translate, rewrite, speak, extract, or your own configured actions. The reading chain (AX direct read → range slice → WebArea) never swallows your mouse or keyboard events, and triggers on drags, double-clicks, ⌘A, and shift-extend alike.
 - **A streaming AI card, not a popup webpage** — results render as native markdown as they stream; each run gets its own tab, cards can be pinned, and the input line lets you follow up in place.
-- **One click from reading to remembering** — save the word to your vocabulary straight from the card, or file the sentence as a note.
+- **From text to knowledge in one click** — save the word to your vocabulary or file the sentence as a note, straight from the card.
 
 <img src="images/toolbar.png" alt="The selection toolbar: a small pill with icon actions floating over selected text" width="360" />
 
@@ -52,7 +52,9 @@ Docs, issues, papers, error messages. Looking words up in a dictionary tab break
 <sub>Clipboard history: categorized chips (剪贴板 / Note / Password / API_KEY / Command), keyword search, per-entry context menu, ⌘P pin · ⏎ paste.</sub>
 </div>
 
-### You collect words, not just look them up
+### You learn languages along the way
+
+English study lives inside the same surfaces — not a separate study app.
 
 - **SM-2 spaced repetition, built in** — the card's Review tab is a flashcard flow: reveal, then grade Again / Hard / Good / Easy. Due scheduling follows the classic SM-2 algorithm.
 - **A vocabulary that reflects usage** — words saved from cards land in the Vocabulary pane with source sentence and status; the list is searchable and paginated.
