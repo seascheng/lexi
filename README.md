@@ -47,10 +47,9 @@ Docs, issues, papers, error messages. Looking words up in a dictionary tab break
 - **Finder right where you right-click** — a Lexi submenu in Finder: copy path, new file, open in terminal, open in editor. Each action toggles independently in Settings → Finder.
 
 <div align="center">
-<img src="images/launcher-search.png" alt="Launcher with the query 2^10 and a calculator answer row = 1,024" width="420" />
-<img src="images/clipboard.png" alt="Clipboard panel: category chips, search field, history list" width="360" />
+<img src="images/clipboard.png" alt="Clipboard panel: category chips, keyword search, history entries with source-app icons, entry context menu, footer shortcuts" width="420" />
 <br />
-<sub>Left: the calculator answer row. Right: clipboard history with tag chips and search.</sub>
+<sub>Clipboard history: categorized chips (剪贴板 / Note / Password / API_KEY / Command), keyword search, per-entry context menu, ⌘P pin · ⏎ paste.</sub>
 </div>
 
 ### You collect words, not just look them up
@@ -65,6 +64,15 @@ Docs, issues, papers, error messages. Looking words up in a dictionary tab break
 <img src="images/finder_menu.png" alt="Finder right-click Lexi submenu: copy path, new file, open in terminal, open in editor" width="300" />
 <br />
 <sub>Left: the Review flashcard. Right: the Finder right-click menu.</sub>
+</div>
+
+
+<div align="center">
+<img src="images/settings-general.png" alt="Settings window, General pane: startup, language, behavior" width="280" />
+<img src="images/settings-vocabulary.png" alt="Settings window, Vocabulary pane: searchable word list with statuses" width="280" />
+<img src="images/settings-review.png" alt="Settings window, Review pane: flashcard review with grading" width="280" />
+<br />
+<sub>Settings: General, Vocabulary, Review — twelve panes in one native window.</sub>
 </div>
 
 ## What's inside
