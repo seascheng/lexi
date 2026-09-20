@@ -16,6 +16,10 @@ final class SelectionPipeline {
     private var tap: CFMachPort?
     private var excludedApps: [String] = ["com.apple.finder"]
     private var enabled = true
+    /// Last mouse-down point (CG coords) — the gesture gate measures the
+    /// drag against it. Main-thread only (the tap runs on the main
+    /// runloop).
+    private var lastDown: CGPoint?
 
     /// Set by the app controller — presents the toolbar on the main thread.
     var onSelection: ((String, CGPoint) -> Void)?
@@ -25,6 +29,45 @@ final class SelectionPipeline {
     /// it before the AX work queue).
     var ownFrames: () -> [NSRect] = { [] }
 
+    // MARK: gesture qualification (openclip MacSelectionMonitor parity)
+
+    /// A mouse-up only counts as a selection gesture when it was a drag
+    /// (moved > 3 pt from the press) or a multi-click (double/triple word
+    /// select). Without this gate every plain click re-reads the app's
+    /// RETAINED old selection and pops the bar out of nowhere — and the
+    /// second press of a double-click killed the bar the first press had
+    /// just shown (the 600 ms dedup gate then blocked the re-show).
+    static func isDragOrMultiClick(down: CGPoint?, up: CGPoint, clickCount: Int) -> Bool {
+        if clickCount >= 2 { return true }
+        guard let down else { return true } // no press seen: assume a drag
+        let dx = up.x - down.x, dy = up.y - down.y
+        return dx * dx + dy * dy > 9.0
+    }
+
+    /// Key gestures that mean "a selection just happened": ⌘A / ⌘L select a
+    /// whole container; Shift + arrows/Home/End/Page keys extend one. The
+    /// whole-container gestures require the exact command set; extend
+    /// gestures fire for shift with optional option/command — plain typing
+    /// and unrelated shortcuts never match. Device bits (function/
+    /// numericPad/help) and capsLock are stripped first: Home/End/Page
+    /// carry .function, capsLock rides along while engaged.
+    static func isSelectionKeyGesture(keyCode: UInt16, flags: NSEvent.ModifierFlags) -> Bool {
+        let gesture = flags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .function, .numericPad, .help])
+        // contains+disjoint instead of exact equality: synthesized and
+        // session-delivered events carry stray high bits (observed
+        // 0x20000000 riding along) that break == and isSubset checks.
+        if gesture.contains(.command), gesture.isDisjoint(with: [.shift, .option, .control]) {
+            return keyCode == 0x00 || keyCode == 0x25 // kVK_ANSI_A / kVK_ANSI_L
+        }
+        if gesture.contains(.shift), gesture.isDisjoint(with: [.control]) {
+            return [0x7B, 0x7C, 0x7D, 0x7E,  // left/right/down/up
+                    0x73, 0x77,              // home/end
+                    0x74, 0x79].contains(keyCode) // page up/down
+        }
+        return false
+    }
     func start() {
         reload()
         pasteboardBaseline = NSPasteboard.general.changeCount
@@ -62,6 +105,19 @@ final class SelectionPipeline {
             }
             self.lastCopied = (text, Date())
             FileLog.write("SEL1 copy: recorded len=\(text.count)")
+
+            // The copy IS the browser flow's trigger: apps whose AX reads
+            // fail (Chrome marker lag, Electron editors) never produce a
+            // qualifying mouse-up AFTER the press — without showing here
+            // the bar could never appear there. Show now, anchored at the
+            // cursor, through the same presentation path (dedup gate
+            // lives in showPanel).
+            let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"
+            guard self.enabled, !self.excludedApps.contains(front) else { return }
+            let location = NSEvent.mouseLocation
+            for frame in self.ownFrames() where frame.contains(location) { return }
+            FileLog.write("SEL1 fire: len=\(text.count) front=\(front) via=copy-show")
+            self.onSelection?(text, location)
         }
     }
     private let workQueue = DispatchQueue(label: "lexi.selection.ax", qos: .userInitiated)
@@ -84,7 +140,9 @@ final class SelectionPipeline {
             pipeline.observe(type: type, event: event)
             return Unmanaged.passRetained(event) // never consume clicks
         }
-        let mask = (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.leftMouseUp.rawValue)
+        let mask = (1 << CGEventType.leftMouseDown.rawValue)
+            | (1 << CGEventType.leftMouseUp.rawValue)
+            | (1 << CGEventType.keyDown.rawValue)
         guard let machPort = CGEvent.tapCreate(
             tap: CGEventTapLocation(rawValue: 1) ?? .cghidEventTap, // kCGSessionEventTap
             place: .headInsertEventTap,
@@ -101,28 +159,64 @@ final class SelectionPipeline {
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, machPort, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: machPort, enable: true)
-        FileLog.write("SELECTION tap installed (AX direct read)")
+        FileLog.write("SELECTION tap installed (drag/multi-click/keyboard gestures)")
     }
 
     private func observe(type: CGEventType, event: CGEvent) {
-        guard type == .leftMouseUp else { return }
         // Snapshot every main-thread value HERE (the tap runs on the main
         // runloop): the AX work queue below must not touch AppKit state
         // (ownFrames reads NSApp/NSWindow) or race lastCopied.
-        let up = event.location
-        let frames = ownFrames()
-        let copied = lastCopied
-        let isEnabled = enabled
-        let excluded = excludedApps
-        // Never read AX inside the tap callback: remote apps can take the
-        // full messaging timeout, which both freezes this run loop and gets
-        // the tap killed by the system. Hand off to a worker.
-        workQueue.async { [weak self] in
-            self?.handleMouseUp(
-                up: up, ownFrames: frames, lastCopied: copied,
-                enabled: isEnabled, excludedApps: excluded)
+        switch type {
+        case .leftMouseDown:
+            lastDown = event.location
+
+        case .leftMouseUp:
+            let up = event.location
+            let down = lastDown
+            lastDown = nil
+            let clickCount = Int(event.getIntegerValueField(.mouseEventClickState))
+            // Gesture gate: a plain stationary click is caret placement or
+            // UI activation, never a selection — skip without touching AX
+            // (the app's retained old selection must not re-pop the bar).
+            guard Self.isDragOrMultiClick(down: down, up: up, clickCount: clickCount) else {
+                FileLog.write("SEL1 skip: click not a selection gesture (count=\(clickCount))")
+                return
+            }
+            let frames = ownFrames()
+            let copied = lastCopied
+            let isEnabled = enabled
+            let excluded = excludedApps
+            // Never read AX inside the tap callback: remote apps can take the
+            // full messaging timeout, which both freezes this run loop and
+            // gets the tap killed by the system. Hand off to a worker.
+            workQueue.async { [weak self] in
+                self?.handleMouseUp(
+                    up: up, ownFrames: frames, lastCopied: copied,
+                    enabled: isEnabled, excludedApps: excluded)
+            }
+
+        case .keyDown:
+            // same retrieval path — keyboard-only selections surface the
+            // bar too. Listen-only: the event always passes through.
+            let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+            let flags = NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue))
+            guard Self.isSelectionKeyGesture(keyCode: keyCode, flags: flags) else { return }
+            let point = event.location // key events carry the mouse position
+            let frames = ownFrames()
+            let copied = lastCopied
+            let isEnabled = enabled
+            let excluded = excludedApps
+            workQueue.async { [weak self] in
+                self?.handleMouseUp(
+                    up: point, ownFrames: frames, lastCopied: copied,
+                    enabled: isEnabled, excludedApps: excluded)
+            }
+
+        default:
+            break
         }
     }
+
 
     private func handleMouseUp(
         up upLocation: CGPoint,
@@ -132,6 +226,14 @@ final class SelectionPipeline {
         excludedApps: [String]
     ) {
         guard enabled else { return }
+        // Settle beat: the session tap observes the gesture BEFORE the
+        // target app processes it — reading AX immediately races the
+        // app's own selection update (the "drag sometimes doesn't fire"
+        // flakiness). Give the app one beat first; we're off-main here
+        // so this never blocks UI. (openclip's async hop has the same
+        // effect implicitly.)
+        Thread.sleep(forTimeInterval: 0.04)
+
         // Drag selections and click selections both land here: the AX read
         // below decides — no selection (window drag, scroll gesture, plain
         // click) simply skips via the empty-text guard.
@@ -171,6 +273,14 @@ final class SelectionPipeline {
             return
         }
 
+        // Whole-container gestures can select megabytes (⌘A over a
+        // terminal scrollback): the bar and card are for sentence-scale
+        // text — refuse the monster (openclip maxTextLength parity).
+        guard text.count <= 20_000 else {
+            FileLog.write("SEL1 skip: text too large (\(text.count))")
+            return
+        }
+
         FileLog.write("SEL1 fire: len=\(text.count) front=\(frontBundle) via=\(source)")
         DispatchQueue.main.async { [weak self] in
             self?.onSelection?(text, cocoa)
@@ -182,15 +292,47 @@ final class SelectionPipeline {
     /// markers. (The copied fallback lives in handleMouseUp.) Ported from
     /// read_selected_text_via_ax / _ax_range / _web_area.
     static func readSelectedText() -> String? {
+        // Focused UI element comes from the focused APPLICATION, never
+        // from the system-wide element: the system-wide read is "the
+        // classic source of stale or missing selection reads" (openclip
+        // AXElementInspector) — on Chromium it fails outright, killing
+        // the whole chain before the web tier ever runs.
         let system = AXUIElementCreateSystemWide()
-        var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            system, kAXFocusedUIElementAttribute as CFString, &focusedRef
-        ) == .success, let raw = focusedRef else { return nil }
-        // The AX API guarantees the CF type on success; the compiler rejects
-        // both `as?` (always-succeeds) and `as` (not convertible) for CF
-        // class references — bit-cast is the canonical bridge.
-        let focused = unsafeBitCast(raw, to: AXUIElement.self)
+        var appRef: CFTypeRef?
+        let appError = AXUIElementCopyAttributeValue(
+            system, kAXFocusedApplicationAttribute as CFString, &appRef)
+        var app: AXUIElement?
+        if appError == .success, let appRaw = appRef {
+            app = unsafeBitCast(appRaw, to: AXUIElement.self)
+        } else {
+            // Fallback: build the element from the frontmost pid — the
+            // system-wide query can fail outright (observed with
+            // Chromium frontmost).
+            guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else {
+                return nil
+            }
+            app = AXUIElementCreateApplication(pid)
+        }
+        guard let app else { return nil }
+        // Wake Chromium's accessibility tree: without an assistive client
+        // setting the manual flag, Chrome never materializes its web AX
+        // (focused-element queries fail, no markers) — the standard
+        // PopClip-class remedy, idempotent on every engine. Engines have
+        // answered either name over the years; set both.
+        for flag in ["AXManualAccessibility", "AXEnhancedUserInterface"] {
+            AXUIElementSetAttributeValue(app, flag as CFString, kCFBooleanTrue)
+        }
+        AXUIElementSetMessagingTimeout(app, 0.3)
+        // Chromium materializes its tree ASYNCHRONOUSLY after the wake —
+        // the first focused-element query can still fail. Retry briefly.
+        var focused: AXUIElement?
+        for attempt in 0..<6 {
+            if attempt > 0 { Thread.sleep(forTimeInterval: 0.05) }
+            focused = axCopyElementAttribute(app, kAXFocusedUIElementAttribute as CFString)
+            if focused != nil { break }
+        }
+        guard let focused else { return nil }
+
 
         // Self-selection guard: our own editors (rename select-all etc.)
         // are UI, not a user selection in a source app.
@@ -251,6 +393,33 @@ final class SelectionPipeline {
     /// area's) AXSelectedTextMarkerRange resolved through the parameterized
     /// AXStringForTextMarkerRange — no Cmd+C, no clipboard.
     private static func readSelectedTextViaWebArea() -> String? {
+        // Settle-retry, openclip webAreaSettle parity (6 × 50 ms): web
+        // engines update the selection markers ASYNCHRONOUSLY after the
+        // gesture (Chrome renderer IPC can exceed 150 ms), and the first
+        // element resolution is often wrong (focus still on browser
+        // chrome). Poll the cached element; when it yields nothing,
+        // RE-RESOLVE the targets fresh instead of retrying stale ones —
+        // the old single-resolution loop was why Chrome "never"
+        // triggered.
+        var targets: (focused: AXUIElement, webArea: AXUIElement)?
+        for attempt in 0..<6 {
+            if attempt > 0 { Thread.sleep(forTimeInterval: 0.05) }
+            if attempt % 2 == 0 || targets == nil {
+                targets = resolveWebAreaTargets()
+            }
+            guard let current = targets else { continue }
+            if let text = pollWebSelection(focused: current.focused, webArea: current.webArea) {
+                return text
+            }
+
+        }
+        return nil
+    }
+
+    /// Focused element + web area, resolved fresh from the focused
+    /// APPLICATION (the system-wide focused element is a classic
+    /// stale-read source).
+    private static func resolveWebAreaTargets() -> (focused: AXUIElement, webArea: AXUIElement)? {
         let system = AXUIElementCreateSystemWide()
         var appRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
@@ -259,23 +428,30 @@ final class SelectionPipeline {
         let app = unsafeBitCast(raw, to: AXUIElement.self)
         AXUIElementSetMessagingTimeout(app, 0.5)
 
-        // The focused element comes from the application — the system-wide
-        // focused element is a classic stale-read source.
         guard let focused = axCopyElementAttribute(app, kAXFocusedUIElementAttribute as CFString),
               let webArea = findWebAreaAncestor(focused)
                   ?? findWebAreaInFocusedWindow(app)
         else { return nil }
+        return (focused, webArea)
+    }
 
-        // Retry briefly: the renderer can lag the selection gesture.
-        for attempt in 0..<3 {
-            if attempt > 0 { Thread.sleep(forTimeInterval: 0.05) }
-            guard let markerRange = copyMarkerRange(focused) ?? copyMarkerRange(webArea) else { continue }
+    /// One polling pass against live elements: marker range from the
+    /// focused element or the web area, resolved through the web area's
+    /// parameterized attribute; plain selected-text attribute as a final
+    /// fallback (some engines).
+    private static func pollWebSelection(focused: AXUIElement, webArea: AXUIElement) -> String? {
+        for element in [focused, webArea] {
+            guard let markerRange = copyMarkerRange(element) else { continue }
             var out: CFTypeRef?
-            guard AXUIElementCopyParameterizedAttributeValue(
+            if AXUIElementCopyParameterizedAttributeValue(
                 webArea, "AXStringForTextMarkerRange" as CFString, markerRange, &out
             ) == .success, let text = out as? String,
-                !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            else { continue }
+                !text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
+                return text
+            }
+        }
+        if let text = axStringAttribute(webArea, kAXSelectedTextAttribute as CFString),
+           !text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
             return text
         }
         return nil

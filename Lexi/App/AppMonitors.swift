@@ -36,6 +36,15 @@ extension SelectionToolbarApp {
         // Accessibility grant; without it this silently never fires and the
         // other dismissal paths still work.
         globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            // Selection gestures (⌘A/⌘L, ⇧+extend keys) are triggers, not
+            // "moved on" typing: hiding here would kill the bar between
+            // two extend presses, and the 600 ms dedup gate would then
+            // block the re-show — extend-by-extend selection would end
+            // with no bar at all.
+            if SelectionPipeline.isSelectionKeyGesture(
+                keyCode: event.keyCode, flags: event.modifierFlags) {
+                return
+            }
             self?.hidePanel()
             if event.keyCode == 53 { // kVK_Escape
                 self?.escapeResultCardIfNeeded()
