@@ -3,9 +3,42 @@
 <plist version="1.0">
 <dict>
 	<key>files</key>
-	<dict/>
+	<dict>
+		<key>Resources/AppIcon.icns</key>
+		<data>
+		Ox5zHFVW9Eoe0yNncWMPGOGKBRg=
+		</data>
+		<key>Resources/LexiLogo.svg</key>
+		<data>
+		VJZcVzIuUMpgydcW/Rmm7XrEwNk=
+		</data>
+	</dict>
 	<key>files2</key>
-	<dict/>
+	<dict>
+		<key>PlugIns/LexiFinderSync.appex</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			3gqZqTJKp0G+FPZtGS7HsPjXrJE=
+			</data>
+			<key>requirement</key>
+			<string>identifier "com.lexi.selection-helper.FinderSync" and anchor apple generic and certificate leaf[subject.CN] = "Apple Development: chengweipeng123@163.com (D8YJ3P5B53)" and certificate 1[field.1.2.840.113635.100.6.2.1] /* exists */</string>
+		</dict>
+		<key>Resources/AppIcon.icns</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			ekv6NBtnxS6rGhfUtDsOSC3NySMqor8oAOx0RHVjm0E=
+			</data>
+		</dict>
+		<key>Resources/LexiLogo.svg</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			rEQzh8BbWdk4Qh2w68x2Zh0z5qQFq+qPum9dsUhP8qc=
+			</data>
+		</dict>
+	</dict>
 	<key>rules</key>
 	<dict>
 		<key>^Resources/</key>
