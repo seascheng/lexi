@@ -243,7 +243,7 @@ struct AppearanceSettingsPane: View {
             }
 
             Section {
-                Picker("Panel blur", selection: Binding(
+                Picker("Panel frost", selection: Binding(
                     get: { model.panelBlur },
                     set: {
                         model.panelBlur = $0
@@ -256,7 +256,7 @@ struct AppearanceSettingsPane: View {
                 }
                 .pickerStyle(.menu)
 
-                LabeledContent("Panel opacity") {
+                LabeledContent("Edge & tint") {
                     HStack(spacing: 12) {
                         Slider(
                             value: Binding(
@@ -281,7 +281,7 @@ struct AppearanceSettingsPane: View {
             } header: {
                 Text("Panels")
             } footer: {
-                Text("Blur presets map to system materials; opacity sets the veil (macOS 26+: the glass tint).")
+                Text("Frost sets the material density (Solid is opaque); Edge & tint scales the rim light and glass tint.")
             }
         }
         .formStyle(.grouped)

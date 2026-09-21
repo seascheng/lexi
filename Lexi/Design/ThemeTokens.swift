@@ -121,9 +121,9 @@ enum PanelStyle {
         var material: NSVisualEffectView.Material {
             if #available(macOS 26.0, *) {
                 switch self {
-                case .clear: return .menu    // system menu/popover frost
+                case .clear: return .menu    // light system frost
                 case .frosted: return .sheet // thicker overlay frost
-                case .solid: return .sidebar
+                case .solid: return .windowBackground // genuinely opaque
                 }
             }
             switch self {
@@ -134,20 +134,25 @@ enum PanelStyle {
         }
     }
 
-    /// Live, user-configurable surface state pushed over /theme.
-    /// `opacity` is the scrim alpha for the dark theme (default 0.40);
-    /// light scales it ×1.375 to preserve the shipped look.
+    /// Live, user-configurable surface state (Appearance pane). On 26+
+    /// `opacity` drives the edge rim/sheen gain and the glass tint; on
+    /// older systems it is the scrim alpha over the material.
     static var opacity: CGFloat = 0.40
     static var blur: Blur = .clear
 
-    /// Every live surface material view (weak) — blur changes retune them
-    /// without rebuilding panels.
     private static var materialViews: [WeakMaterialView] = []
     private struct WeakMaterialView { weak var view: NSVisualEffectView? }
+    /// Live edge overlays — the Appearance slider retints them in place.
+    private static var edgeOverlays: [WeakEdgeOverlay] = []
+    private struct WeakEdgeOverlay { weak var view: PanelEdgeOverlay? }
 
     static func register(_ view: NSVisualEffectView) {
         materialViews.append(WeakMaterialView(view: view))
         view.material = blur.material
+    }
+
+    static func registerEdge(_ overlay: PanelEdgeOverlay) {
+        edgeOverlays.append(WeakEdgeOverlay(view: overlay))
     }
 
     static func update(opacity newOpacity: CGFloat?, blur newBlur: Blur?) {
@@ -155,6 +160,15 @@ enum PanelStyle {
         if let newBlur { blur = newBlur }
         materialViews.removeAll { $0.view == nil }
         materialViews.forEach { $0.view?.material = blur.material }
+        // The slider's visible effect on 26+: edge light + glass tint.
+        edgeOverlays.removeAll { $0.view == nil }
+        edgeOverlays.forEach { $0.view?.retint() }
+    }
+
+    /// Theme flips retint every live overlay (dark/light rims differ).
+    static func retintEdges(dark: Bool) {
+        edgeOverlays.removeAll { $0.view == nil }
+        edgeOverlays.forEach { $0.view?.dark = dark }
     }
 
     /// Theme-tinted veil between the glass material and the content
@@ -171,14 +185,13 @@ enum PanelStyle {
             ? NSColor.white.withAlphaComponent(0.12)
             : NSColor.black.withAlphaComponent(0.10)
     }
-
     /// Tint for the 26+ glass capsules (the sanctioned "scrim":
-    /// `tintColor` colors both the glass and its backing). Half the veil
-    /// alpha — `.regular` glass already adapts luminosity, the tint only
-    /// lends the theme its identity.
+    /// `tintColor` colors both the glass and its backing). A whisper —
+    /// `.regular` glass adapts luminosity and the PanelEdgeOverlay rim
+    /// carries the edge definition, so the tint only lends identity.
     static func glassTint(dark: Bool) -> NSColor {
-        let base = min(max(opacity * 0.5, 0.05), 0.60)
-        let alpha = dark ? base : min(base * 1.5, 0.80)
+        let base = min(max(opacity * 0.35, 0.04), 0.45)
+        let alpha = dark ? base : min(base * 1.6, 0.55)
         return dark
             ? NSColor.black.withAlphaComponent(alpha)
             : NSColor.white.withAlphaComponent(alpha)
@@ -191,12 +204,77 @@ enum PanelStyle {
     static func applyContentScrim(to view: NSView, dark: Bool) {
         if #available(macOS 26.0, *) {
             view.layer?.backgroundColor = NSColor.clear.cgColor
+            retintEdges(dark: dark)
             return
         }
         view.layer?.backgroundColor = scrim(dark: dark).cgColor
     }
 }
 
+/// The luminous edge system chrome (Dock, Spotlight) gets for free but a
+/// bare material in a borderless window does not: a hairline rim that
+/// catches light at the top and settles at the bottom, plus a faint top
+/// sheen. Painted ABOVE the material, UNDER the content — the TinyCast /
+/// PopClip craft. Works on every background; no dependence on private
+/// material rendering. Intensity follows the Appearance "Edge & tint"
+/// slider (PanelStyle.opacity) live.
+final class PanelEdgeOverlay: NSView {
+    private let rimGradient = CAGradientLayer()
+    private let rimShape = CAShapeLayer()
+    private let sheen = CAGradientLayer()
+    private let cornerRadius: CGFloat
+    var dark: Bool {
+        didSet { if oldValue != dark { retint() } }
+    }
+
+    init(cornerRadius: CGFloat, dark: Bool) {
+        self.cornerRadius = cornerRadius
+        self.dark = dark
+        super.init(frame: .zero)
+        wantsLayer = true
+        // A gradient STROKE: the gradient layer masked to the shape's
+        // stroke (CAShapeLayer alone can't carry a color ramp).
+        rimShape.fillColor = nil
+        rimShape.lineWidth = 1
+        rimShape.strokeColor = NSColor.white.cgColor
+        rimGradient.mask = rimShape
+        layer?.addSublayer(rimGradient)
+        sheen.locations = [0, 1]
+        layer?.addSublayer(sheen)
+        PanelStyle.registerEdge(self)
+        retint()
+    }
+
+    required init?(coder: NSCoder) { fatalError("not supported") }
+
+    /// Non-flipped geometry: gradient index 0 = bottom, 1 = top.
+    func retint() {
+        let gain = 0.5 + PanelStyle.opacity
+        func c(_ color: NSColor, _ alpha: CGFloat) -> CGColor {
+            color.withAlphaComponent(min(alpha * gain, 1)).cgColor
+        }
+        rimGradient.colors = dark
+            ? [c(.white, 0.06), c(.white, 0.36)]
+            : [c(.black, 0.08), c(.white, 0.60)]
+        sheen.colors = dark
+            ? [NSColor.clear.cgColor, c(.white, 0.10)]
+            : [NSColor.clear.cgColor, c(.white, 0.16)]
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        rimShape.path = CGPath(
+            roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+            cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil
+        )
+        rimShape.frame = bounds
+        rimGradient.frame = bounds
+        sheen.frame = NSRect(x: 0, y: bounds.height - 14, width: bounds.width, height: 14)
+        CATransaction.commit()
+    }
+}
 /// Shared surface builder for every native panel. macOS 26+ splits the
 /// layers per HIG materials: floating CONTROL clusters (the selection
 /// pill) ride a real NSGlassEffectView — `.regular` blurs and adapts
@@ -225,6 +303,10 @@ func makePanelBackground(
             content.autoresizingMask = [.width, .height]
             content.wantsLayer = true
             glass.contentView = content
+            let edge = PanelEdgeOverlay(cornerRadius: cornerRadius, dark: dark)
+            edge.autoresizingMask = [.width, .height]
+            edge.frame = glass.bounds
+            content.addSubview(edge)
             return (glass, content, true)
         }
         // Content panel: standard material. The vibrancy is composited by
@@ -242,6 +324,10 @@ func makePanelBackground(
         vibrancy.blendingMode = .behindWindow
         vibrancy.state = .active
         clip.addSubview(vibrancy)
+        let edge = PanelEdgeOverlay(cornerRadius: cornerRadius, dark: dark)
+        edge.autoresizingMask = [.width, .height]
+        edge.frame = clip.bounds
+        clip.addSubview(edge)
         let content = NSView(frame: clip.bounds)
         content.autoresizingMask = [.width, .height]
         content.wantsLayer = true
