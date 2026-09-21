@@ -326,10 +326,23 @@ final class ShortcutMonitor {
             if let raw = Self.rawKeyHandler {
                 DispatchQueue.main.async { raw(keyCode, flags.rawValue) }
             }
-            // Plain Cmd+C — the browser fallback trigger.
+            // Every keyDown dirties every double-press detector FIRST —
+            // before any early return. The historical bug: the Cmd+C copy
+            // path returned early, so the C between two Cmd presses was
+            // never noted; ⌘C → ⌘V then read as a clean double-Cmd and
+            // the panel stole focus mid-paste.
+            for route in routes {
+                route.detector.noteNonModKeyDown()
+            }
+            // Plain Cmd+C — the browser fallback trigger. A synthetic ⌘C
+            // (Sublime-class selection read) is NOT a user copy: pass the
+            // event through untouched so the pipeline's synthetic path owns
+            // the result (no double record, no double toolbar).
             if Self.isCopyCommand(keyCode: keyCode, flags: flags) {
-                DispatchQueue.main.async { [weak self] in
-                    self?.onCopyCommand?()
+                if !SelectionPipeline.syntheticCopyInFlight {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onCopyCommand?()
+                    }
                 }
                 return Unmanaged.passRetained(event)
             }
@@ -343,7 +356,6 @@ final class ShortcutMonitor {
             // (Cmd+Space → Spotlight) would otherwise trigger BOTH Lexi
             // and the system handler on one press.
             for route in routes {
-                route.detector.noteNonModKeyDown()
                 if matchesCombo(route, keyCode: keyCode, flags: flags) {
                     DispatchQueue.main.async { route.fire() }
                     return nil

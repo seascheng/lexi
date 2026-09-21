@@ -120,7 +120,95 @@ final class SelectionPipeline {
             self.onSelection?(text, location)
         }
     }
+
+
+    /// True while the synthetic-⌘C dance posts its events. ShortcutMonitor
+    /// consults this to let the synthetic Cmd+C pass without firing the
+    /// user-copy fallback (no double record, no double toolbar).
+    /// Main-thread only — the dance and the shortcut tap both run there.
+    static var syntheticCopyInFlight = false
+
+    /// Editors whose selection is unreadable via every AX tier (they draw
+    /// their own text). For these the synthetic ⌘C is the only read path.
+    /// Comma-joined bundle ids, extendable via the `syntheticCopyApps`
+    /// setting without a rebuild.
+    static let syntheticCopyApps: Set<String> = {
+        let raw = LexiStore.setting("syntheticCopyApps")
+            ?? "com.sublimetext.4,com.sublimetext.3"
+        return Set(
+            raw.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty })
+    }()
+
+    /// Reads the selection by provoking a real Cmd+C and restoring the
+    /// pasteboard. The hardening rules (the historical failure modes of
+    /// this approach — literal "c"/"^C" typed into editors, clipboard
+    /// litter):
+    /// - events carry their OWN CGEventSource(.combinedSessionState) with
+    ///   .maskCommand on BOTH down and up — a flags/session desync is what
+    ///   leaked a bare "c" before;
+    /// - down and up post back-to-back within one main-thread turn — no
+    ///   runloop turn between them for the user's physical modifiers to
+    ///   interleave;
+    /// - the pasteboard is snapshotted (every item, every type) first and
+    ///   restored after — an originally empty board is cleared again, so
+    ///   nothing lingers;
+    /// - ClipboardMonitor suppression spans the whole window: neither the
+    ///   provoked copy nor the restore enters history;
+    /// - bounded 0.6 s wait: no changeCount bump → restore → nil.
+    /// MUST run on the main thread (pasteboard + event posting).
+    private func readViaSyntheticCopy() -> String? {
+        let pb = NSPasteboard.general
+        let saved: [NSPasteboardItem] = (pb.pasteboardItems ?? []).map { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    copy.setData(data, forType: type)
+                }
+            }
+            return copy
+        }
+        ClipboardMonitor.shared.beginCaptureSuppression()
+        Self.syntheticCopyInFlight = true
+        defer {
+            Self.syntheticCopyInFlight = false
+            if saved.isEmpty {
+                pb.clearContents()
+            } else {
+                pb.clearContents()
+                pb.writeObjects(saved)
+            }
+            ClipboardMonitor.shared.endCaptureSuppression()
+            // noteCopyCommand's baseline must reflect the restored state.
+            pasteboardBaseline = pb.changeCount
+        }
+
+        let baseline = pb.changeCount
+        let source = CGEventSource(stateID: .combinedSessionState)
+        for keyDown in [true, false] {
+            let event = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: keyDown)
+            event?.flags = .maskCommand
+            event?.post(tap: .cghidEventTap)
+        }
+
+        let deadline = Date().addingTimeInterval(0.6)
+        while Date() < deadline {
+            // Service the runloop while waiting: the copy lands through
+            // normal app event processing, and the poll timer keeps firing.
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+            guard pb.changeCount > baseline else { continue }
+            guard let text = pb.string(forType: .string),
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { continue }
+            FileLog.write("SEL1 synthetic copy: len=\(text.count)")
+            return text
+        }
+        FileLog.write("SEL1 synthetic copy: no pasteboard bump")
+        return nil
+    }
     private let workQueue = DispatchQueue(label: "lexi.selection.ax", qos: .userInitiated)
+
 
     private func installTap() {
         let callback: CGEventTapCallBack = { _, type, event, userInfo in
@@ -268,6 +356,25 @@ final class SelectionPipeline {
             text = copied.text
             source = "copied"
         }
+        // Tier 4 — Sublime-class editors expose no AX selection at all:
+        // provoke a real Cmd+C, peek, restore. Runs on the main thread
+        // (pasteboard + event posting); the semaphore hop keeps the
+        // workQueue from blocking main.
+        if text.isEmpty, Self.syntheticCopyApps.contains(frontBundle) {
+            let semaphore = DispatchSemaphore(value: 0)
+            var picked: String?
+            DispatchQueue.main.async { [weak self] in
+                picked = self?.readViaSyntheticCopy()
+                semaphore.signal()
+            }
+            _ = semaphore.wait(timeout: .now() + 1.0)
+            if let viaCopy = picked?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !viaCopy.isEmpty {
+                text = viaCopy
+                source = "synthetic-copy"
+            }
+        }
+
         guard !text.isEmpty else {
             FileLog.write("SEL1 skip: no AX text (front=\(frontBundle))")
             return

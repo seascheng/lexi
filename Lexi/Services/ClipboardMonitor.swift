@@ -48,7 +48,15 @@ final class ClipboardMonitor {
     private var iconsDir: URL?
     private var timer: Timer?
     private var lastChangeCount: Int = 0
+    /// >0 while SelectionPipeline's synthetic ⌘C reads a selection from a
+    /// non-AX editor (Sublime): both the copy it provokes and the restore
+    /// that follows must stay out of history. Main-thread only — poll()
+    /// and the dance both run on the main thread.
+    private var suppressionDepth = 0
 
+    /// Suppresses history capture around a synthetic-selection window.
+    func beginCaptureSuppression() { suppressionDepth += 1 }
+    func endCaptureSuppression() { suppressionDepth = max(0, suppressionDepth - 1) }
     private init() {}
 
     /// Starts polling. The baseline is the CURRENT changeCount: after a
@@ -77,6 +85,14 @@ final class ClipboardMonitor {
     private func poll() {
         guard let store else { return }
         let pb = NSPasteboard.general
+        // A synthetic-selection window swallows everything in it; the
+        // baseline keeps tracking so post-window polls see a pasteboard
+        // that has "always been like this".
+        if suppressionDepth > 0 {
+            lastChangeCount = pb.changeCount
+            return
+        }
+
         guard pb.changeCount != lastChangeCount else { return }
         lastChangeCount = pb.changeCount
 
