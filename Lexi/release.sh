@@ -93,9 +93,7 @@ fi
 
 echo "==> git"
 git push origin main
-if git rev-parse "$TAG" >/dev/null 2>&1; then
-    git tag -f "$TAG" >/dev/null
-fi
+git tag -f "$TAG" >/dev/null
 git push -f origin "$TAG"
 
 echo "==> GitHub release"
