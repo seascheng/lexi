@@ -319,9 +319,19 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     /// (Cmd+C/V/X/A) live on. Merges with whatever installEditMenu()
     /// already put up — never drops it.
     func installAppMainMenu() {
+        // Idempotent: once the Lexi app menu is up, later Settings opens
+        // keep it (rebuilding dropped nothing but wasted work).
+        if NSApp.mainMenu?.items.contains(where: { $0.submenu?.title == "Lexi" }) == true {
+            return
+        }
         let editMenu: NSMenu
-        if let existing = NSApp.mainMenu?.items.first(where: { $0.submenu?.title == "Edit" })?.submenu {
-            editMenu = existing
+        if let editItem = NSApp.mainMenu?.items.first(where: { $0.submenu?.title == "Edit" }) {
+            // Reuse the standing Edit menu (installEditMenu's), but DETACH
+            // it first: macOS 27's setSubmenu: throws
+            // "already a submenu of some menu" if the old owner still
+            // holds it — the release-blocking crash on first Settings open.
+            editMenu = editItem.submenu!
+            editItem.submenu = nil
         } else {
             editMenu = NSMenu(title: "Edit")
             editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
