@@ -279,6 +279,10 @@ extension SelectionToolbarApp {
 
         resultTabsView.frame = NSRect(x: 0, y: tabsY, width: width, height: tabsH)
         cardPanelTabsView.frame = NSRect(x: 8, y: 2, width: width - 48, height: 28)
+        // The pills center inside the container (layoutPanelTabPills) but
+        // were only laid out at build time — a user resize changed the
+        // container width without recentering them. Re-run on every pass.
+        layoutPanelTabPills()
 
         inputContainer.isHidden = !isTranslate
         if isTranslate {
