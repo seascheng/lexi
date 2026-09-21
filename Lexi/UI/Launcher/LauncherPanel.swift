@@ -176,8 +176,22 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         // is even visible gets the request refused on macOS 14+, and the
         // aborted handshake then swallows the key request too — the
         // "panel opens, typing lands in the previous app" failure.
+        // Materialize at alpha 0 (the card's pattern): a never-shown
+        // borderless window composites its layers and window blur a frame
+        // late — opaque ordering flashed a raw window frame on first open.
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        panel.alphaValue = 0
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(searchField.field)
+        if reduceMotion {
+            panel.alphaValue = 1
+        } else {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.15
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1
+            }
+        }
         // THEN activate (Spotlight/Raycast rule): a key panel of an
         // inactive app renders fine but the WindowServer routes its
         // clicks to the active app's window.

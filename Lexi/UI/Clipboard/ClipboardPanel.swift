@@ -219,8 +219,24 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         syncChips()
         reload()
         placePanel()
+        // Materialize pattern (the card's): a never-shown borderless window
+        // composites its layer tree and window-server blur a frame LATE —
+        // ordering front opaque showed one raw window frame before the
+        // finished panel on the first open per launch. Order front fully
+        // transparent, then fade in.
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        panel.alphaValue = 0
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(searchField.field)
+        if reduceMotion {
+            panel.alphaValue = 1
+        } else {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.15
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1
+            }
+        }
     }
 
     func hide(notify: Bool) {
