@@ -22,3 +22,9 @@ Thumbs.db
 
 # Debug scratch (screenshots, probes)
 .debug/
+
+# Agent tool config (kept locally, never pushed)
+.agents/
+.claude/
+CLAUDE.md
+skills-lock.json
