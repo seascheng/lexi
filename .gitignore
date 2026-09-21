@@ -1,4 +1,5 @@
-# Swift build output (the app bundle is force-added per release flow)
+# Release artifacts (Lexi/release.sh output)
+Lexi/dist/
 Lexi/LexiSelectionHelper.app/
 
 # Local environment and secrets
