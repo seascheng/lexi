@@ -399,33 +399,14 @@ final class SelectionPipeline {
     /// markers. (The copied fallback lives in handleMouseUp.) Ported from
     /// read_selected_text_via_ax / _ax_range / _web_area.
     static func readSelectedText() -> String? {
-        // Focused UI element comes from the focused APPLICATION, never
-        // from the system-wide element: the system-wide read is "the
-        // classic source of stale or missing selection reads" (openclip
-        // AXElementInspector) — on Chromium it fails outright, killing
-        // the whole chain before the web tier ever runs.
-        let system = AXUIElementCreateSystemWide()
-        var appRef: CFTypeRef?
-        let appError = AXUIElementCopyAttributeValue(
-            system, kAXFocusedApplicationAttribute as CFString, &appRef)
-        var app: AXUIElement?
-        if appError == .success, let appRaw = appRef {
-            app = unsafeBitCast(appRaw, to: AXUIElement.self)
-        } else {
-            // Fallback: build the element from the frontmost pid — the
-            // system-wide query can fail outright (observed with
-            // Chromium frontmost).
-            guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else {
-                return nil
-            }
-            app = AXUIElementCreateApplication(pid)
-        }
-        guard let app else { return nil }
+        guard let app = resolveFocusedApp() else { return nil }
         // Wake Chromium's accessibility tree: without an assistive client
         // setting the manual flag, Chrome never materializes its web AX
         // (focused-element queries fail, no markers) — the standard
         // PopClip-class remedy, idempotent on every engine. Engines have
-        // answered either name over the years; set both.
+        // answered either name over the years; set both. Chrome answers
+        // an error for the set yet still honors it — materialization is
+        // asynchronous (seconds), which the settle-retry loops absorb.
         for flag in ["AXManualAccessibility", "AXEnhancedUserInterface"] {
             AXUIElementSetAttributeValue(app, flag as CFString, kCFBooleanTrue)
         }
@@ -438,35 +419,56 @@ final class SelectionPipeline {
             focused = axCopyElementAttribute(app, kAXFocusedUIElementAttribute as CFString)
             if focused != nil { break }
         }
-        guard let focused else { return nil }
 
+        if let focused {
+            // Self-selection guard: our own editors (rename select-all etc.)
+            // are UI, not a user selection in a source app.
+            var pid: Int32 = 0
+            AXUIElementGetPid(focused, &pid)
+            if pid == ProcessInfo.processInfo.processIdentifier {
+                return nil
+            }
+            AXUIElementSetMessagingTimeout(focused, 0.3)
 
-        // Self-selection guard: our own editors (rename select-all etc.)
-        // are UI, not a user selection in a source app.
-        var pid: Int32 = 0
-        AXUIElementGetPid(focused, &pid)
-        if pid == ProcessInfo.processInfo.processIdentifier {
-            return nil
-        }
-        AXUIElementSetMessagingTimeout(focused, 0.3)
+            // Tier 1: direct attribute.
+            if let text = axStringAttribute(focused, kAXSelectedTextAttribute as CFString),
+               !text.isEmpty {
+                return text
+            }
 
-        // Tier 1: direct attribute.
-        if let text = axStringAttribute(focused, kAXSelectedTextAttribute as CFString),
-           !text.isEmpty {
-            return text
-        }
-
-        // Tier 2: AXValue sliced by AXSelectedTextRange — terminals expose
-        // no AXSelectedText but do expose value + range.
-        if let text = readSelectedTextViaAxRange(focused) {
-            return text
+            // Tier 2: AXValue sliced by AXSelectedTextRange — terminals expose
+            // no AXSelectedText but do expose value + range.
+            if let text = readSelectedTextViaAxRange(focused) {
+                return text
+            }
         }
 
         // Tier 3: web-area text markers (Chrome/Safari/Edge/Arc/Electron).
-        if let text = readSelectedTextViaWebArea() {
+        // Chromium reports kAXFocusedUIElement as noValue while its tree is
+        // waking (and sometimes returns a bare AXGroup with no attributes) —
+        // the window-descendant web-area path must run regardless.
+        if let text = readSelectedTextViaWebArea(app) {
             return text
         }
         return nil
+    }
+
+    /// Focused APPLICATION element. The system-wide query is the preferred
+    /// source but goes cannotComplete while Chrome's tree is waking
+    /// (observed — it killed the whole web tier from resolveWebAreaTargets);
+    /// fall back to the frontmost pid, which answers immediately.
+    private static func resolveFocusedApp() -> AXUIElement? {
+        let system = AXUIElementCreateSystemWide()
+        var appRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(
+            system, kAXFocusedApplicationAttribute as CFString, &appRef) == .success,
+            let appRaw = appRef {
+            return unsafeBitCast(appRaw, to: AXUIElement.self)
+        }
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else {
+            return nil
+        }
+        return AXUIElementCreateApplication(pid)
     }
 
     private static func axStringAttribute(_ element: AXUIElement, _ attribute: CFString) -> String? {
@@ -499,7 +501,7 @@ final class SelectionPipeline {
     /// Web selection via text markers: the focused element's (or the web
     /// area's) AXSelectedTextMarkerRange resolved through the parameterized
     /// AXStringForTextMarkerRange — no Cmd+C, no clipboard.
-    private static func readSelectedTextViaWebArea() -> String? {
+    private static func readSelectedTextViaWebArea(_ app: AXUIElement) -> String? {
         // Settle-retry, openclip webAreaSettle parity (6 × 50 ms): web
         // engines update the selection markers ASYNCHRONOUSLY after the
         // gesture (Chrome renderer IPC can exceed 150 ms), and the first
@@ -508,11 +510,11 @@ final class SelectionPipeline {
         // RE-RESOLVE the targets fresh instead of retrying stale ones —
         // the old single-resolution loop was why Chrome "never"
         // triggered.
-        var targets: (focused: AXUIElement, webArea: AXUIElement)?
+        var targets: (focused: AXUIElement?, webArea: AXUIElement)?
         for attempt in 0..<6 {
             if attempt > 0 { Thread.sleep(forTimeInterval: 0.05) }
             if attempt % 2 == 0 || targets == nil {
-                targets = resolveWebAreaTargets()
+                targets = resolveWebAreaTargets(app)
             }
             guard let current = targets else { continue }
             if let text = pollWebSelection(focused: current.focused, webArea: current.webArea) {
@@ -523,31 +525,23 @@ final class SelectionPipeline {
         return nil
     }
 
-    /// Focused element + web area, resolved fresh from the focused
-    /// APPLICATION (the system-wide focused element is a classic
-    /// stale-read source).
-    private static func resolveWebAreaTargets() -> (focused: AXUIElement, webArea: AXUIElement)? {
-        let system = AXUIElementCreateSystemWide()
-        var appRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            system, kAXFocusedApplicationAttribute as CFString, &appRef
-        ) == .success, let raw = appRef else { return nil }
-        let app = unsafeBitCast(raw, to: AXUIElement.self)
+    /// Web area for the app element passed in (resolving through the
+    /// system-wide focused application AGAIN here used to fail with
+    /// cannotComplete on waking Chrome, killing the whole web tier). The
+    /// focused ELEMENT is optional: Chromium reports it as noValue while
+    /// its tree materializes, but the focused WINDOW still exposes the
+    /// web area — the descendant path must carry the tier alone then.
+    private static func resolveWebAreaTargets(_ app: AXUIElement) -> (focused: AXUIElement?, webArea: AXUIElement)? {
         AXUIElementSetMessagingTimeout(app, 0.5)
-
-        guard let focused = axCopyElementAttribute(app, kAXFocusedUIElementAttribute as CFString),
-              let webArea = findWebAreaAncestor(focused)
-                  ?? findWebAreaInFocusedWindow(app)
+        let focused = axCopyElementAttribute(app, kAXFocusedUIElementAttribute as CFString)
+        guard let webArea = focused.flatMap(findWebAreaAncestor)
+            ?? findWebAreaInFocusedWindow(app)
         else { return nil }
         return (focused, webArea)
     }
 
-    /// One polling pass against live elements: marker range from the
-    /// focused element or the web area, resolved through the web area's
-    /// parameterized attribute; plain selected-text attribute as a final
-    /// fallback (some engines).
-    private static func pollWebSelection(focused: AXUIElement, webArea: AXUIElement) -> String? {
-        for element in [focused, webArea] {
+    private static func pollWebSelection(focused: AXUIElement?, webArea: AXUIElement) -> String? {
+        for element in [focused, webArea].compactMap({ $0 }) {
             guard let markerRange = copyMarkerRange(element) else { continue }
             var out: CFTypeRef?
             if AXUIElementCopyParameterizedAttributeValue(
@@ -563,7 +557,6 @@ final class SelectionPipeline {
         }
         return nil
     }
-
     private static func axCopyElementAttribute(_ element: AXUIElement, _ attribute: CFString) -> AXUIElement? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
