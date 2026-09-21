@@ -43,19 +43,12 @@ extension SelectionToolbarApp {
             dark: cardTheme.isDark
         )
         resultContainer = resultContent
-        if isGlass {
-            // Glass draws its own rounded shape — no clip wrapper needed.
-            resultPanel.contentView = resultBackground
-        } else {
-            // Legacy: the vibrancy material draws past manual corner radii —
-            // wrap and mask so only the rounded card shows (grey-rounded +
-            // white-squared double edge fix).
-            let clip = NSView(frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 240))
-            clip.wantsLayer = true
-            clip.layer?.cornerRadius = 12
-            clip.layer?.masksToBounds = true
-            resultPanel.contentView = clip
-            clip.addSubview(resultBackground)
+        // Material + scrim + edge live inside the rounded clip — nothing
+        // square can escape (the old wrapper was vibrancy-overflow
+        // insurance, long obsolete).
+        resultPanel.contentView = resultBackground
+        if !isGlass {
+            PanelStyle.install(background: resultBackground, dark: cardTheme.isDark, on: resultPanel)
         }
 
         // Panel tab strip (top): panel switcher (Actions/Notes/Review, the
@@ -203,27 +196,15 @@ extension SelectionToolbarApp {
         resultActionBar.addSubview(resultSaveButton)
 
         // Input bar (WebView AiForm parity): single-line keeps the action
-        // buttons on the text row; multi-line moves them to a row below and
-        // gives the text the full width.
+        // buttons on the text row; multi-line moves them to a row below.
+        // Self-drawn surface — the panel's own language (wash + hairline,
+        // TinyCast controlSurface), not a glass capsule.
         inputContainer = NSView(frame: NSRect(x: 10, y: 10, width: resultCardWidth - 20, height: 36))
         inputContainer.wantsLayer = true
-        inputContainer.layer?.cornerRadius = 8
+        inputContainer.layer?.cornerRadius = 10
         inputContainer.layer?.borderWidth = 1
-        if #available(macOS 26.0, *) {
-            // The follow-up input becomes a glass capsule (system search
-            // field parity). The material lives INSIDE the container so
-            // layoutResultCard keeps driving exactly one view; on glass,
-            // focus feedback rides the tint, not a border.
-            let glass = NSGlassEffectView(frame: inputContainer.bounds)
-            glass.autoresizingMask = [.width, .height]
-            glass.style = .regular
-            glass.cornerRadius = 10
-            glass.tintColor = PanelStyle.glassTint(dark: cardTheme.isDark)
-            if #available(macOS 27.0, *) { glass.effectIsInteractive = true }
-            inputContainer.addSubview(glass, positioned: .below, relativeTo: nil)
-            cardInputGlass = glass
-        }
         resultContainer.addSubview(inputContainer)
+        styleCardInputs()
 
         inputTextView = CardInputTextView(frame: NSRect(x: 6, y: 4, width: resultCardWidth - 32 - 90, height: 26))
         inputTextView.font = .systemFont(ofSize: 13)
@@ -440,8 +421,13 @@ extension SelectionToolbarApp {
             cardRuns.removeAll()
             activeRunId = nil
         }
-        // New runs always surface on the Actions panel.
+        // New runs always surface on the Actions panel — restyle the pills
+        // too: leaving the highlight on the last tab (e.g. Review) showed
+        // Actions content under a Review-selected tab on reopen.
         activePanel = "translate"
+        if !panelTabPills.isEmpty {
+            stylePanelTabPills()
+        }
         if let input = payload.inputText, !input.isEmpty {
             inputTextView.string = input
             rebuildInputButtons()

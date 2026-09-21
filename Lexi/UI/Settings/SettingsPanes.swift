@@ -10,7 +10,7 @@ import SwiftUI
 /// Side effects the panes trigger after persisting. Wired by the window
 /// controller — the panes themselves never reach past the store.
 struct LexiSettingsEffects {
-    var panelStyleChanged: (_ theme: String?, _ opacity: Int?, _ blur: String?) -> Void
+    var panelStyleChanged: (_ theme: String?, _ opacity: Int?, _ blurRadius: Int?) -> Void
     var nativeSettingsChanged: () -> Void
 }
 
@@ -21,8 +21,9 @@ final class LexiSettingsModel {
 
     // Appearance
     var theme = "dark"
-    var panelBlur = "clear"
+    var panelBlur = 24
     var panelOpacity = 40
+
 
     // AI
     var apiBaseUrl = ""
@@ -45,7 +46,7 @@ final class LexiSettingsModel {
     /// Read every value from the store (fresh window show).
     func reload() {
         theme = LexiStore.setting("theme") ?? "dark"
-        panelBlur = LexiStore.setting("panelBlur") ?? "clear"
+        panelBlur = LexiStore.settingInt("panelBlur", in: 0...100, default: 24)
         panelOpacity = LexiStore.settingInt("panelOpacity", in: 10...90, default: 40)
         apiBaseUrl = LexiStore.setting("apiBaseUrl") ?? ""
         apiKey = LexiStore.setting("apiKey") ?? ""
@@ -78,7 +79,7 @@ final class LexiSettingsModel {
     /// Drag end / picker change persists both style values at once.
     func persistPanelStyle() {
         LexiStore.setSetting("panelOpacity", String(panelOpacity))
-        LexiStore.setSetting("panelBlur", panelBlur)
+        LexiStore.setSetting("panelBlur", String(panelBlur))
         effects?.panelStyleChanged(nil, panelOpacity, panelBlur)
     }
 
@@ -236,27 +237,30 @@ struct AppearanceSettingsPane: View {
                     Text("Dark").tag("dark")
                 }
                 .pickerStyle(.segmented)
-            } header: {
-                Text("Theme")
-            } footer: {
-                Text("Applies to the toolbar, panels and cards immediately.")
-            }
-
-            Section {
-                Picker("Panel frost", selection: Binding(
-                    get: { model.panelBlur },
-                    set: {
-                        model.panelBlur = $0
-                        model.persistPanelStyle()
+                LabeledContent("Background Blur") {
+                    HStack(spacing: 12) {
+                        Slider(
+                            value: Binding(
+                                get: { Double(model.panelBlur) },
+                                set: { model.panelBlur = Int($0) }
+                            ),
+                            in: 0...100,
+                            step: 1
+                        ) { editing in
+                            if editing {
+                                model.applyLivePanelStyle()
+                            } else {
+                                model.persistPanelStyle()
+                            }
+                        }
+                        .frame(width: 180)
+                        Text("\(model.panelBlur)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .frame(width: 46, alignment: .trailing)
                     }
-                )) {
-                    Text("Clear").tag("clear")
-                    Text("Frosted").tag("frosted")
-                    Text("Solid").tag("solid")
                 }
-                .pickerStyle(.menu)
-
-                LabeledContent("Edge & tint") {
+                LabeledContent("Background Purity") {
                     HStack(spacing: 12) {
                         Slider(
                             value: Binding(
@@ -281,7 +285,7 @@ struct AppearanceSettingsPane: View {
             } header: {
                 Text("Panels")
             } footer: {
-                Text("Frost sets the material density (Solid is opaque); Edge & tint scales the rim light and glass tint.")
+                Text("Blur sets the frost density of the material behind the panel; Purity is how solid the panel's own tint paints over it.")
             }
         }
         .formStyle(.grouped)

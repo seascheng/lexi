@@ -328,7 +328,7 @@ final class LexiSettingsWindowController: NSObject, NSWindowDelegate {
 
     /// Wired by the app controller: applies a style change in-process and
     /// persists it, so helper restarts preserve it.
-    var onPanelStyleChange: ((_ theme: String?, _ opacity: Int?, _ blur: String?) -> Void)?
+    var onPanelStyleChange: ((_ theme: String?, _ opacity: Int?, _ blurRadius: Int?) -> Void)?
     /// A shortcut or toolbar toggle was persisted; the app reloads its statics.
     var onNativeSettingsReload: (() -> Void)?
     /// A fresh window mounts on `tab`; an open one just navigates to it.

@@ -37,19 +37,24 @@ extension SelectionToolbarApp {
 
         if request.hasPrefix("POST /debug-clip-shot") {
             let wantsNotes = request.contains("?tab=notes")
-            let renameRow = Int(
-                request.components(separatedBy: "&rename=").last?
+            let renameRow: Int? = request.contains("&rename=")
+                ? Int(request.components(separatedBy: "&rename=").last?
                     .components(separatedBy: " ")[0]
                     .components(separatedBy: "&").first ?? "")
+                : nil
             let plusProbe = request.contains("&plus=1")
-            let tagColor = request.components(separatedBy: "&tagcolor=").last?
-                .components(separatedBy: " ")[0]
-                .components(separatedBy: "&").first
-                .flatMap { $0.isEmpty ? nil : $0.removingPercentEncoding ?? $0 }
-            let tagRenameTarget = request.components(separatedBy: "&tagrename=").last?
-                .components(separatedBy: " ")[0]
-                .components(separatedBy: "&").first
-                .flatMap { $0.isEmpty ? nil : $0.removingPercentEncoding ?? $0 }
+            let tagColor: String? = request.contains("&tagcolor=")
+                ? request.components(separatedBy: "&tagcolor=").last?
+                    .components(separatedBy: " ")[0]
+                    .components(separatedBy: "&").first
+                    .flatMap { $0.isEmpty ? nil : $0.removingPercentEncoding ?? $0 }
+                : nil
+            let tagRenameTarget: String? = request.contains("&tagrename=")
+                ? request.components(separatedBy: "&tagrename=").last?
+                    .components(separatedBy: " ")[0]
+                    .components(separatedBy: "&").first
+                    .flatMap { $0.isEmpty ? nil : $0.removingPercentEncoding ?? $0 }
+                : nil
             DispatchQueue.main.async {
                 self.debugClipboardShot(
                     notes: wantsNotes, renameRow: renameRow, plusProbe: plusProbe,
@@ -101,6 +106,25 @@ extension SelectionToolbarApp {
                 : nil
             DispatchQueue.main.async {
                 self.debugLauncherShot(query: query, compose: compose, select: select)
+            }
+            return
+        }
+        if request.hasPrefix("POST /debug-card-open") {
+            // Reopen-state + resize-layout probe: opens the card via the
+            // real showPopupCard path and LEAVES it open. `?resize=WxH`
+            // applies a user resize (same clamp as the drag zones) so the
+            // layout pass can be checked without synthetic mouse events.
+            let spec = request.components(separatedBy: "?resize=").last?
+                .components(separatedBy: " ")[0].split(separator: "x")
+                .compactMap { Int($0) }
+            DispatchQueue.main.async {
+                self.showPopupCard()
+                if spec?.count == 2, let w = spec?[0], let h = spec?[1] {
+                    self.cardUserWidth = CGFloat(min(max(w, 360), 760))
+                    self.cardUserHeight = CGFloat(min(max(h, 240), 900))
+                    self.layoutResultCard()
+                }
+                FileLog.write("CARD-OPEN state panel=\(self.activePanel)")
             }
             return
         }
@@ -323,9 +347,43 @@ extension SelectionToolbarApp {
                 }
             }
 
+            let wantsScreen = plusProbe == false && tagColor == nil
+                && tagRenameTarget == nil && renameRow == nil
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                 MainActor.assumeIsolated {
                     snapshot("base")
+                    if wantsScreen {
+                        // Full-screen capture: the window-server blur shows
+                        // only with real content behind the panel.
+                        let displayID = self.clipboardController.panel.screen?
+                            .deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
+                            as? CGDirectDisplayID
+                        Task {
+                            // Every display: the panel follows the cursor,
+                            // which may not be the capture's first screen.
+                            guard let content = try? await SCShareableContent.excludingDesktopWindows(
+                                false, onScreenWindowsOnly: false) else {
+                                FileLog.write("SCREEN-SHOT shareable-content failed")
+                                return
+                            }
+                            let config = SCStreamConfiguration()
+                            config.showsCursor = false
+                            for (index, display) in content.displays.enumerated() {
+                                guard let cg = try? await SCScreenshotManager.captureImage(
+                                    contentFilter: SCContentFilter(display: display, excludingWindows: []),
+                                    configuration: config) else { continue }
+                                let rep = NSBitmapImageRep(cgImage: cg)
+                                if let png = rep.representation(using: .png, properties: [:]) {
+                                    try? png.write(to: URL(fileURLWithPath: "/tmp/lexi-screen-\(index).png"))
+                                    FileLog.write("SCREEN-SHOT[\(index)] saved bytes=\(png.count)")
+                                }
+                            }
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                            MainActor.assumeIsolated { cleanup() }
+                        }
+                        return
+                    }
                     if plusProbe {
                         let many = (1...10).map { "分类\($0)号" }
                         self.clipboardController.debugShowNotes(

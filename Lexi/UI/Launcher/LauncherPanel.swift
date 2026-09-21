@@ -148,6 +148,7 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
             dark: cardTheme.isDark
         )
         panel.contentView = background
+        PanelStyle.install(background: background, dark: cardTheme.isDark, on: panel)
         glassContent = content
         glassContent.wantsLayer = true
         root = FlippedView(frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 240))

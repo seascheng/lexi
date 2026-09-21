@@ -110,14 +110,8 @@ extension SelectionToolbarApp {
             container?.layer?.cornerRadius = 8
             container?.layer?.borderWidth = 1
         }
-        // macOS 26+: the actions input is a glass capsule — layer fills and
-        // hairlines don't draw on server-composited glass; theme and focus
-        // ride the tint instead (focus lifts toward the foreground color).
-        if #available(macOS 26.0, *) {
-            cardInputGlass?.tintColor = focused == .actions
-                ? cardTheme.foreground.withAlphaComponent(0.32)
-                : PanelStyle.glassTint(dark: theme == .dark)
-        }
+        // Self-drawn input surface: the layer fill and hairline ARE the
+        // look (TinyCast controlSurface); focus lifts the border.
         inputTextView?.placeholder = NSAttributedString(
             string: "Enter text",
             attributes: [.foregroundColor: cardTheme.tertiaryText, .font: NSFont.systemFont(ofSize: 13)]
@@ -135,14 +129,13 @@ extension SelectionToolbarApp {
                     controller = LexiSettingsWindowController()
                     self.settingsWindowController = controller
                 }
-                controller.onPanelStyleChange = { [weak self] theme, opacity, blur in
+                controller.onPanelStyleChange = { [weak self] theme, opacity, blurRadius in
                     PanelStyle.update(
                         opacity: opacity.map { CGFloat($0) / 100.0 },
-                        blur: blur.flatMap(PanelStyle.Blur.init(rawValue:))
+                        blurRadius: blurRadius
                     )
-                    // Opacity/blur changes must repaint the live scrims too —
-                    // PanelStyle.update only retunes materials. Reapplying the
-                    // current theme re-derives every scrim from the new values.
+                    // Reapplying the current theme re-derives every surface
+                    // (fills, rims) from the new values.
                     self?.applyTheme(theme ?? (self?.theme ?? .dark).rawValue)
                     // The settings window itself follows the app theme so the
                     // Appearance controls have a visible effect in place.

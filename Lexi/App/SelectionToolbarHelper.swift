@@ -145,7 +145,7 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
         // relayouts the card. Applies to toolbar, card, launcher, clipboard.
         PanelStyle.update(
             opacity: CGFloat(LexiStore.settingInt("panelOpacity", in: 10...90, default: 40)) / 100.0,
-            blur: LexiStore.setting("panelBlur").flatMap(PanelStyle.Blur.init(rawValue:))
+            blurRadius: LexiStore.settingInt("panelBlur", in: 0...100, default: 24)
         )
         applyTheme(LexiStore.setting("theme") ?? "dark")
         refreshCardActions()

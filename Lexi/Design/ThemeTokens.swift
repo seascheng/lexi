@@ -88,7 +88,7 @@ struct CardTheme {
         (isDark ? NSColor.white : NSColor.black).withAlphaComponent(isDark ? 0.18 : 0.12)
     }
     var hairline: NSColor {
-        NSColor.black.withAlphaComponent(isDark ? 0.35 : 0.12)
+        NSColor.black.withAlphaComponent(isDark ? 0.18 : 0.07)
     }
 }
 
@@ -110,66 +110,71 @@ enum PanelStyle {
             }
         }
     }
+    /// Background Blur (Settings → Appearance): the window-server backdrop
+    /// blur radius, 1:1 with the slider — goty's own chain
+    /// (ghostty_set_window_background_blur → CGSSetWindowBackgroundBlur-
+    /// Radius). Purity (opacity) is the self-drawn fill composited on top.
+    static var blurRadius: Int = 24
 
-    /// Frost level (Settings → Appearance). Native vibrancy has no
-    /// continuous blur radius — the material IS the blur knob. On 26+
-    /// `.hudWindow` renders as Liquid Glass (a control-layer material),
-    /// so content panels map onto standard frosted materials instead.
-    enum Blur: String {
-        case clear, frosted, solid
-
-        var material: NSVisualEffectView.Material {
-            if #available(macOS 26.0, *) {
-                switch self {
-                case .clear: return .menu    // light system frost
-                case .frosted: return .sheet // thicker overlay frost
-                case .solid: return .windowBackground // genuinely opaque
-                }
-            }
-            switch self {
-            case .clear: return .hudWindow
-            case .frosted: return .sheet
-            case .solid: return .sidebar
-            }
-        }
+    /// The painted fill for a content surface: theme wash at the user's
+    /// Purity, over the window-server blur.
+    static func fill(dark: Bool) -> NSColor {
+        scrim(dark: dark)
     }
 
-    /// Live, user-configurable surface state (Appearance pane). On 26+
-    /// `opacity` drives the edge rim/sheen gain and the glass tint; on
-    /// older systems it is the scrim alpha over the material.
-    static var opacity: CGFloat = 0.40
-    static var blur: Blur = .clear
 
-    private static var materialViews: [WeakMaterialView] = []
-    private struct WeakMaterialView { weak var view: NSVisualEffectView? }
-    /// Live edge overlays — the Appearance slider retints them in place.
+    /// Live, user-configurable surface state (Appearance pane). `opacity`
+    /// is Background Purity — the fill alpha over the window blur.
+    static var opacity: CGFloat = 0.40
+    /// Live painted fills — the Purity slider repaints them in place.
+    private static var surfaceFills: [WeakFill] = []
+    private struct WeakFill { weak var view: NSView?; var dark: Bool }
+    /// Live panels carrying the window blur — re-radii'd on slider turns.
+    private static var blurPanels: [WeakPanel] = []
+    private struct WeakPanel { weak var panel: NSPanel? }
+    /// Live edge overlays — retinted in place.
     private static var edgeOverlays: [WeakEdgeOverlay] = []
     private struct WeakEdgeOverlay { weak var view: PanelEdgeOverlay? }
 
-    static func register(_ view: NSVisualEffectView) {
-        materialViews.append(WeakMaterialView(view: view))
-        view.material = blur.material
+    /// Wires a finished surface: painted fill (repainted on knob turns)
+    /// and the owning panel's window blur.
+    static func install(background: NSView, dark: Bool, on panel: NSPanel?) {
+        background.layer?.backgroundColor = fill(dark: dark).cgColor
+        surfaceFills.append(WeakFill(view: background, dark: dark))
+        if let panel {
+            blurPanels.append(WeakPanel(panel: panel))
+            WindowBlur.set(radius: blurRadius, on: panel)
+        }
     }
 
     static func registerEdge(_ overlay: PanelEdgeOverlay) {
         edgeOverlays.append(WeakEdgeOverlay(view: overlay))
     }
 
-    static func update(opacity newOpacity: CGFloat?, blur newBlur: Blur?) {
+    static func update(opacity newOpacity: CGFloat?, blurRadius newRadius: Int?) {
         if let newOpacity { opacity = newOpacity }
-        if let newBlur { blur = newBlur }
-        materialViews.removeAll { $0.view == nil }
-        materialViews.forEach { $0.view?.material = blur.material }
-        // The slider's visible effect on 26+: edge light + glass tint.
+        if let newRadius { blurRadius = newRadius }
+        surfaceFills.removeAll { $0.view == nil }
+        for item in surfaceFills {
+            item.view?.layer?.backgroundColor = fill(dark: item.dark).cgColor
+        }
+        blurPanels.removeAll { $0.panel == nil }
+        blurPanels.forEach { WindowBlur.set(radius: blurRadius, on: $0.panel!) }
         edgeOverlays.removeAll { $0.view == nil }
         edgeOverlays.forEach { $0.view?.retint() }
     }
 
-    /// Theme flips retint every live overlay (dark/light rims differ).
+    /// Theme flips retint every live overlay and fill (dark/light differ).
     static func retintEdges(dark: Bool) {
         edgeOverlays.removeAll { $0.view == nil }
         edgeOverlays.forEach { $0.view?.dark = dark }
+        surfaceFills.removeAll { $0.view == nil }
+        for var item in surfaceFills {
+            item.dark = dark
+            item.view?.layer?.backgroundColor = fill(dark: dark).cgColor
+        }
     }
+
 
     /// Theme-tinted veil between the glass material and the content
     /// (TinyCast `panelScrim`), at the user's opacity.
@@ -275,14 +280,11 @@ final class PanelEdgeOverlay: NSView {
         CATransaction.commit()
     }
 }
-/// Shared surface builder for every native panel. macOS 26+ splits the
-/// layers per HIG materials: floating CONTROL clusters (the selection
-/// pill) ride a real NSGlassEffectView — `.regular` blurs and adapts
-/// luminosity for the icons it hosts, `tintColor` is the sanctioned veil,
-/// and 27's interactive flag adds the press response system toolbars
-/// have. Large CONTENT panels stay on the standard frosted material with
-/// no hand-painted veil. Older systems: legacy frosted vibrancy with the
-/// scrim + hairline treatment.
+/// Shared surface builder for every native panel. The selection bar rides
+/// a real NSGlassEffectView (a floating CONTROL cluster). Content panels
+/// are goty's architecture: a self-drawn translucent fill (Background
+/// Purity) over a window-server backdrop blur (Background Blur radius,
+/// installed by PanelStyle.install), clipped to the rounded shape.
 /// Returns (background, content, isGlass): set the panel's contentView to
 /// `background` and add all subviews to `content`.
 func makePanelBackground(
@@ -309,21 +311,14 @@ func makePanelBackground(
             content.addSubview(edge)
             return (glass, content, true)
         }
-        // Content panel: standard material. The vibrancy is composited by
-        // the WINDOW SERVER and ignores cornerRadius set on its own layer
-        // — a clipping superview (what SwiftUI clipShape does) is still
-        // required to round it.
+        // Content panel: the fill paints at Purity over the window blur;
+        // the clip rounds the whole layer tree.
         let clip = NSView(frame: frame)
         clip.autoresizingMask = [.width, .height]
         clip.wantsLayer = true
         clip.layer?.cornerRadius = cornerRadius
         clip.layer?.masksToBounds = true
-        let vibrancy = NSVisualEffectView(frame: clip.bounds)
-        vibrancy.autoresizingMask = [.width, .height]
-        PanelStyle.register(vibrancy)
-        vibrancy.blendingMode = .behindWindow
-        vibrancy.state = .active
-        clip.addSubview(vibrancy)
+        clip.layer?.backgroundColor = PanelStyle.fill(dark: dark).cgColor
         let edge = PanelEdgeOverlay(cornerRadius: cornerRadius, dark: dark)
         edge.autoresizingMask = [.width, .height]
         edge.frame = clip.bounds
@@ -335,8 +330,7 @@ func makePanelBackground(
         clip.addSubview(content)
         return (clip, content, false)
     }
-    // PopClip-style frosted bar: the material adapts to whatever is behind
-    // it; the accent stroke keeps the edge legible over any background.
+    // PopClip-style frosted bar (pre-26).
     let vibrancy = NSVisualEffectView(frame: frame)
     vibrancy.autoresizingMask = [.width, .height]
     vibrancy.material = .menu
@@ -351,10 +345,7 @@ func makePanelBackground(
 
 /// File logger usable from any class (the controller's log() is private).
 enum FileLog {
-    /// Off the caller's thread — the launcher logs per keystroke, and a
-    /// synchronous open/seek/write/close there is measurable jank.
-    private static let queue = DispatchQueue(label: "lexi.filelog", qos: .utility)
-
+    private static let queue = DispatchQueue(label: "lexi.filelog")
     static func write(_ message: String) {
         let line = "\(Date()) \(message)\n"
         queue.async {
@@ -369,16 +360,6 @@ enum FileLog {
         }
     }
 }
-
-let toolbarHandleWidth: CGFloat = 16
-let toolbarSegmentWidth: CGFloat = 30
-let toolbarHeight: CGFloat = 28
-let toolbarIconSize: CGFloat = 14
-let toolbarVerticalGap: CGFloat = 6
-let resultCardWidth: CGFloat = 420
-
-/// Deterministic tag → hue mapping: the same tag always lands on the same
-/// traffic-light color in both themes (the row dot and the tag pill share it).
 func tagColor(for tag: String, dark: Bool) -> NSColor {
     guard !tag.isEmpty else { return .clear }
     var hash: UInt64 = 5381
@@ -387,6 +368,13 @@ func tagColor(for tag: String, dark: Bool) -> NSColor {
     return NSColor(hue: hue, saturation: dark ? 0.62 : 0.72,
                    brightness: dark ? 0.98 : 0.58, alpha: 1)
 }
+
+let toolbarHandleWidth: CGFloat = 16
+let toolbarSegmentWidth: CGFloat = 30
+let toolbarHeight: CGFloat = 28
+let toolbarIconSize: CGFloat = 14
+let toolbarVerticalGap: CGFloat = 6
+let resultCardWidth: CGFloat = 420
 
 /// Vivid variant for tab chips, glyphs and section headers: the
 /// deterministic tag hue pushed to full saturation/brightness — calm

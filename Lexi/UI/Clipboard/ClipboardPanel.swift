@@ -151,6 +151,7 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
             dark: cardTheme.isDark
         )
         panel.contentView = background
+        PanelStyle.install(background: background, dark: cardTheme.isDark, on: panel)
         glassContent = content
         glassContent.wantsLayer = true
         root = ClipboardPanelRootView(frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 300))
