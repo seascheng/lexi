@@ -24,9 +24,11 @@ Select text anywhere and a small pill appears. One click opens the action panel.
 
 <div align="center">
 <img src="images/toolbar.png" alt="The selection toolbar: a small pill with icon actions floating over selected text" width="360" />
-<img src="images/card.png" alt="Action panel in Review mode: a flashcard with Again/Hard/Good/Easy grading" width="380" />
 <br />
-<sub>Left: the selection pill. Right: the action panel's Review tab — one of the language-learning methods.</sub>
+<img src="images/action.png" alt="Action panel, Actions tab: an AI translate run rendering structured markdown" width="380" />
+<img src="images/card.png" alt="Action panel, Review tab: a flashcard with Again/Hard/Good/Easy grading" width="380" />
+<br />
+<sub>Top: the selection pill. Bottom left: an AI translate run in the Actions tab. Bottom right: the Review tab — one of the language-learning methods.</sub>
 </div>
 
 ### Clipboard + Notes, one search box
