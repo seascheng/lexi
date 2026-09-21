@@ -92,15 +92,11 @@ if [ -n "$IDENTITY" ]; then
 fi
 
 echo "==> git"
-# Push to GitHub regardless of where origin points.
-if ! git remote | grep -q '^github$'; then
-    git remote add github "git@github.com:$GITHUB_REPO.git"
-fi
-git push github main
+git push origin main
 if git rev-parse "$TAG" >/dev/null 2>&1; then
     git tag -f "$TAG" >/dev/null
 fi
-git push -f github "$TAG"
+git push -f origin "$TAG"
 
 echo "==> GitHub release"
 NOTES="${1:-Lexi $VERSION.}"
