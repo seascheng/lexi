@@ -39,7 +39,8 @@ extension SelectionToolbarApp {
         }
         let (resultBackground, resultContent, isGlass) = makePanelBackground(
             frame: NSRect(x: 0, y: 0, width: resultCardWidth, height: 240),
-            surface: .card
+            surface: .card,
+            dark: cardTheme.isDark
         )
         resultContainer = resultContent
         if isGlass {
@@ -208,6 +209,20 @@ extension SelectionToolbarApp {
         inputContainer.wantsLayer = true
         inputContainer.layer?.cornerRadius = 8
         inputContainer.layer?.borderWidth = 1
+        if #available(macOS 26.0, *) {
+            // The follow-up input becomes a glass capsule (system search
+            // field parity). The material lives INSIDE the container so
+            // layoutResultCard keeps driving exactly one view; on glass,
+            // focus feedback rides the tint, not a border.
+            let glass = NSGlassEffectView(frame: inputContainer.bounds)
+            glass.autoresizingMask = [.width, .height]
+            glass.style = .regular
+            glass.cornerRadius = 10
+            glass.tintColor = PanelStyle.glassTint(dark: cardTheme.isDark)
+            if #available(macOS 27.0, *) { glass.effectIsInteractive = true }
+            inputContainer.addSubview(glass, positioned: .below, relativeTo: nil)
+            cardInputGlass = glass
+        }
         resultContainer.addSubview(inputContainer)
 
         inputTextView = CardInputTextView(frame: NSRect(x: 6, y: 4, width: resultCardWidth - 32 - 90, height: 26))

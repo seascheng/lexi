@@ -281,7 +281,7 @@ struct AppearanceSettingsPane: View {
             } header: {
                 Text("Panels")
             } footer: {
-                Text("Blur presets map to system vibrancy materials; opacity is the scrim layer under the glass.")
+                Text("Blur presets map to system materials; opacity sets the veil (macOS 26+: the glass tint).")
             }
         }
         .formStyle(.grouped)

@@ -144,7 +144,8 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
         panel.backgroundColor = .clear
         let (background, content, _) = makePanelBackground(
             frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 240),
-            surface: .launcher
+            surface: .launcher,
+            dark: cardTheme.isDark
         )
         panel.contentView = background
         glassContent = content
@@ -336,9 +337,9 @@ final class LauncherPanelController: NSObject, NSWindowDelegate, NSTableViewData
     }
 
     private func styleChrome() {
-        // Contrast scrim (TinyCast values): dark 40% black / light 55%
-        // white, painted between the vibrancy material and the content.
-        glassContent.layer?.backgroundColor = PanelStyle.scrim(dark: cardTheme.isDark).cgColor
+        // Content-layer veil: 26+ materials self-manage contrast (no
+        // hand-painted scrim); legacy systems keep the TinyCast veil.
+        PanelStyle.applyContentScrim(to: glassContent, dark: cardTheme.isDark)
         emptyLabel.textColor = cardTheme.tertiaryText
         searchField.applyTheme(cardTheme)
         settingsButton.contentTintColor = cardTheme.foreground

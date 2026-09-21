@@ -110,6 +110,14 @@ extension SelectionToolbarApp {
             container?.layer?.cornerRadius = 8
             container?.layer?.borderWidth = 1
         }
+        // macOS 26+: the actions input is a glass capsule — layer fills and
+        // hairlines don't draw on server-composited glass; theme and focus
+        // ride the tint instead (focus lifts toward the foreground color).
+        if #available(macOS 26.0, *) {
+            cardInputGlass?.tintColor = focused == .actions
+                ? cardTheme.foreground.withAlphaComponent(0.32)
+                : PanelStyle.glassTint(dark: theme == .dark)
+        }
         inputTextView?.placeholder = NSAttributedString(
             string: "Enter text",
             attributes: [.foregroundColor: cardTheme.tertiaryText, .font: NSFont.systemFont(ofSize: 13)]

@@ -58,6 +58,10 @@ final class SelectionToolbarApp: NSObject, NSApplicationDelegate {
     var resultCopyButton: NSButton!
     var resultSaveButton: NSButton!
     var inputContainer: NSView!
+    /// macOS 26+ Liquid Glass surfaces: the selection pill's material and
+    /// the card follow-up input capsule. Nil on older systems (vibrancy path).
+    var pillGlass: NSGlassEffectView?
+    var cardInputGlass: NSGlassEffectView?
     var inputTextView: CardInputTextView!
     var runsSeparator: NSView!
     var inputButtonsRow: NSView!

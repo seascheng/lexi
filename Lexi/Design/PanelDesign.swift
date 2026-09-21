@@ -113,6 +113,7 @@ func makePanelEmptyLabel() -> NSTextField {
 final class PanelSearchField: NSView {
     let field = NSTextField()
     private let icon = NSImageView()
+
     /// NSTextField only draws its placeholder while NOT editing — the
     /// panel always opens with the field focused, so the hint owns its
     /// own label and shows whenever the input is empty.
@@ -127,6 +128,7 @@ final class PanelSearchField: NSView {
 
     init() {
         super.init(frame: .zero)
+
         let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
         icon.image = NSImage(
             systemSymbolName: "magnifyingglass", accessibilityDescription: "search"
@@ -134,7 +136,6 @@ final class PanelSearchField: NSView {
         icon.imageScaling = .scaleNone
         icon.contentTintColor = .systemGray
         addSubview(icon)
-
         field.font = .systemFont(ofSize: 15)  // one step under the 16pt chrome scale
         field.isBordered = false
         field.drawsBackground = false
@@ -172,6 +173,7 @@ final class PanelSearchField: NSView {
     }
 
     func applyTheme(_ theme: CardTheme) {
+
         icon.contentTintColor = theme.tertiaryText
         field.textColor = theme.foreground
         placeholderLabel.textColor = theme.tertiaryText
@@ -179,6 +181,8 @@ final class PanelSearchField: NSView {
 
     override func layout() {
         super.layout()
+        // The strip blends into the panel material — no capsule, no
+        // background of its own; the icon keeps its tight chrome inset.
         let iconSide: CGFloat = 15
         icon.frame = NSRect(x: 2, y: (bounds.height - iconSide) / 2, width: iconSide, height: iconSide)
         // Breathing room between the magnifier and the text area.

@@ -147,7 +147,8 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let (background, content, _) = makePanelBackground(
             frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 300),
-            surface: .list
+            surface: .list,
+            dark: cardTheme.isDark
         )
         panel.contentView = background
         glassContent = content
@@ -349,11 +350,10 @@ final class ClipboardPanelController: NSObject, NSWindowDelegate, NSTableViewDat
         case .tag(let name): return .tag(name)
         }
     }
-
     private func styleChrome() {
-        // Contrast scrim: raw NSGlassEffectView washes out on dark
-        // wallpapers (same veil the launcher and card use).
-        glassContent.layer?.backgroundColor = PanelStyle.scrim(dark: cardTheme.isDark).cgColor
+        // Content-layer veil: 26+ materials self-manage contrast (no
+        // hand-painted scrim); legacy systems keep the TinyCast veil.
+        PanelStyle.applyContentScrim(to: glassContent, dark: cardTheme.isDark)
         emptyLabel.textColor = cardTheme.tertiaryText
         footerLeft.textColor = cardTheme.secondaryText
         searchField.applyTheme(cardTheme)

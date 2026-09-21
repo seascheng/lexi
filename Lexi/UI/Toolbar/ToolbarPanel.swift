@@ -8,7 +8,14 @@ extension SelectionToolbarApp {
     func applyTheme(_ themeName: String) {
         theme = ToolbarTheme(rawValue: themeName) ?? .dark
         let scrim = PanelStyle.scrim(dark: theme == .dark).cgColor
-        container.layer?.backgroundColor = scrim
+        if #available(macOS 26.0, *) {
+            // The pill rides a real glass surface now: theme identity is
+            // the tint, and the container must not paint a veil over it.
+            pillGlass?.tintColor = PanelStyle.glassTint(dark: theme == .dark)
+            container.layer?.backgroundColor = NSColor.clear.cgColor
+        } else {
+            container.layer?.backgroundColor = scrim
+        }
         dragHandle.theme = theme
         buttons.forEach { $0.theme = theme }
         // The result card follows the same theme: appearance, hairlines, and
@@ -18,7 +25,7 @@ extension SelectionToolbarApp {
                 ? NSAppearance(named: .vibrantDark)
                 : NSAppearance(named: .vibrantLight)
             resultPanel.appearance = cardAppearance
-            resultContainer.layer?.backgroundColor = scrim
+            PanelStyle.applyContentScrim(to: resultContainer, dark: theme == .dark)
             // chips: force a rebuild (the diff skips identical id/status/active)
             runChipViews.forEach { $0.removeFromSuperview() }
             runChipViews.removeAll()
@@ -164,9 +171,11 @@ extension SelectionToolbarApp {
 
         let (background, content, _) = makePanelBackground(
             frame: panel.contentView?.bounds ?? .zero,
-            surface: .bar
+            surface: .bar,
+            dark: theme == .dark
         )
         panel.contentView = background
+        pillGlass = background as? NSGlassEffectView
         container = content
         dragHandle = ToolbarDragHandle(frame: NSRect(x: 0, y: 0, width: toolbarHandleWidth, height: toolbarHeight))
         dragHandle.autoresizingMask = [.height]

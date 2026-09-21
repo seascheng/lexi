@@ -112,11 +112,20 @@ enum PanelStyle {
     }
 
     /// Frost level (Settings → Appearance). Native vibrancy has no
-    /// continuous blur radius — the material IS the blur knob.
+    /// continuous blur radius — the material IS the blur knob. On 26+
+    /// `.hudWindow` renders as Liquid Glass (a control-layer material),
+    /// so content panels map onto standard frosted materials instead.
     enum Blur: String {
         case clear, frosted, solid
 
         var material: NSVisualEffectView.Material {
+            if #available(macOS 26.0, *) {
+                switch self {
+                case .clear: return .menu    // system menu/popover frost
+                case .frosted: return .sheet // thicker overlay frost
+                case .solid: return .sidebar
+                }
+            }
             switch self {
             case .clear: return .hudWindow
             case .frosted: return .sheet
@@ -162,27 +171,66 @@ enum PanelStyle {
             ? NSColor.white.withAlphaComponent(0.12)
             : NSColor.black.withAlphaComponent(0.10)
     }
+
+    /// Tint for the 26+ glass capsules (the sanctioned "scrim":
+    /// `tintColor` colors both the glass and its backing). Half the veil
+    /// alpha — `.regular` glass already adapts luminosity, the tint only
+    /// lends the theme its identity.
+    static func glassTint(dark: Bool) -> NSColor {
+        let base = min(max(opacity * 0.5, 0.05), 0.60)
+        let alpha = dark ? base : min(base * 1.5, 0.80)
+        return dark
+            ? NSColor.black.withAlphaComponent(alpha)
+            : NSColor.white.withAlphaComponent(alpha)
+    }
+
+    /// Content-panel veil: ≤25 paints the hand-mixed scrim over the
+    /// material; 26+ materials self-manage contrast — the veil goes away
+    /// (HIG "Adopting Liquid Glass": reduce custom backgrounds over
+    /// system materials).
+    static func applyContentScrim(to view: NSView, dark: Bool) {
+        if #available(macOS 26.0, *) {
+            view.layer?.backgroundColor = NSColor.clear.cgColor
+            return
+        }
+        view.layer?.backgroundColor = scrim(dark: dark).cgColor
+    }
 }
 
-/// Shared surface builder for every native panel. macOS 26+: the system
-/// renders `.hudWindow` vibrancy AS Liquid Glass with its own contrast
-/// adaptation and edge highlight (a raw NSGlassEffectView is a nearly clear
-/// sheet that washes out — the original complaint); the theme scrim is
-/// painted on `content` between material and content. Older systems: the
-/// legacy frosted `.menu` vibrancy with its own hairline stroke.
+/// Shared surface builder for every native panel. macOS 26+ splits the
+/// layers per HIG materials: floating CONTROL clusters (the selection
+/// pill) ride a real NSGlassEffectView — `.regular` blurs and adapts
+/// luminosity for the icons it hosts, `tintColor` is the sanctioned veil,
+/// and 27's interactive flag adds the press response system toolbars
+/// have. Large CONTENT panels stay on the standard frosted material with
+/// no hand-painted veil. Older systems: legacy frosted vibrancy with the
+/// scrim + hairline treatment.
 /// Returns (background, content, isGlass): set the panel's contentView to
 /// `background` and add all subviews to `content`.
 func makePanelBackground(
     frame: NSRect,
-    surface: PanelStyle.Surface
+    surface: PanelStyle.Surface,
+    dark: Bool
 ) -> (background: NSView, content: NSView, isGlass: Bool) {
     let cornerRadius = surface.cornerRadius
     if #available(macOS 26.0, *) {
-        // The glass material is composited by the WINDOW SERVER and ignores
-        // cornerRadius set on the vibrancy view's own layer — the square
-        // backdrop behind rounded corners. A real composited mask (what
-        // SwiftUI clipShape does under TinyCast) is required: a clipping
-        // superview whose layer rounds AND clips the vibrancy child.
+        if surface == .bar {
+            let glass = NSGlassEffectView(frame: frame)
+            glass.autoresizingMask = [.width, .height]
+            glass.style = .regular
+            glass.cornerRadius = cornerRadius
+            glass.tintColor = PanelStyle.glassTint(dark: dark)
+            if #available(macOS 27.0, *) { glass.effectIsInteractive = true }
+            let content = NSView(frame: glass.bounds)
+            content.autoresizingMask = [.width, .height]
+            content.wantsLayer = true
+            glass.contentView = content
+            return (glass, content, true)
+        }
+        // Content panel: standard material. The vibrancy is composited by
+        // the WINDOW SERVER and ignores cornerRadius set on its own layer
+        // — a clipping superview (what SwiftUI clipShape does) is still
+        // required to round it.
         let clip = NSView(frame: frame)
         clip.autoresizingMask = [.width, .height]
         clip.wantsLayer = true
@@ -190,7 +238,6 @@ func makePanelBackground(
         clip.layer?.masksToBounds = true
         let vibrancy = NSVisualEffectView(frame: clip.bounds)
         vibrancy.autoresizingMask = [.width, .height]
-        vibrancy.material = .hudWindow
         PanelStyle.register(vibrancy)
         vibrancy.blendingMode = .behindWindow
         vibrancy.state = .active
@@ -200,7 +247,7 @@ func makePanelBackground(
         content.wantsLayer = true
         content.focusRingType = .none
         clip.addSubview(content)
-        return (clip, content, true)
+        return (clip, content, false)
     }
     // PopClip-style frosted bar: the material adapts to whatever is behind
     // it; the accent stroke keeps the edge legible over any background.
